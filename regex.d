@@ -1,27 +1,43 @@
+//Written in the D programming language
+/**
+ * Fast Regular expressions for D
+ *
+ * License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
+ *
+ * Authors: Dmitry Olshansky
+ *
+ */
 module regex;
 
 import std.stdio;
-import std.range, std.conv, std.exception, std.ctype, std.format;
+import std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format;
 
 enum:uint {
-    IRchar        = 0,
-    IRstring      = 1<<24,
-    IRany         = 2<<24,
-    IRcharset     = 3<<24,
-    IRalter       = 4<<24,
-    IRnm          = 5<<24,
-    IRstar        = 6<<24,
-    IRcross       = 7<<24,
-    IRquest       = 8<<24,
-    IRnmq         = 9<<24,
-    IRstarq       = 10<<24,
-    IRcrossq      = 11<<24,
-    IRconcat      = 12<<24,
-
-    IRdigit       = 13<<24,
-    IRnotdigit    = 14<<24,
+    IRchar              =      0,
+    IRstring            =  1<<24,
+    IRany               =  2<<24,
+    IRcharset           =  3<<24,
+    IRalter             =  4<<24,
+    IRnm                =  5<<24,
+    IRstar              =  6<<24,
+    IRcross             =  7<<24,
+    IRquest             =  8<<24,
+    IRnmq               =  9<<24,
+    IRstarq             = 10<<24,
+    IRcrossq            = 11<<24,
+    IRconcat            = 12<<24,
+    IRdigit             = 13<<24,
+    IRnotdigit          = 14<<24,
+    IRspace             = 15<<24,
+    IRnotspace          = 16<<24,
+        
+    IRgroup             = 32<<24,
+    IRlookahead         = 33<<24,
+    IRneglookahead      = 34<<24,
+    IRlookbehind        = 35<<24,
+    IRneglookbehind     = 36<<24,
     //TODO: ...
-    IRlambda      =  128<<24
+    IRlambda            = 128<<24
 };
 
 
@@ -33,6 +49,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     bool empty;
     R pat, origin;
     uint[] ir;
+    uint[] index; //for numbered captures
+    uint[string] dict; //for named ones
+    uint nsub = 0;
     this(R pattern)
     {
         origin = pat = pattern;
@@ -42,7 +61,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     }
     void skipSpace()
     {
-        while(next() && isspace(current)){ }
+        while(isspace(current) && next()){ }
     }
     @property dchar current(){ return _current; }
     bool next()
@@ -55,6 +74,18 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         _current = pat.front;
         pat.popFront();
         return true;
+    }
+    uint parseNumber()
+    {
+        uint r=0;
+        while(isdigit(current))
+        {
+            if(r >= (uint.max/10)) 
+                error("Overflow in repetition count");
+            r = 10*r + cast(uint)(current-'0'); 
+            next();
+        }
+        return r;
     }
     void put(uint code){  ir ~= code; }
     void parseRegex()
@@ -96,60 +127,58 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         uint min, max;
         switch(current)
         {
-            case '*':
-                if(next())
-                    current == '?' ?  put(IRstarq) : put(IRstar);
-                else
-                    put(IRstar);
-                break;
-            case '?':
+        case '*':
+            if(next())
+                current == '?' ?  put(IRstarq) : put(IRstar);
+            else
+                put(IRstar);
+            break;
+        case '?':
+            next();
+            put(IRquest);
+            break;
+        case '+':
+            if(next())
+                current == '?' ? put(IRcrossq) : put(IRcross);
+            else
+                put(IRcross);
+            break;
+        case '{':
+            if(!next())
+                error("Unexpected end of regex pattern");
+            if(isdigit(current))
+                min = parseNumber();
+            else 
+                min = 0;
+            skipSpace();
+            if(current == '}')
+                max = min;
+            else if(current == ',')
+            {
                 next();
-                put(IRquest);
-                break;
-            case '+':
-                if(next())
-                    current == '?' ? put(IRcrossq) : put(IRcross);
+                if(isdigit(current))
+                    max = parseNumber();
+                else if(current == '}')
+                    max = infinite;
                 else
-                    put(IRcross);
-                break;
-            case '{':
-                if(!next())
-                    error("Unexpected end of regex pattern");
-                try
-                {
-                    if(isdigit(current))
-                        min = parse!uint(pat);
-                    else 
-                        min = 0;
-                    skipSpace();
-                    if(current == '}')
-                        max = infinite;
-                    else if(current == ',')
-                    {
-                        next();
-                        max = parse!uint(pat);
-                        skipSpace();
-                        if(current == '}')
-                            error("Unmatched '{' in regex pattern");
-                    }
-                    else
-                        error("Unexpected symbol in regex pattern");
+                    error("Unexpected symbol in regex pattern"); 
+                skipSpace();
+                if(current != '}')
+                    error("Unmatched '{' in regex pattern");
+            }
+            else
+                error("Unexpected symbol in regex pattern");
+            next();       
+            if(current == '?')
+                put(IRnmq);
+            else
+                put(IRnm);
+            put(min);
+            put(max);
                     
-                    if(next() && current == '?')
-                        put(IRnmq);
-                    else
-                        put(IRnm);
-                    put(min);
-                    put(max);
-                    
-                }
-                catch(ConvException ex)
-                {
-                    error("Failed to parse number in regex pattern");                       
-                }
-                break;
-            default:
-                break;
+            break;
+        default:
+            break;
         }
     }
     void parseAtom()
@@ -158,8 +187,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return;
         switch(current)
         {
-        case '*', '?', '+', '|':
-            error("'*', '+', '?' not allowed in atom");
+        case '*', '?', '+', '|', '{', '}':
+            error("'*', '+', '?', '{', '}' not allowed in atom");
             break;
         case '.':
             put(IRany);
@@ -168,12 +197,52 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case '(':
             R save = pat;
             next();
+            uint op = 0;
+            if(current == '?')
+            {
+                next();
+                switch(current)
+                {
+                case '=':
+                    op = IRlookahead;
+                    next();
+                    break;
+                case '!':
+                    op = IRneglookahead;
+                    next();
+                    break;
+                case 'P':
+                    assert(0);
+                    break;
+                case '<':
+                    next();
+                    if(current == '=')
+                        op = IRlookbehind;
+                    else if(current == '!')
+                        op = IRneglookbehind;
+                    else
+                        error("'!' or '=' expected after '<'");
+                    next();
+                    break;
+                default:
+                    //nothing
+                }
+            }
+            else
+            {
+                auto old = nsub++;
+                index ~= old;
+                op = IRgroup | old;
+            }
             parseRegex();
             if(current != ')')
             {
                 pat = save;
                 error("Unmatched '(' in regex pattern");
             }
+            assert(nsub < (1<<24));
+            if(op)
+                put(op);
             next();
         break;
         case '[':
@@ -194,7 +263,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     void error(string msg)
     {
         auto app = appender!string;
-        formattedWrite(app,"%s\nPattern with error: `%s <--HERE-- s`",
+        formattedWrite(app,"%s\nPattern with error: `%s <--HERE-- %s`",
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
@@ -229,15 +298,19 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 write("+?");
                 break;
             case IRnm:
-                write("{%u,%u}",ir[i+1],ir[i+2]);
+                writef("{%u,%u}",ir[i+1],ir[i+2]);
                 i += 2;//2 extra words
                 break;
             case IRnmq:
-                write("{%u,%u}?",ir[i+1],ir[i+2]);
+                writef("{%u,%u}?",ir[i+1],ir[i+2]);
                 i += 2;//ditto
                 break;
             case IRalter:
                 write('|');
+                break;
+            case IRgroup:
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("(%u)",  n);
                 break;
             }
         }
