@@ -4,11 +4,10 @@ import std.typetuple;
 import regex;
 
 int main(string[] argv)
-{
-    //RecursiveParser!string("a{1}");
+{    
     if(argv.length < 2)
     {
-        writeln("regex parser test\nUsage %s <pattern file>");
+        writefln("regex parser test\nUsage %s <pattern file>",argv[0]);
         return 1;
     }
     auto f = File(argv[1]);
@@ -18,7 +17,7 @@ int main(string[] argv)
         s = strip(f.readln());
         if(s.empty)
             break;
-        write(s.idup," ");
+        write(s," ");
         try
         {
             auto p = RecursiveParser!string(s);

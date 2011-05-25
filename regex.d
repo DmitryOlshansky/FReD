@@ -10,7 +10,7 @@
 module regex;
 
 import std.stdio;
-import std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format;
+import std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
 
 enum:uint {
     IRchar              =      0,
@@ -50,8 +50,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     R pat, origin;
     uint[] ir;
     uint[] index; //for numbered captures
-    uint[string] dict; //for named ones
-    uint nsub = 0;
+    struct NamedGroup
+    { 
+        string name; 
+        uint group;
+    }
+    NamedGroup[] dict; //for named ones
+    uint nsub = 0, nesting = 0, top = 0;
     this(R pattern)
     {
         origin = pat = pattern;
@@ -64,6 +69,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         while(isspace(current) && next()){ }
     }
     @property dchar current(){ return _current; }
+    void put(uint code){  ir ~= code; }
     bool next()
     {
         if(pat.empty)
@@ -87,13 +93,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         return r;
     }
-    void put(uint code){  ir ~= code; }
+
     void parseRegex()
     {
         while(!empty)
             switch(current)
             {
                 case '|':
+                    nsub = nesting;
                     next();
                     //alternation
                     parseConcat();
@@ -129,7 +136,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
         case '*':
             if(next())
-                current == '?' ?  put(IRstarq) : put(IRstar);
+                if(current == '?')
+                {
+                    put(IRstarq); 
+                    next();
+                }
             else
                 put(IRstar);
             break;
@@ -139,17 +150,20 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             break;
         case '+':
             if(next())
-                current == '?' ? put(IRcrossq) : put(IRcross);
+                if(current == '?')
+                {
+                    put(IRcrossq); 
+                    next();
+                }
             else
                 put(IRcross);
             break;
         case '{':
             if(!next())
                 error("Unexpected end of regex pattern");
-            if(isdigit(current))
-                min = parseNumber();
-            else 
-                min = 0;
+            if(!isdigit(current))
+                error("First number required in repetition"); 
+            min = parseNumber();    
             skipSpace();
             if(current == '}')
                 max = min;
@@ -170,7 +184,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 error("Unexpected symbol in regex pattern");
             next();       
             if(current == '?')
+            {
                 put(IRnmq);
+                next();
+            }
             else
                 put(IRnm);
             put(min);
@@ -197,7 +214,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case '(':
             R save = pat;
             next();
-            uint op = 0;
+            uint op = 0, nglob;
             if(current == '?')
             {
                 next();
@@ -212,7 +229,27 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     next();
                     break;
                 case 'P':
-                    assert(0);
+                    next();
+                    if(current != '<')
+                        error("Expected '<' in named group");
+                    string name;
+                    while(next() && isalpha(current))
+                    {
+                        name ~= current;
+                    }
+                    if(current != '>')
+                        error("Expected '>' closing named group");
+                    next();
+                    auto old = nsub++;
+                    nesting++;
+                    top = max(nsub,top);
+                    nglob = cast(uint)index.length;
+                    index ~= old;
+                    auto t = NamedGroup(name,old);
+                    auto d = assumeSorted!"a.name < b.name"(dict);
+                    auto ind = d.lowerBound(t).length;
+                    insertInPlace(dict, ind, t);
+                    op = IRgroup | old;
                     break;
                 case '<':
                     next();
@@ -231,6 +268,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             else
             {
                 auto old = nsub++;
+                nesting++;
+                top = max(nsub,top);
+                nglob = cast(uint)index.length;
                 index ~= old;
                 op = IRgroup | old;
             }
@@ -241,20 +281,28 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 error("Unmatched '(' in regex pattern");
             }
             assert(nsub < (1<<24));
-            if(op)
+            if((op & 0xff00_0000) == IRgroup)
+            {
+                assert(nesting);
+                --nesting;
+                put(op);
+                put(nglob);
+            }
+            else if(op)
                 put(op);
             next();
-        break;
+            break;
         case '[':
             //range
             assert(0);
-        break;
+            break;
         case '\\':
             //escape
+            //parseEscape();
             assert(0);
-        break;
+            break;
         case ')':
-        break;
+            break;
         default:
             put(current);
             next();
@@ -310,7 +358,32 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 break;
             case IRgroup:
                 uint n = ir[i] & 0x00ff_ffff;
-                writef("(%u)",  n);
+                //auto ng = find!((x){ return x.group == n; })(dict); // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
+                string name;
+                foreach(v;dict)
+                    if(v.group == n)
+                    {
+                        name = "<"~v.name~">";
+                        break;   
+                    }
+                writef("(%s%u->%u)", name, n, ir[i+1]);
+                i++;//1 extra word
+                break;
+            case IRlookahead:
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("(?=%u)",  n);
+                break;
+            case IRneglookahead: 
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("(?!%u)",  n);
+                break;
+            case IRlookbehind:
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("(?<=%u)",  n);
+                break;
+            case IRneglookbehind:
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("(?<!%u)",  n);
                 break;
             }
         }
