@@ -30,16 +30,21 @@ enum:uint {
     IRnotdigit          = 14<<24,
     IRspace             = 15<<24,
     IRnotspace          = 16<<24,
-        
-    IRgroup             = 32<<24,
+    IRword              = 17<<24,
+    IRnotword           = 18<<24,    
+    IRgroup             = 19<<24,
+    IRbackref           = 20<<24,
+    
+    IRwordboundary      = 31<<24,
+    IRnotwordboundary   = 32<<24,
     IRlookahead         = 33<<24,
     IRneglookahead      = 34<<24,
     IRlookbehind        = 35<<24,
     IRneglookbehind     = 36<<24,
+    
     //TODO: ...
     IRlambda            = 128<<24
 };
-
 
 struct RecursiveParser(R)
 if (isForwardRange!R && is(ElementType!R : dchar))
@@ -47,29 +52,26 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     enum infinite = ~0u;
     dchar _current;
     bool empty;
-    R pat, origin;
+    R pat, origin;//keep full pattern for pretty printing error messages
     uint[] ir;
-    uint[] index; //for numbered captures
+    uint[] index; //user group number -> internal number
     struct NamedGroup
     { 
         string name; 
         uint group;
     }
     NamedGroup[] dict; //for named ones
-    uint nsub = 0, nesting = 0, top = 0;
+    //current num of group, current nesting, and peak number of group
+    uint nsub = 0, nesting = 0, top = 0; 
+    
     this(R pattern)
     {
-        origin = pat = pattern;
+        pat = origin = pattern;     
         ir.reserve(pat.length);
         next();
         parseRegex();
     }
-    void skipSpace()
-    {
-        while(isspace(current) && next()){ }
-    }
     @property dchar current(){ return _current; }
-    void put(uint code){  ir ~= code; }
     bool next()
     {
         if(pat.empty)
@@ -81,19 +83,29 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         pat.popFront();
         return true;
     }
-    uint parseNumber()
+    void skipSpace()
+    {
+        while(isspace(current) && next()){ }
+    }
+    void restart(R newpat)
+    { 
+        pat = newpat;
+        empty = false;
+        next();
+    }
+    void put(uint code){  ir ~= code; }    
+    uint parseDecimal()
     {
         uint r=0;
         while(isdigit(current))
         {
             if(r >= (uint.max/10)) 
-                error("Overflow in repetition count");
+                error("Overflow in decimal number");
             r = 10*r + cast(uint)(current-'0'); 
             next();
         }
         return r;
     }
-
     void parseRegex()
     {
         while(!empty)
@@ -159,11 +171,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 put(IRcross);
             break;
         case '{':
-            if(!next())
-                error("Unexpected end of regex pattern");
-            if(!isdigit(current))
-                error("First number required in repetition"); 
-            min = parseNumber();    
+            next() || error("Unexpected end of regex pattern");
+            isdigit(current) || error("First number required in repetition"); 
+            min = parseDecimal();    
             skipSpace();
             if(current == '}')
                 max = min;
@@ -171,7 +181,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 next();
                 if(isdigit(current))
-                    max = parseNumber();
+                    max = parseDecimal();
                 else if(current == '}')
                     max = infinite;
                 else
@@ -298,14 +308,102 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             break;
         case '\\':
             //escape
-            //parseEscape();
-            assert(0);
+            next() || error("Unfinished escape sequence");
+            put(escape());
             break;
         case ')':
             break;
         default:
             put(current);
             next();
+        }
+    }
+    uint escape()
+    {
+        switch(current)
+        {
+        case 'f':   next(); return '\f';
+        case 'n':   next(); return '\n';
+        case 'r':   next(); return '\r';
+        case 't':   next(); return '\t';
+        case 'v':   next(); return '\v';
+            
+        case 'd':   next(); return IRdigit; 
+        case 'D':   next(); return IRnotdigit; 
+        case 'b':   next(); return IRwordboundary;
+        case 'B':   next(); return IRnotwordboundary;
+        case 's':   next(); return IRspace;
+        case 'S':   next(); return IRnotspace;
+        case 'w':   next(); return IRword;
+        case 'W':   next(); return IRnotword;
+        case 'x':            
+            auto save = pat;
+            uint code = 0;
+            for(int i=0;i<2;i++)
+            {
+                if(!next())
+                {
+                    restart(save);
+                    return 'x';
+                }
+                if('0' <= current && current <= '9')
+                    code = code * 16 + current - '0';
+                else if('a' <= current && current <= 'f')
+                    code = code * 16 + current -'a' + 10;
+                else if('A' <= current && current <= 'Z')
+                    code = code * 16 + current - 'A' + 10;
+                else//wrong unicode escape treat \x like 'x' 
+                {
+                    restart(save);
+                    return 'x';
+                }
+            }
+            next();
+            return code;
+        case 'u':
+            auto save = pat;
+            uint code = 0;
+            for(int i=0; i<4; i++)
+            {
+                if(!next())
+                {
+                    restart(save);
+                    return 'u';
+                }
+                if('0' <= current && current <= '9')
+                    code = code * 16 + current - '0';
+                else if('a' <= current && current <= 'f')
+                    code = code * 16 + current -'a' + 10;
+                else if('A' <= current && current <= 'Z')
+                    code = code * 16 + current - 'A' + 10;
+                else //wrong unicode escape treat \u like 'u' 
+                {
+                    restart(save);
+                    return 'u';
+                }
+            }
+            next();
+            return code;
+        case 'c': //control codes                      
+            next() || error("Unfinished escape sequence");
+            (('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z'))
+                || error("Only letters are allowed after \\c");
+            return current &  0x1f;
+        case '0':
+            next();
+            return 0;//NUL character
+        case '1': .. case '9':
+            uint nref = cast(uint)current - '0'; 
+            //groups counted from zero, so nref comes greater by 1 hence '<='
+            nref <=  index.length || error("Backref to unseen group");
+            while(nref <= index.length && next() && isdigit(current))
+            {
+                nref = nref * 10 + current - '0';
+            }
+            if(nref > index.length)
+                nref /= 10;
+            nref--;
+            return IRbackref | nref;
         }
     }
     void error(string msg)
@@ -358,7 +456,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 break;
             case IRgroup:
                 uint n = ir[i] & 0x00ff_ffff;
-                //auto ng = find!((x){ return x.group == n; })(dict); // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
+                // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
+                //auto ng = find!((x){ return x.group == n; })(dict); 
                 string name;
                 foreach(v;dict)
                     if(v.group == n)
@@ -384,6 +483,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             case IRneglookbehind:
                 uint n = ir[i] & 0x00ff_ffff;
                 writef("(?<!%u)",  n);
+                break;
+            case IRbackref:
+                uint n = ir[i] & 0x00ff_ffff;
+                writef("\\%u",  n);
                 break;
             }
         }
