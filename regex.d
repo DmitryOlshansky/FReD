@@ -13,43 +13,43 @@ import std.stdio;
 import std.array, std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
 
 enum:uint {
-    IRchar              =      0,
-    IRany               =  1<<24,
-    IRcharset           =  2<<24,
-    IRstartoption       =  3<<24,
-    IRoption            =  4<<24,
-    IRendoption         =  5<<24,
-    IRstartinfinite     =  6<<24, 
-    IRstartrepeat       =  7<<24,
-    IRrepeat            =  8<<24,
-    IRrepeatq           =  9<<24,
-    IRinfinite          = 10<<24, 
-    IRinfiniteq         = 11<<24, 
-    IRdigit             = 12<<24, 
-    IRnotdigit          = 13<<24,
-    IRspace             = 14<<24,
-    IRnotspace          = 15<<24,
-    IRword              = 16<<24,
-    IRnotword           = 17<<24,    
-    IRstartgroup        = 18<<24,
-    IRendgroup          = 19<<24,
-    IRgoto              = 20<<24,
+    IRchar              =  0,
+    IRany               =  1,
+    IRcharset           =  2,
+    IRstartoption       =  3,
+    IRoption            =  4,
+    IRendoption         =  5,
+    IRstartinfinite     =  6, 
+    IRstartrepeat       =  7,
+    IRrepeat            =  8,
+    IRrepeatq           =  9,
+    IRinfinite          = 10, 
+    IRinfiniteq         = 11, 
+    IRdigit             = 12, 
+    IRnotdigit          = 13,
+    IRspace             = 14,
+    IRnotspace          = 15,
+    IRword              = 16,
+    IRnotword           = 17,    
+    IRstartgroup        = 18,
+    IRendgroup          = 19,
+    IRgoto              = 20,
     
-    IRbackref           = 30<<24,
-    IRwordboundary      = 31<<24,
-    IRnotwordboundary   = 32<<24,
-    IRlookahead         = 33<<24,
-    IRneglookahead      = 34<<24,
-    IRlookbehind        = 35<<24,
-    IRneglookbehind     = 36<<24,
+    IRbackref           = 30,
+    IRwordboundary      = 31,
+    IRnotwordboundary   = 32,
+    IRlookahead         = 33,
+    IRneglookahead      = 34,
+    IRlookbehind        = 35,
+    IRneglookbehind     = 36,
     
     //TODO: ...
-    IRlambda            = 128<<24
+    IRlambda            = 128
 };
 //IR bit twiddling helpers
-uint opcode(uint ir){ return ir & 0xff00_0000; }
+uint opcode(uint ir){ return ir >>24; }
 uint opdata(uint ir){ return ir & 0x00ff_ffff; }
-
+uint opgen(uint code, uint data=0){ return (code<<24) | data; }
 //multiply-add, throws exception on overflow
 uint checkedMulAdd(uint f1, uint f2, uint add)
 {
@@ -132,7 +132,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             switch(current)
             {
                 case '|'://alternation
-                    put(IRstartoption);// +1 word
+                    put(opgen(IRstartoption));// +1 word
                     effectiveLength++;
                     uint anchor = cast(uint)(ir.length); //points to first option
                     do
@@ -144,14 +144,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         effectiveLength += parseRepetition()+1;
                         if(current == '|')      //another option?
                         {
-                            put(IRendoption);   //we can turn this into jump later
+                            put(opgen(IRendoption));   //we can turn this into jump later
                             effectiveLength++;
                         }
                         uint len = cast(uint)(ir.length - offset - 1);
                         assert(len < (1<<24));
-                        ir[offset] = IRoption | len;
+                        ir[offset] = opgen(IRoption,  len);
                     }while(current == '|'); //process all options of alternation
-                    uint end = ir.length;
                     //TODO: account empty alternation?  (a|b|) -> (a|b|*lambda*)
                     break;
                 case ')':
@@ -222,8 +221,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         if(max != infinite)
         {
-            insertInPlace(ir, offset, IRstartrepeat | len); // + 1 word
-            put((greedy ? IRrepeat : IRrepeatq) | len);
+            insertInPlace(ir, offset, opgen(IRstartrepeat, len)); // + 1 word
+            put(opgen(greedy ? IRrepeat : IRrepeatq, len));
             put(effectiveLength); //step of RIN counter
             put(min);
             put(max);
@@ -231,21 +230,21 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         else if(min) // && max is infinite
         {
-            insertInPlace(ir, offset, IRstartrepeat | len);// + 1 word
+            insertInPlace(ir, offset, opgen(IRstartrepeat, len));// + 1 word
             offset += 1;//so it still points to the repeated block
-            put((greedy ? IRrepeat : IRrepeatq) | len);//TODO: include step
+            put(opgen(greedy ? IRrepeat : IRrepeatq, len));//TODO: include step
             put(effectiveLength); //step of RIN counter
             put(min);
             put(min);
-            put(IRstartinfinite | len);
+            put(opgen(IRstartinfinite, len));
             ir ~= ir[offset .. offset+len];// + another effectiveLength
-            put((greedy ? IRinfinite : IRinfiniteq) | len);
+            put(opgen(greedy ? IRinfinite : IRinfiniteq, len));
             effectiveLength = checkedMulAdd((min+1),effectiveLength,7);
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir, offset, IRstartinfinite | len);// + 1 word
-            put((greedy ? IRinfinite : IRinfiniteq) | len);
+            insertInPlace(ir, offset, opgen(IRstartinfinite, len));// + 1 word
+            put(opgen(greedy ? IRinfinite : IRinfiniteq, len));
             effectiveLength = checkedMulAdd(2,effectiveLength,2);
         }
         return effectiveLength;
@@ -307,7 +306,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     auto d = assumeSorted!"a.name < b.name"(dict);
                     auto ind = d.lowerBound(t).length;
                     insertInPlace(dict, ind, t);
-                    op = IRstartgroup | nglob;
+                    op = opgen(IRstartgroup, nglob);
                     break;
                 case '<':
                     next();
@@ -330,15 +329,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 top = max(nsub,top);//count max capture stack usage
                 nglob = cast(uint)index.length;
                 index ~= old;
-                op = IRstartgroup | nglob;
+                op = opgen(IRstartgroup, nglob);
                 
             }
             if(op) 
             {
                 effectiveLength++;
-                put(op);
+                put(op); //needs fixup for lookarounds
             }
+            uint offset = cast(uint)ir.length;
             effectiveLength += parseRegex();
+            uint len = cast(uint)ir.length - offset;
             if(current != ')')
             {
                 pat = save;
@@ -349,8 +350,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 assert(nesting);
                 --nesting;
-                put(IRendgroup| nglob);
+                put(opgen(IRendgroup, nglob));
                 effectiveLength++;
+            }
+            else if(op)
+            {
+                ir[offset-1] = opgen(ir[offset-1],len);    
             }
             next();
             return effectiveLength;
@@ -382,14 +387,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case 't':   next(); return '\t';
         case 'v':   next(); return '\v';
             
-        case 'd':   next(); return IRdigit; 
-        case 'D':   next(); return IRnotdigit; 
-        case 'b':   next(); return IRwordboundary;
-        case 'B':   next(); return IRnotwordboundary;
-        case 's':   next(); return IRspace;
-        case 'S':   next(); return IRnotspace;
-        case 'w':   next(); return IRword;
-        case 'W':   next(); return IRnotword;
+        case 'd':   next(); return opgen(IRdigit); 
+        case 'D':   next(); return opgen(IRnotdigit); 
+        case 'b':   next(); return opgen(IRwordboundary);
+        case 'B':   next(); return opgen(IRnotwordboundary);
+        case 's':   next(); return opgen(IRspace);
+        case 'S':   next(); return opgen(IRnotspace);
+        case 'w':   next(); return opgen(IRword);
+        case 'W':   next(); return opgen(IRnotword);
         case 'x':            
             auto save = pat;
             uint code = 0;
@@ -413,7 +418,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 }
             }
             next();
-            return code;
+            return opgen(IRchar,code);
         case 'u':
             auto save = pat;
             uint code = 0;
@@ -437,12 +442,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 }
             }
             next();
-            return code;
+            return opgen(IRchar, code);
         case 'c': //control codes                      
             next() || error("Unfinished escape sequence");
-            (('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z'))
+            ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
                 || error("Only letters are allowed after \\c");
-            return current &  0x1f;
+            uint code = opgen(IRchar, current &  0x1f);
+            next();
+            return code;
         case '0':
             next();
             return 0;//NUL character
@@ -457,7 +464,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             if(nref > index.length)
                 nref /= 10;
             nref--;
-            return IRbackref | nref;
+            return opgen(IRbackref, nref);
         }
     }
     
