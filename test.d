@@ -22,7 +22,7 @@ int main(string[] argv)
         {
             auto p = RecursiveParser!string(s);
             write(" OK \n");
-            p.printPostfix();
+            p.print();
         }
         catch(Exception ex)
         {
@@ -30,5 +30,7 @@ int main(string[] argv)
         }    
         writeln();
     }
+   /* auto parser = RecursiveParser!string("abcdef");
+    parser.printPostfix();*/
     return 0;
 }

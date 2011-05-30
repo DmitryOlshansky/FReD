@@ -10,31 +10,32 @@
 module regex;
 
 import std.stdio;
-import std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
+import std.array, std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
 
 enum:uint {
     IRchar              =      0,
-    IRstring            =  1<<24,
-    IRany               =  2<<24,
-    IRcharset           =  3<<24,
-    IRalter             =  4<<24,
-    IRnm                =  5<<24,
-    IRstar              =  6<<24,
-    IRcross             =  7<<24,
-    IRquest             =  8<<24,
-    IRnmq               =  9<<24,
-    IRstarq             = 10<<24,
-    IRcrossq            = 11<<24,
-    IRconcat            = 12<<24,
-    IRdigit             = 13<<24,
-    IRnotdigit          = 14<<24,
-    IRspace             = 15<<24,
-    IRnotspace          = 16<<24,
-    IRword              = 17<<24,
-    IRnotword           = 18<<24,    
-    IRgroup             = 19<<24,
-    IRbackref           = 20<<24,
+    IRany               =  1<<24,
+    IRcharset           =  2<<24,
+    IRstartoption       =  3<<24,
+    IRoption            =  4<<24,
+    IRendoption         =  5<<24,
+    IRstartinfinite     =  6<<24, 
+    IRstartrepeat       =  7<<24,
+    IRrepeat            =  8<<24,
+    IRrepeatq           =  9<<24,
+    IRinfinite          = 10<<24, 
+    IRinfiniteq         = 11<<24, 
+    IRdigit             = 12<<24, 
+    IRnotdigit          = 13<<24,
+    IRspace             = 14<<24,
+    IRnotspace          = 15<<24,
+    IRword              = 16<<24,
+    IRnotword           = 17<<24,    
+    IRstartgroup        = 18<<24,
+    IRendgroup          = 19<<24,
+    IRgoto              = 20<<24,
     
+    IRbackref           = 30<<24,
     IRwordboundary      = 31<<24,
     IRnotwordboundary   = 32<<24,
     IRlookahead         = 33<<24,
@@ -45,6 +46,18 @@ enum:uint {
     //TODO: ...
     IRlambda            = 128<<24
 };
+//IR bit twiddling helpers
+uint opcode(uint ir){ return ir & 0xff00_0000; }
+uint opdata(uint ir){ return ir & 0x00ff_ffff; }
+
+//multiply-add, throws exception on overflow
+uint checkedMulAdd(uint f1, uint f2, uint add)
+{
+    ulong r = f1 * cast(ulong)f2 + add;
+    if(r < (1<<32UL))
+        throw new RegexException("Regex internal errror - integer overflow");
+    return cast(uint)r;
+}
 
 struct RecursiveParser(R)
 if (isForwardRange!R && is(ElementType!R : dchar))
@@ -52,15 +65,15 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     enum infinite = ~0u;
     dchar _current;
     bool empty;
-    R pat, origin;//keep full pattern for pretty printing error messages
-    uint[] ir;
-    uint[] index; //user group number -> internal number
+    R pat, origin;  //keep full pattern for pretty printing error messages
+    uint[] ir;      //resulting bytecode
+    uint[] index;   //user group number -> internal number
     struct NamedGroup
     { 
         string name; 
         uint group;
     }
-    NamedGroup[] dict; //for named ones
+    NamedGroup[] dict; //maps name -> user group number
     //current num of group, current nesting, and peak number of group
     uint nsub = 0, nesting = 0, top = 0; 
     
@@ -83,10 +96,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         pat.popFront();
         return true;
     }
+    
     void skipSpace()
     {
         while(isspace(current) && next()){ }
     }
+    
     void restart(R newpat)
     { 
         pat = newpat;
@@ -94,6 +109,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         next();
     }
     void put(uint code){  ir ~= code; }    
+    
     uint parseDecimal()
     {
         uint r=0;
@@ -106,69 +122,69 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         return r;
     }
-    void parseRegex()
+    /*
+        Parse and store IR for sub regex, returns effective length of IR 
+    */
+    uint parseRegex()
     {
+        uint effectiveLength = 0;
         while(!empty)
             switch(current)
             {
-                case '|':
-                    nsub = nesting;
-                    next();
-                    //alternation
-                    parseConcat();
-                    put(IRalter);
-                    //TODO: account empty alternation  (a|) -> (a|*lambda*)
+                case '|'://alternation
+                    put(IRstartoption);// +1 word
+                    effectiveLength++;
+                    uint anchor = cast(uint)(ir.length); //points to first option
+                    do
+                    {//TODO: check overflows
+                        nsub = nesting;//reuse groups across alternations
+                        next();
+                        uint offset = cast(uint)(ir.length);
+                        put(0); //reserve space
+                        effectiveLength += parseRepetition()+1;
+                        if(current == '|')      //another option?
+                        {
+                            put(IRendoption);   //we can turn this into jump later
+                            effectiveLength++;
+                        }
+                        uint len = cast(uint)(ir.length - offset - 1);
+                        assert(len < (1<<24));
+                        ir[offset] = IRoption | len;
+                    }while(current == '|'); //process all options of alternation
+                    uint end = ir.length;
+                    //TODO: account empty alternation?  (a|b|) -> (a|b|*lambda*)
                     break;
                 case ')':
-                    return;
+                    return effectiveLength;
                 default:
-                    parseConcat();
+                    effectiveLength += parseRepetition();
             }
+        return effectiveLength;
     }
-    void parseConcat()
+    /*
+        Parse and store IR for atom-quantifier pair, returns effective length of IR
+    */
+    uint parseRepetition()
     {
-        parseRepetition();
-        while(!empty)
-            switch(current)
-            {
-            case '|': case ')':
-                return;
-            default:
-                parseRepetition();
-                put(IRconcat);
-            }
-    }
-    void parseRepetition()
-    {
-        parseAtom();
+        uint offset = cast(uint)ir.length;
+        uint effectiveLength = parseAtom();
+        uint len = cast(uint)ir.length - offset;
         if(empty)
-            return;
+            return effectiveLength;
         uint min, max;
         switch(current)
         {
         case '*':
-            if(next())
-                if(current == '?')
-                {
-                    put(IRstarq); 
-                    next();
-                }
-            else
-                put(IRstar);
+            min = 0;
+            max = infinite;
             break;
         case '?':
-            next();
-            put(IRquest);
+            min = 0;
+            max = 1;
             break;
         case '+':
-            if(next())
-                if(current == '?')
-                {
-                    put(IRcrossq); 
-                    next();
-                }
-            else
-                put(IRcross);
+            min = 1;
+            max = infinite;
             break;
         case '{':
             next() || error("Unexpected end of regex pattern");
@@ -192,26 +208,55 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             else
                 error("Unexpected symbol in regex pattern");
-            next();       
-            if(current == '?')
-            {
-                put(IRnmq);
-                next();
-            }
-            else
-                put(IRnm);
-            put(min);
-            put(max);
-                    
+                       
             break;
         default:
-            break;
+            return effectiveLength;
         }
+        next(); 
+        bool greedy = true;
+        if(current == '?')
+        {
+            greedy = false;
+            next();
+        }
+        if(max != infinite)
+        {
+            insertInPlace(ir, offset, IRstartrepeat | len); // + 1 word
+            put((greedy ? IRrepeat : IRrepeatq) | len);
+            put(effectiveLength); //step of RIN counter
+            put(min);
+            put(max);
+            effectiveLength = checkedMulAdd(max,effectiveLength,5);
+        }
+        else if(min) // && max is infinite
+        {
+            insertInPlace(ir, offset, IRstartrepeat | len);// + 1 word
+            offset += 1;//so it still points to the repeated block
+            put((greedy ? IRrepeat : IRrepeatq) | len);//TODO: include step
+            put(effectiveLength); //step of RIN counter
+            put(min);
+            put(min);
+            put(IRstartinfinite | len);
+            ir ~= ir[offset .. offset+len];// + another effectiveLength
+            put((greedy ? IRinfinite : IRinfiniteq) | len);
+            effectiveLength = checkedMulAdd((min+1),effectiveLength,7);
+        }
+        else//vanila {0,inf}
+        {
+            insertInPlace(ir, offset, IRstartinfinite | len);// + 1 word
+            put((greedy ? IRinfinite : IRinfiniteq) | len);
+            effectiveLength = checkedMulAdd(2,effectiveLength,2);
+        }
+        return effectiveLength;
     }
-    void parseAtom()
+    /*
+        Parse and store IR for atom, returns effective length of IR
+    */
+    uint parseAtom()
     {
         if(empty)
-            return;
+            return 0;
         switch(current)
         {
         case '*', '?', '+', '|', '{', '}':
@@ -224,12 +269,15 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case '(':
             R save = pat;
             next();
-            uint op = 0, nglob;
+            uint op = 0, nglob = void, effectiveLength = 0;
             if(current == '?')
             {
                 next();
                 switch(current)
                 {
+                case ':':
+                    next();
+                    break;
                 case '=':
                     op = IRlookahead;
                     next();
@@ -252,14 +300,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     next();
                     auto old = nsub++;
                     nesting++;
-                    top = max(nsub,top);
+                    top = max(nsub,top);//count max capture stack usage
                     nglob = cast(uint)index.length;
                     index ~= old;
-                    auto t = NamedGroup(name,old);
+                    auto t = NamedGroup(name,nglob);
                     auto d = assumeSorted!"a.name < b.name"(dict);
                     auto ind = d.lowerBound(t).length;
                     insertInPlace(dict, ind, t);
-                    op = IRgroup | old;
+                    op = IRstartgroup | nglob;
                     break;
                 case '<':
                     next();
@@ -272,36 +320,40 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     next();
                     break;
                 default:
-                    //nothing
+                    error(" ':', '=', '<', 'P' or '!' expected after '(?' ");
                 }
             }
             else
             {
                 auto old = nsub++;
                 nesting++;
-                top = max(nsub,top);
+                top = max(nsub,top);//count max capture stack usage
                 nglob = cast(uint)index.length;
                 index ~= old;
-                op = IRgroup | old;
+                op = IRstartgroup | nglob;
+                
             }
-            parseRegex();
+            if(op) 
+            {
+                effectiveLength++;
+                put(op);
+            }
+            effectiveLength += parseRegex();
             if(current != ')')
             {
                 pat = save;
                 error("Unmatched '(' in regex pattern");
             }
-            assert(nsub < (1<<24));
-            if((op & 0xff00_0000) == IRgroup)
+            assert(index.length < (1<<24));
+            if(opcode(op) == IRstartgroup)
             {
                 assert(nesting);
                 --nesting;
-                put(op);
-                put(nglob);
+                put(IRendgroup| nglob);
+                effectiveLength++;
             }
-            else if(op)
-                put(op);
             next();
-            break;
+            return effectiveLength;
         case '[':
             //range
             assert(0);
@@ -317,7 +369,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             put(current);
             next();
         }
+        return 1;
     }
+    
     uint escape()
     {
         switch(current)
@@ -406,6 +460,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return IRbackref | nref;
         }
     }
+    
     void error(string msg)
     {
         auto app = appender!string;
@@ -413,49 +468,65 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-    void printPostfix()
+    
+    void print()
     {
+        uint nsub;
+        uint[] nsub_save;//used to simulate normal execution of alternation
+        uint[] group;
+        writeln("PC\tINST");
         for(size_t i=0;i<ir.length;i++)
         {
-            switch(ir[i] & 0xff00_0000)
+            writef("%d\t",i);
+            switch(opcode(ir[i]))
             {
             case IRchar:
-                write(cast(dchar)ir[i]);
+                write("char ",cast(dchar)ir[i]);
                 break;
             case IRany:
-                write("(.)");
+                write("any char");
                 break;
-            case IRconcat:
-                write('.');
+            case IRstartrepeat:
+                uint len = opdata(ir[i]);
+                writef("start repeat pc=>%u", i+len+1);
                 break;
-            case IRquest:
-                write('?');
+            case IRstartinfinite:
+                uint len = opdata(ir[i]);
+                writef("start infinite pc=>%u", i+len+1);
                 break;
-            case IRstar:
-                write('*');
+            case IRrepeat:
+            case IRrepeatq:
+                uint len = opdata(ir[i]);
+                writef("repeat%s pc=>%u min=%u max=%u (dRIN=%u)", 
+                       opcode(ir[i]) == IRrepeatq ? "q" : "",
+                       i-len, ir[i+2], ir[i+3],ir[i+1]);
+                i += 3;//3 extra operands
                 break;
-            case IRstarq:
-                write("*?");
+            case IRinfinite:
+            case IRinfiniteq:
+                uint len = opdata(ir[i]);
+                writef("infinite%s pc=>%u ", 
+                       opcode(ir[i]) == IRinfiniteq ? "q" : "", i-len);
                 break;
-            case IRcross:
-                write('+');
+            case IRstartoption:
+                writef("start option");
                 break;
-            case IRcrossq:
-                write("+?");
+            case IRoption:
+                uint len = opdata(ir[i]);
+                nsub_save ~= nsub;
+                writef("option pc=>%u", i+len+1);
                 break;
-            case IRnm:
-                writef("{%u,%u}",ir[i+1],ir[i+2]);
-                i += 2;//2 extra words
+
+            case IRendoption:
+                uint len = opdata(ir[i]);
+                assert(nsub_save.length);
+                nsub = nsub_save.back;
+                nsub_save.length -= 1;
+                writef("end option pc=>%u", i+len+1);
                 break;
-            case IRnmq:
-                writef("{%u,%u}?",ir[i+1],ir[i+2]);
-                i += 2;//ditto
-                break;
-            case IRalter:
-                write('|');
-                break;
-            case IRgroup:
-                uint n = ir[i] & 0x00ff_ffff;
+            case IRstartgroup: 
+            case IRendgroup:
+                uint n = opdata(ir[i]);
                 // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
                 //auto ng = find!((x){ return x.group == n; })(dict); 
                 string name;
@@ -465,30 +536,44 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         name = "<"~v.name~">";
                         break;   
                     }
-                writef("(%s%u->%u)", name, n, ir[i+1]);
-                i++;//1 extra word
+                if(opcode(ir[i]) == IRstartgroup)
+                {
+                    group ~= nsub;
+                    nsub++;
+                    writef("start group %s #%u (internal %u)",
+                       name, n,  group.back);    
+                }
+                else
+                {
+                    assert(group.length);
+                    auto x = group.back;
+                    group.length -= 1;
+                    writef("end group %s #%u (internal %u)",
+                       name, n, x);
+                }
                 break;
             case IRlookahead:
-                uint n = ir[i] & 0x00ff_ffff;
-                writef("(?=%u)",  n);
+                uint len = opdata(ir[i]);
+                writef("lookahead pc=>%u",  i+len+1);
                 break;
             case IRneglookahead: 
-                uint n = ir[i] & 0x00ff_ffff;
-                writef("(?!%u)",  n);
+                uint len = opdata(ir[i]);
+                writef("neglookahead pc=>%u",  i+len+1);
                 break;
             case IRlookbehind:
-                uint n = ir[i] & 0x00ff_ffff;
-                writef("(?<=%u)",  n);
+                uint len = opdata(ir[i]);
+                writef("lookbehind pc=>%u",  i+len+1);
                 break;
             case IRneglookbehind:
-                uint n = ir[i] & 0x00ff_ffff;
-                writef("(?<!%u)",  n);
+                uint len = opdata(ir[i]);
+                writef("neglookbehind pc=>%u",  i+len+1);
                 break;
             case IRbackref:
-                uint n = ir[i] & 0x00ff_ffff;
-                writef("\\%u",  n);
+                uint n = opdata(ir[i]);
+                writef("backref %u",  n);
                 break;
             }
+            writeln();
         }
     }
 }
