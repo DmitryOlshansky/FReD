@@ -30,7 +30,5 @@ int main(string[] argv)
         }    
         writeln();
     }
-   /* auto parser = RecursiveParser!string("abcdef");
-    parser.printPostfix();*/
     return 0;
 }

@@ -13,36 +13,37 @@ import std.stdio;
 import std.array, std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
 
 enum:uint {
-    IRchar              =  0,
-    IRany               =  1,
-    IRcharset           =  2,
-    IRstartoption       =  3,
-    IRoption            =  4,
-    IRendoption         =  5,
-    IRstartinfinite     =  6, 
-    IRstartrepeat       =  7,
-    IRrepeat            =  8,
-    IRrepeatq           =  9,
-    IRinfinite          = 10, 
-    IRinfiniteq         = 11, 
+    IRchar              =  0, // a
+    IRany               =  1, // .
+    IRcharset           =  2, // [...]
+    IRstartoption       =  3, // size prefix
+    IRoption            =  4, // x | y
+    IRendoption         =  5, // option separator
+    IRstartinfinite     =  6, // size prefix
+    IRstartrepeat       =  7, // ditto
+    IRrepeat            =  8, // x{n,m}
+    IRrepeatq           =  9, // x{n,m}?
+    IRinfinite          = 10, // x*
+    IRinfiniteq         = 11, // x*?
     IRdigit             = 12, 
     IRnotdigit          = 13,
     IRspace             = 14,
     IRnotspace          = 15,
     IRword              = 16,
     IRnotword           = 17,    
-    IRstartgroup        = 18,
-    IRendgroup          = 19,
-    IRgoto              = 20,
+    IRstartgroup        = 18, // (
+    IRendgroup          = 19, // )
+    IRbol               = 20, // ^
+    IReol               = 21, // $ 
     
-    IRbackref           = 30,
-    IRwordboundary      = 31,
-    IRnotwordboundary   = 32,
-    IRlookahead         = 33,
-    IRneglookahead      = 34,
-    IRlookbehind        = 35,
-    IRneglookbehind     = 36,
-    
+    IRbackref           = 22,
+    IRwordboundary      = 23,
+    IRnotwordboundary   = 24,
+    IRlookahead         = 25,
+    IRneglookahead      = 26,
+    IRlookbehind        = 27,
+    IRneglookbehind     = 28,
+    IRret               = 29, //end of lookaround sub
     //TODO: ...
     IRlambda            = 128
 };
@@ -65,9 +66,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     enum infinite = ~0u;
     dchar _current;
     bool empty;
-    R pat, origin;  //keep full pattern for pretty printing error messages
-    uint[] ir;      //resulting bytecode
-    uint[] index;   //user group number -> internal number
+    R pat, origin;       //keep full pattern for pretty printing error messages
+    uint[][] ir;      //resulting bytecode separated by lookaround levels
+    uint level = 0;      //current lookaround level
+    uint[] index;        //user group number -> internal number
     struct NamedGroup
     { 
         string name; 
@@ -80,11 +82,18 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     this(R pattern)
     {
         pat = origin = pattern;     
-        ir.reserve(pat.length);
+        ir = new uint[][1];
+        ir[0].reserve(pat.length);
         next();
         parseRegex();
     }
     @property dchar current(){ return _current; }
+    void enterLevel()
+    { 
+        if(++level >= ir.length)
+            ir.length += 1;
+    }
+    void leaveLevel(){  --level;   }
     bool next()
     {
         if(pat.empty)
@@ -96,20 +105,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         pat.popFront();
         return true;
     }
-    
     void skipSpace()
     {
         while(isspace(current) && next()){ }
     }
-    
     void restart(R newpat)
     { 
         pat = newpat;
         empty = false;
         next();
     }
-    void put(uint code){  ir ~= code; }    
-    
+    void put(uint code){  ir[level] ~= code; }    
     uint parseDecimal()
     {
         uint r=0;
@@ -128,46 +134,57 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     uint parseRegex()
     {
         uint effectiveLength = 0;
-        while(!empty)
+        uint start = cast(uint)ir[level].length;
+        auto subSave = nsub;
+        while(!empty && current != '|' && current != ')')
+            effectiveLength += parseRepetition();
+        if(!empty)
             switch(current)
             {
-                case '|'://alternation
-                    put(opgen(IRstartoption));// +1 word
-                    effectiveLength++;
-                    uint anchor = cast(uint)(ir.length); //points to first option
-                    do
-                    {//TODO: check overflows
-                        nsub = nesting;//reuse groups across alternations
-                        next();
-                        uint offset = cast(uint)(ir.length);
-                        put(0); //reserve space
-                        effectiveLength += parseRepetition()+1;
-                        if(current == '|')      //another option?
-                        {
-                            put(opgen(IRendoption));   //we can turn this into jump later
-                            effectiveLength++;
-                        }
-                        uint len = cast(uint)(ir.length - offset - 1);
-                        assert(len < (1<<24));
-                        ir[offset] = opgen(IRoption,  len);
-                    }while(current == '|'); //process all options of alternation
-                    //TODO: account empty alternation?  (a|b|) -> (a|b|*lambda*)
-                    break;
-                case ')':
-                    return effectiveLength;
-                default:
-                    effectiveLength += parseRepetition();
+            case ')':
+                nesting || error("Unmatched ')'");
+                nesting--;
+                return effectiveLength;
+            case '|':
+                uint[2] piece = [opgen(IRstartoption), opgen(IRoption, ir[level].length - start)];
+                insertInPlace(ir[level], start, piece[]); // + 2 
+                put(opgen(IRendoption)); // + 1 
+                effectiveLength += 3;
+                uint anchor = cast(uint)(ir[level].length); //points to first option
+                uint maxSub = 0; //maximum number of captures out of each code path
+                do
+                {//TODO: check overflows
+                    writeln(current);
+                    next();
+                    uint offset = cast(uint)(ir[level].length);
+                    put(0); //reserve space
+                    while(!empty && current != '|' && current != ')')
+                        effectiveLength += parseRepetition();
+                    if(current == '|')      //another option?
+                    {
+                        put(opgen(IRendoption));   //we can turn this into jump later
+                        effectiveLength++;
+                    }
+                    uint len = cast(uint)(ir[level].length - offset - 1);
+                    assert(len < (1<<24));
+                    ir[level][offset] = opgen(IRoption,  len);
+                    maxSub = max(nsub,maxSub);
+                    nsub = subSave; //reuse groups across alternations
+                }while(current == '|'); //process all options of alternation
+                nsub = maxSub;
+                if(current == ')') 
+                    goto case ')';
             }
-        return effectiveLength;
+        return effectiveLength;   
     }
     /*
         Parse and store IR for atom-quantifier pair, returns effective length of IR
     */
     uint parseRepetition()
     {
-        uint offset = cast(uint)ir.length;
+        uint offset = cast(uint)ir[level].length;
         uint effectiveLength = parseAtom();
-        uint len = cast(uint)ir.length - offset;
+        uint len = cast(uint)ir[level].length - offset;
         if(empty)
             return effectiveLength;
         uint min, max;
@@ -221,29 +238,35 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         if(max != infinite)
         {
-            insertInPlace(ir, offset, opgen(IRstartrepeat, len)); // + 1 word
-            put(opgen(greedy ? IRrepeat : IRrepeatq, len));
-            put(effectiveLength); //step of RIN counter
-            put(min);
-            put(max);
-            effectiveLength = checkedMulAdd(max,effectiveLength,5);
+            if(min != 1 || max != 1)
+            {
+                insertInPlace(ir[level], offset, opgen(IRstartrepeat, len)); // + 1 word
+                put(opgen(greedy ? IRrepeat : IRrepeatq, len));
+                put(effectiveLength); //step of RIN counter
+                put(min);
+                put(max);
+                effectiveLength = checkedMulAdd(max,effectiveLength,5);
+            }
         }
         else if(min) // && max is infinite
         {
-            insertInPlace(ir, offset, opgen(IRstartrepeat, len));// + 1 word
-            offset += 1;//so it still points to the repeated block
-            put(opgen(greedy ? IRrepeat : IRrepeatq, len));//TODO: include step
-            put(effectiveLength); //step of RIN counter
-            put(min);
-            put(min);
+            if(min != 1)
+            {
+                insertInPlace(ir[level], offset, opgen(IRstartrepeat, len));// + 1 word
+                offset += 1;//so it still points to the repeated block
+                put(opgen(greedy ? IRrepeat : IRrepeatq, len));//TODO: include step
+                put(effectiveLength); //step of RIN counter
+                put(min);
+                put(min);
+            }
             put(opgen(IRstartinfinite, len));
-            ir ~= ir[offset .. offset+len];// + another effectiveLength
+            ir[level] ~= ir[level][offset .. offset+len];// + another effectiveLength
             put(opgen(greedy ? IRinfinite : IRinfiniteq, len));
             effectiveLength = checkedMulAdd((min+1),effectiveLength,7);
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir, offset, opgen(IRstartinfinite, len));// + 1 word
+            insertInPlace(ir[level], offset, opgen(IRstartinfinite, len));// + 1 word
             put(opgen(greedy ? IRinfinite : IRinfiniteq, len));
             effectiveLength = checkedMulAdd(2,effectiveLength,2);
         }
@@ -269,8 +292,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             R save = pat;
             next();
             uint op = 0, nglob = void, effectiveLength = 0;
+            bool lookaround  = false;
+            nesting++;
             if(current == '?')
             {
+                
                 next();
                 switch(current)
                 {
@@ -280,10 +306,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 case '=':
                     op = IRlookahead;
                     next();
+                    lookaround = true;
                     break;
                 case '!':
                     op = IRneglookahead;
                     next();
+                    lookaround = true;
                     break;
                 case 'P':
                     next();
@@ -297,11 +325,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     if(current != '>')
                         error("Expected '>' closing named group");
                     next();
-                    auto old = nsub++;
-                    nesting++;
-                    top = max(nsub,top);//count max capture stack usage
                     nglob = cast(uint)index.length;
-                    index ~= old;
+                    index ~= nsub++;
                     auto t = NamedGroup(name,nglob);
                     auto d = assumeSorted!"a.name < b.name"(dict);
                     auto ind = d.lowerBound(t).length;
@@ -317,6 +342,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     else
                         error("'!' or '=' expected after '<'");
                     next();
+                    lookaround = true;
                     break;
                 default:
                     error(" ':', '=', '<', 'P' or '!' expected after '(?' ");
@@ -324,38 +350,38 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             else
             {
-                auto old = nsub++;
-                nesting++;
-                top = max(nsub,top);//count max capture stack usage
                 nglob = cast(uint)index.length;
-                index ~= old;
+                index ~= nsub++; //put local index
                 op = opgen(IRstartgroup, nglob);
-                
-            }
-            if(op) 
+            }            
+            if(lookaround)
             {
-                effectiveLength++;
-                put(op); //needs fixup for lookarounds
+                enterLevel();
+                uint offset = cast(uint)ir[level].length;
+                parseRegex();//lookarounds are isolated
+                put(opgen(IRret));
+                leaveLevel();
+                put(opgen(op, offset));//aims to the next level
+                effectiveLength = 1; // only one word 
             }
-            uint offset = cast(uint)ir.length;
-            effectiveLength += parseRegex();
-            uint len = cast(uint)ir.length - offset;
+            else
+            {
+                if(op) //currently only groups
+                {
+                    put(op);
+                    effectiveLength++;
+                }
+                effectiveLength += parseRegex();
+            }
+            if(opcode(op) == IRstartgroup)
+            {
+                put(opgen(IRendgroup, nglob));
+                effectiveLength++;
+            }
             if(current != ')')
             {
                 pat = save;
                 error("Unmatched '(' in regex pattern");
-            }
-            assert(index.length < (1<<24));
-            if(opcode(op) == IRstartgroup)
-            {
-                assert(nesting);
-                --nesting;
-                put(opgen(IRendgroup, nglob));
-                effectiveLength++;
-            }
-            else if(op)
-            {
-                ir[offset-1] = opgen(ir[offset-1],len);    
             }
             next();
             return effectiveLength;
@@ -364,11 +390,16 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             assert(0);
             break;
         case '\\':
-            //escape
             next() || error("Unfinished escape sequence");
             put(escape());
             break;
-        case ')':
+        case '^':
+            put(opgen(IRbol));
+            next();
+            break;
+        case '$':
+            put(opgen(IReol));
+            next();
             break;
         default:
             put(current);
@@ -457,6 +488,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             uint nref = cast(uint)current - '0'; 
             //groups counted from zero, so nref comes greater by 1 hence '<='
             nref <=  index.length || error("Backref to unseen group");
+            //perl's disambiguation rule i.e.
+            //get next digit only if there is such group number
             while(nref <= index.length && next() && isdigit(current))
             {
                 nref = nref * 10 + current - '0';
@@ -467,7 +500,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return opgen(IRbackref, nref);
         }
     }
-    
+    //
     void error(string msg)
     {
         auto app = appender!string;
@@ -475,112 +508,135 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-    
+    //
     void print()
     {
-        uint nsub;
-        uint[] nsub_save;//used to simulate normal execution of alternation
-        uint[] group;
-        writeln("PC\tINST");
-        for(size_t i=0;i<ir.length;i++)
+        foreach(lvl, irb; ir)
         {
-            writef("%d\t",i);
-            switch(opcode(ir[i]))
+            writefln("%sPC\tINST", lvl ? "Lookaround level #"~to!string(lvl)~"\n" : "");
+            for(size_t i=0;i<irb.length;i++)
             {
-            case IRchar:
-                write("char ",cast(dchar)ir[i]);
-                break;
-            case IRany:
-                write("any char");
-                break;
-            case IRstartrepeat:
-                uint len = opdata(ir[i]);
-                writef("start repeat pc=>%u", i+len+1);
-                break;
-            case IRstartinfinite:
-                uint len = opdata(ir[i]);
-                writef("start infinite pc=>%u", i+len+1);
-                break;
-            case IRrepeat:
-            case IRrepeatq:
-                uint len = opdata(ir[i]);
-                writef("repeat%s pc=>%u min=%u max=%u (dRIN=%u)", 
-                       opcode(ir[i]) == IRrepeatq ? "q" : "",
-                       i-len, ir[i+2], ir[i+3],ir[i+1]);
-                i += 3;//3 extra operands
-                break;
-            case IRinfinite:
-            case IRinfiniteq:
-                uint len = opdata(ir[i]);
-                writef("infinite%s pc=>%u ", 
-                       opcode(ir[i]) == IRinfiniteq ? "q" : "", i-len);
-                break;
-            case IRstartoption:
-                writef("start option");
-                break;
-            case IRoption:
-                uint len = opdata(ir[i]);
-                nsub_save ~= nsub;
-                writef("option pc=>%u", i+len+1);
-                break;
-
-            case IRendoption:
-                uint len = opdata(ir[i]);
-                assert(nsub_save.length);
-                nsub = nsub_save.back;
-                nsub_save.length -= 1;
-                writef("end option pc=>%u", i+len+1);
-                break;
-            case IRstartgroup: 
-            case IRendgroup:
-                uint n = opdata(ir[i]);
-                // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
-                //auto ng = find!((x){ return x.group == n; })(dict); 
-                string name;
-                foreach(v;dict)
-                    if(v.group == n)
+                writef("%d\t",i);
+                switch(opcode(irb[i]))
+                {
+                case IRchar:
+                    write("char ",cast(dchar)irb[i]);
+                    break;
+                case IRany:
+                    write("any char");
+                    break;
+                case IRword:
+                    write("word");
+                    break;
+                case IRnotword:
+                    write("not word");
+                    break;
+                case IRdigit:
+                    write("digit");
+                    break;
+                case IRnotdigit:
+                    write("not digit");
+                    break;
+                case IRspace:
+                    write("space");
+                    break;
+                case IRnotspace:
+                    write("not space");
+                    break;
+                case IRwordboundary:
+                    write("word-boundary");
+                    break;
+                case IRnotwordboundary:
+                    write("not word-boundary");
+                    break;
+                case IRbol:
+                    write("begining-of-line");
+                    break;
+                case IReol:
+                    write("end-of-line");
+                    break;
+                case IRstartrepeat:
+                    uint len = opdata(irb[i]);
+                    writef("start repeat pc=>%u", i+len+1);
+                    break;
+                case IRstartinfinite:
+                    uint len = opdata(irb[i]);
+                    writef("start infinite pc=>%u", i+len+1);
+                    break;
+                case IRrepeat:
+                case IRrepeatq:
+                    uint len = opdata(irb[i]);
+                    writef("repeat%s pc=>%u min=%u max=%u (dRIN=%u)", 
+                           opcode(irb[i]) == IRrepeatq ? "q" : "",
+                           i-len, irb[i+2], irb[i+3],irb[i+1]);
+                    i += 3;//3 extra operands
+                    break;
+                case IRinfinite:
+                case IRinfiniteq:
+                    uint len = opdata(irb[i]);
+                    writef("infinite%s pc=>%u ", 
+                           opcode(irb[i]) == IRinfiniteq ? "q" : "", i-len);
+                    break;
+                case IRstartoption:
+                    writef("start option");
+                    break;
+                case IRoption:
+                    uint len = opdata(irb[i]);
+                    writef("option pc=>%u", i+len+1);
+                    break;
+                case IRendoption:
+                    uint len = opdata(irb[i]);
+                    writef("end option pc=>%u", i+len+1);
+                    break;
+                case IRstartgroup: 
+                case IRendgroup:
+                    uint n = opdata(irb[i]);
+                    // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
+                    //auto ng = find!((x){ return x.group == n; })(dict); 
+                    string name;
+                    foreach(v;dict)
+                        if(v.group == n)
+                        {
+                            name = "'"~v.name~"'";
+                            break;   
+                        }
+                    if(opcode(irb[i]) == IRstartgroup)
                     {
-                        name = "<"~v.name~">";
-                        break;   
+                        writef("start group %s #%u (internal %u)",
+                           name, n,  index[n]);    
                     }
-                if(opcode(ir[i]) == IRstartgroup)
-                {
-                    group ~= nsub;
-                    nsub++;
-                    writef("start group %s #%u (internal %u)",
-                       name, n,  group.back);    
+                    else
+                    {
+                        writef("end group '%s' #%u (internal %u)",
+                           name, n, index[n]);
+                    }
+                    break;
+                case IRlookahead:
+                    uint dest = opdata(irb[i]);
+                    writef("lookahead dest=%u",  dest);
+                    break;
+                case IRneglookahead: 
+                    uint dest = opdata(irb[i]);
+                    writef("neglookahead dest=%u",  dest);
+                    break;
+                case IRlookbehind:
+                    uint dest = opdata(irb[i]);
+                    writef("lookbehind dest=%u",  dest);
+                    break;
+                case IRneglookbehind:
+                    uint dest = opdata(irb[i]);
+                    writef("neglookbehind dest=%u",  dest);
+                    break;
+                case IRbackref:
+                    uint n = opdata(irb[i]);
+                    writef("backref %u",  n);
+                    break;
+                case IRret:
+                    writeln("return");
+                    break;
                 }
-                else
-                {
-                    assert(group.length);
-                    auto x = group.back;
-                    group.length -= 1;
-                    writef("end group %s #%u (internal %u)",
-                       name, n, x);
-                }
-                break;
-            case IRlookahead:
-                uint len = opdata(ir[i]);
-                writef("lookahead pc=>%u",  i+len+1);
-                break;
-            case IRneglookahead: 
-                uint len = opdata(ir[i]);
-                writef("neglookahead pc=>%u",  i+len+1);
-                break;
-            case IRlookbehind:
-                uint len = opdata(ir[i]);
-                writef("lookbehind pc=>%u",  i+len+1);
-                break;
-            case IRneglookbehind:
-                uint len = opdata(ir[i]);
-                writef("neglookbehind pc=>%u",  i+len+1);
-                break;
-            case IRbackref:
-                uint n = opdata(ir[i]);
-                writef("backref %u",  n);
-                break;
+                writeln();
             }
-            writeln();
         }
     }
 }
