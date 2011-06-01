@@ -10,7 +10,9 @@
 module regex;
 
 import std.stdio;
-import std.array, std.algorithm, std.range, std.conv, std.exception, std.ctype, std.format, std.typecons;
+import std.array, std.algorithm, std.range, std.conv;
+import std.exception, std.ctype, std.format, std.typecons;
+import std.uni, std.utf;
 
 enum:uint {
     IRchar              =  0, // a
@@ -146,7 +148,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 nesting--;
                 return effectiveLength;
             case '|':
-                uint[2] piece = [opgen(IRstartoption), opgen(IRoption, ir[level].length - start)];
+                uint[2] piece = [opgen(IRstartoption), opgen(IRoption, ir[level].length - start + 1)];
                 insertInPlace(ir[level], start, piece[]); // + 2 
                 put(opgen(IRendoption)); // + 1 
                 effectiveLength += 3;
@@ -154,7 +156,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 uint maxSub = 0; //maximum number of captures out of each code path
                 do
                 {//TODO: check overflows
-                    writeln(current);
+                    //writeln(current);
                     next();
                     uint offset = cast(uint)(ir[level].length);
                     put(0); //reserve space
@@ -243,8 +245,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 insertInPlace(ir[level], offset, opgen(IRstartrepeat, len)); // + 1 word
                 put(opgen(greedy ? IRrepeat : IRrepeatq, len));
                 put(effectiveLength); //step of RIN counter
-                put(min);
-                put(max);
+                put(min*effectiveLength);
+                put(max*effectiveLength);
                 effectiveLength = checkedMulAdd(max,effectiveLength,5);
             }
         }
@@ -256,13 +258,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 offset += 1;//so it still points to the repeated block
                 put(opgen(greedy ? IRrepeat : IRrepeatq, len));//TODO: include step
                 put(effectiveLength); //step of RIN counter
-                put(min);
-                put(min);
+                put(min*effectiveLength);
+                put(min*effectiveLength);
             }
             put(opgen(IRstartinfinite, len));
             ir[level] ~= ir[level][offset .. offset+len];// + another effectiveLength
             put(opgen(greedy ? IRinfinite : IRinfiniteq, len));
-            effectiveLength = checkedMulAdd((min+1),effectiveLength,7);
+            effectiveLength = checkedMulAdd((min+1),effectiveLength, min == 1 ? 2 : 7);
         }
         else//vanila {0,inf}
         {
@@ -640,58 +642,350 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
     }
 }
-
-//Actual instructions for VM 
-enum InstType:uint {
-    Banychar,
-    Bchar,
-    Bnotchar,
-    Brange,
-    Bnotrange,
-    Bstring,
-    Bsplit,
-    Bsave
-};
-
-struct GenericInst{
-    InstType type;
-    union{
-        dchar ch;
-        uint nsave;
-        struct{
-            dchar low,hi;
-        }
-        struct{
-            uint x,y;
+//abstract away decoding & caching
+struct Fetcher(String)
+if(isForwardRange!String && !is(String.init[0] : dchar))
+{
+    String origin, buf;
+    dchar cur;
+    bool _empty;
+    this(String str)
+    {
+        origin = buf = str;
+        fetch();
+    }
+    void rewind(size_t i)
+    {//TODO: could be much better
+        buf = origin[i..$];
+        fetch();
+        debug write("Backtracked pc-->",front, "<-- ",buf);
+    }
+    void fetch()
+    {
+        if(buf.empty)
+            _empty = true;
+        else
+        {
+            cur = buf.front;
+            buf.popFront();
         }
     }
+    dchar back(size_t i){ return origin[0..$-buf.length].back; }//TODO: cache it too
+    @property size_t backLength(){ return origin.length - buf.length; }
+    @property dchar front(){ return cur; }
+    void popFront(){ return fetch(); }
+    @property bool empty(){ return _empty; }
+    String original(size_t start, size_t end){ return origin[start..end]; }
+    @property size_t index(){ return origin.length - buf.length - !empty; }//TODO: unicode
 }
-
-
-struct Inst(InstType type){
-    GenericInst inst;
-    enum length = instSize!type;
-    alias inst this;
-}
-
-
-auto _instSize(InstType type){
-    switch(type){
-        case InstType.Banychar:
-            return InstType.sizeof;
-        case InstType.Bchar: case InstType.Bnotchar:
-            return InstType.sizeof+dchar.sizeof;
-        case InstType.Brange: case InstType.Bnotrange:
-            return InstType.sizeof+dchar.sizeof+dchar.sizeof;
-        case InstType.Bsplit:
-            return InstType.sizeof+uint.sizeof+uint.sizeof;
+//low level construct, doesn't 'own' any memory
+struct BacktrackingEngine(String)
+if(isForwardRange!String && !is(String.init[0] : dchar))
+{
+    uint[][] code;      //bytecode per lookaround level
+    uint[] stack;       //memory for saved states
+    uint[] index;       //index to map matches
+    uint last;          //top of stack  
+    
+    //size of a thread state head
+    enum headWords = size_t.sizeof/uint.sizeof + 2;
+    enum indexSize = size_t.sizeof/uint.sizeof;
+    uint pc, counter;
+    size_t[] matches;   
+    
+    this(uint[][] code_, uint[] stack_, uint[] index_, size_t[] matches_)
+    {
+        code = code_;
+        stack = stack_;
+        index = index_;
+        matches = matches_;
+    }
+    /*
+    */
+    void pushState(uint pc, uint counter, size_t index)
+    {//TODO: more options on out of memory
+        enforce(last + headWords + matches.length*indexSize < stack.length);
+        stack[last++] = pc;
+        stack[last++] = counter;
+        static if(size_t.sizeof == uint.sizeof)
+        {
+            stack[last++] = index;
+        }
+        else static if(size_t.sizeof == 2*uint.sizeof)
+        {
+            *cast(size_t*)&stack[last] = index; 
+            last += 2;
+        }
+        else
+            pragma(error,"32 & 64 bits only");
+        stack[last..last+matches.length*indexSize] = cast(uint[])matches[];
+        last += matches.length*indexSize;
+    }
+    /*
+    */
+    bool popState(ref Fetcher!String s)
+    {
+        if(!last)
+            return false;
+        last -= matches.length*indexSize;
+        matches[] = cast(size_t[])stack[last..last+matches.length*indexSize];
+        last -= headWords;
+        pc = stack[last];
+        counter = stack[last+1];
+        static if(size_t.sizeof == uint.sizeof)
+        {
+            s.rewind(stack[last+2]);
+        }
+        else static if(size_t.sizeof == 2*uint.sizeof)
+        {
+            s.rewind(*cast(size_t*)stack[last]);
+        }
+        else
+            pragma(error,"32 & 64 bits only");
+        debug writeln(" pc=",pc);
+        return true;
+    }
+    enum backtrack = "if(!popState(s)) return false;";
+    
+    /*
+        match subexpression prog against s, being on lookaround level 'level'
+    */
+    bool matchImpl(ref Fetcher!String s, uint[] prog, uint level)
+    {      
+        while(pc<prog.length)
+            switch(opcode(prog[pc]))
+            {
+            case IRchar:
+                if(s.empty || s.front != opdata(prog[pc]))
+                   mixin(backtrack);
+                else
+                {
+                    pc++;
+                    s.popFront();
+                }
+            break;
+            case IRany:
+                if(s.empty)
+                    mixin(backtrack);
+                else
+                {
+                    pc++;
+                    s.popFront();
+                }
+                break;
+            case IRword:
+                if(s.empty || !isUniAlpha(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRnotword:
+                if(s.empty || isUniAlpha(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRdigit:
+                if(s.empty || !isdigit(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRnotdigit:
+                if(s.empty || isdigit(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRspace:
+                if(s.empty || !isspace(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRnotspace:
+                if(s.empty || isspace(s.front))
+                    mixin(backtrack);
+                else
+                {
+                    s.popFront();
+                    pc++;
+                }
+                break;
+            case IRwordboundary:
+                //at start & end of input
+                if(s.empty && s.backLength && isUniAlpha(s.back(1)))
+                    pc++;
+                else if( (isUniAlpha(s.front) && !isUniAlpha(s.back(1)))
+                      || (!isUniAlpha(s.front) && isUniAlpha(s.back(1))) )
+                    pc++;
+                else
+                    mixin(backtrack);
+                break;
+            case IRnotwordboundary:
+                 if(s.empty && s.backLength && isUniAlpha(s.back(1)))
+                    mixin(backtrack);
+                else if( (isUniAlpha(s.front) && !isUniAlpha(s.back(1)))
+                      || (!isUniAlpha(s.front) && isUniAlpha(s.back(1))) )
+                    mixin(backtrack);
+                else
+                    pc++;
+                break;
+            case IRbol:
+                //TODO: multiline & attributes, unicode line terminators
+                if(!s.backLength || s.back(1) == '\n')
+                    pc++;
+                else
+                    mixin(backtrack);
+                break;
+            case IReol:
+                //TODO: ditto for the begining of line
+                if(s.empty || s.front == '\n')
+                    pc++;
+                else
+                    mixin(backtrack);
+                break;
+            case IRstartrepeat:
+            case IRstartinfinite: 
+                pc += opdata(prog[pc]) + 1;
+                break;
+            case IRrepeat:
+            case IRrepeatq:
+                // len, step, min, max
+                uint len = opdata(prog[pc]);
+                uint step =  prog[pc+1];
+                uint min = prog[pc+2];
+                uint max = prog[pc+3];
+                if(counter < min)
+                {
+                    counter += step;
+                    pc -= len;
+                }
+                else if(counter >= min)
+                {
+                    bool greedy = opcode(prog[pc]) == IRrepeat;
+                    if(counter < max)
+                    {
+                        int actual = counter/step % (max+1);
+                        if(greedy)
+                        {    
+                            pushState(pc + 4, counter - actual*step, s.index);
+                            counter += step;
+                            pc -= len;
+                        }
+                        else
+                        {
+                            pushState(pc - len, counter + step, s.index);
+                            counter -= actual*step;
+                            pc += 4; 
+                        }
+                    }
+                    else
+                        pc += 4;
+                }                       
+                break;
+            case IRinfinite:
+            case IRinfiniteq:
+                bool greedy = opcode(prog[pc]) == IRinfinite;
+                uint len = opdata(prog[pc]);
+                if(greedy)
+                {
+                    pushState(pc+1, counter, s.index);
+                    pc -= len;
+                }
+                else
+                {
+                    pushState(pc-len, counter, s.index);
+                    pc++;    
+                }
+                break;
+            case IRstartoption:
+                pc++;
+                //fallthrough
+            case IRoption:
+                uint len = opdata(prog[pc]);
+                if(opcode(prog[pc+len+1]) == IRoption)//not a last one
+                {
+                   pushState(pc + len + 1, counter, s.index); //remember 2nd branch
+                }
+                pc++;
+                break;
+            case IRendoption:
+                pc++; // now stands at IRoption if any
+                // TODO: should use precomputed jump
+                for(;opcode(prog[pc]) == IRoption; pc += opdata(prog[pc]+1)){}
+                break;
+            case IRstartgroup: //TODO: mark which global matched and do the other alternatives
+                uint n = opdata(prog[pc]);
+                matches[index[n]*2] = s.index;
+                debug  writefln("IR group #%u starts at %u",n,s.index);
+                pc++;
+                break;
+            case IRendgroup:   //TODO: ditto
+                uint n = opdata(prog[pc]);
+                matches[index[n]*2+1] = s.index;
+                debug writefln("IR group #%u ends at %u",n,s.index);
+                pc++;
+                break;
+            case IRlookahead:
+                assert(0, "No impl!");
+                break;
+            case IRneglookahead: 
+                assert(0, "No impl!");
+                break;
+            case IRlookbehind:
+                assert(0, "No impl!");
+                break;
+            case IRneglookbehind:
+                assert(0, "No impl!");
+                break;
+            case IRbackref:
+                uint n = index[opdata(prog[pc])];
+                if(startsWith(s.buf, s.original(n, n+1)) )
+                    pc++;
+                else
+                    mixin(backtrack);
+                break;
+            case IRret:
+                assert(0, "No impl!");
+                break;
+            }
+        return true;
     }
 }
-
-template instSize(InstType t){
-    enum opcodeSize = _instSize(t);
+    
+void test(string pattern, string input)
+{
+    auto p = RecursiveParser!string(pattern);
+    size_t[] match = new size_t[p.nsub*2];
+    uint[] memory = new uint[8*1024];
+    auto engine = BacktrackingEngine!string(p.ir, memory, p.index, match);
+    auto f = Fetcher!string(input);
+    p.print();
+    bool result = engine.matchImpl(f,p.ir[0],0);
+    
+    writeln(input, " ", result, " ",match);
 }
 
+unittest
+{
+    
+}
 
 class RegexException : Exception
 {

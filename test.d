@@ -7,28 +7,34 @@ int main(string[] argv)
 {    
     if(argv.length < 2)
     {
-        writefln("regex parser test\nUsage %s <pattern file>",argv[0]);
+        writefln("regex test\nUsage %s <pattern file>\n or: <pattern> <test-string>",argv[0]);
         return 1;
     }
-    auto f = File(argv[1]);
-    string s;
-    for(;;)
-    { 
-        s = strip(f.readln());
-        if(s.empty)
-            break;
-        write(s," ");
-        try
-        {
-            auto p = RecursiveParser!string(s);
-            write(" OK \n");
-            p.print();
+    else if(argv.length == 2)
+    {
+        auto f = File(argv[1]);
+        string s;
+        for(;;)
+        { 
+            s = strip(f.readln());
+            if(s.empty)
+                break;
+            write(s," ");
+            try
+            {
+                auto p = RecursiveParser!string(s);
+                write(" OK \n");
+                p.print();
+            }
+            catch(Exception ex)
+            {
+                write(" FAIL\n",ex.msg);
+            }    
+            writeln();
         }
-        catch(Exception ex)
-        {
-            write(" FAIL\n",ex.msg);
-        }    
-        writeln();
     }
+    else
+        test(argv[1],argv[2]);
+    
     return 0;
 }
