@@ -79,7 +79,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     }
     NamedGroup[] dict; //maps name -> user group number
     //current num of group, current nesting, and peak number of group
-    uint nsub = 0, nesting = 0, top = 0; 
+    uint nsub = 0, nesting = 0, counterStep = 1; 
     
     this(R pattern)
     {
@@ -244,9 +244,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 insertInPlace(ir[level], offset, opgen(IRstartrepeat, len)); // + 1 word
                 put(opgen(greedy ? IRrepeat : IRrepeatq, len));
-                put(effectiveLength); //step of RIN counter
-                put(min*effectiveLength);
-                put(max*effectiveLength);
+                put(counterStep); 
+                put(min*counterStep);
+                put(max*counterStep);
+                counterStep = (max+1)*counterStep;
                 effectiveLength = checkedMulAdd(max,effectiveLength,5);
             }
         }
@@ -256,10 +257,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 insertInPlace(ir[level], offset, opgen(IRstartrepeat, len));// + 1 word
                 offset += 1;//so it still points to the repeated block
-                put(opgen(greedy ? IRrepeat : IRrepeatq, len));//TODO: include step
-                put(effectiveLength); //step of RIN counter
-                put(min*effectiveLength);
-                put(min*effectiveLength);
+                put(opgen(greedy ? IRrepeat : IRrepeatq, len));
+                put(counterStep);
+                put(min*counterStep);
+                put(min*counterStep);
+                counterStep = (min+1)*counterStep;
             }
             put(opgen(IRstartinfinite, len));
             ir[level] ~= ir[level][offset .. offset+len];// + another effectiveLength
@@ -298,7 +300,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             nesting++;
             if(current == '?')
             {
-                
                 next();
                 switch(current)
                 {
@@ -657,8 +658,9 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
     void rewind(size_t i)
     {//TODO: could be much better
         buf = origin[i..$];
+        _empty = false;
         fetch();
-        debug write("Backtracked pc-->",front, "<-- ",buf);
+        debug write("Backtracked src ->",front, buf);
     }
     void fetch()
     {
@@ -871,32 +873,32 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
                 uint step =  prog[pc+1];
                 uint min = prog[pc+2];
                 uint max = prog[pc+3];
-                if(counter < min)
+                debug writefln("repeat pc=%u, counter=%u",pc,counter);
+                uint cnt = counter % (max+1);
+                if(cnt < min)
                 {
                     counter += step;
                     pc -= len;
                 }
-                else if(counter >= min)
+                else if(cnt < max)
                 {
-                    bool greedy = opcode(prog[pc]) == IRrepeat;
-                    if(counter < max)
-                    {
-                        int actual = counter/step % (max+1);
-                        if(greedy)
-                        {    
-                            pushState(pc + 4, counter - actual*step, s.index);
-                            counter += step;
-                            pc -= len;
-                        }
-                        else
-                        {
-                            pushState(pc - len, counter + step, s.index);
-                            counter -= actual*step;
-                            pc += 4; 
-                        }
+                    if(opcode(prog[pc]) == IRrepeat)
+                    {    
+                        pushState(pc + 4, counter - counter%(max+1), s.index);
+                        counter += step;
+                        pc -= len;
                     }
                     else
-                        pc += 4;
+                    {
+                        pushState(pc - len, counter + step, s.index);
+                        counter -= counter%(max+1);
+                        pc += 4; 
+                    }                    
+                }
+                else
+                {
+                    counter -= counter%(max+1);
+                    pc += 4;
                 }                       
                 break;
             case IRinfinite:

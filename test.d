@@ -7,7 +7,8 @@ int main(string[] argv)
 {    
     if(argv.length < 2)
     {
-        writefln("regex test\nUsage %s <pattern file>\n or: <pattern> <test-string>",argv[0]);
+        writefln("regex test\nUsage %s <pattern file>\n"
+                 "or: %s <pattern> <test-string>\n",argv[0],argv[0]);
         return 1;
     }
     else if(argv.length == 2)
