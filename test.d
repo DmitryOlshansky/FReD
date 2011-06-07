@@ -34,8 +34,7 @@ int main(string[] argv)
             writeln();
         }
     }
-    else
-        test(argv[1],argv[2]);
+        
     
     return 0;
 }
