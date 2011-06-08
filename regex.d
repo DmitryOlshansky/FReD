@@ -344,7 +344,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     pc = pc + ir[level][pc].data;
                     if(ir[level][pc].code != IRendoption)
                         break;
-                    ir[level][pc] = Bytecode(IRendoption,cast(uint)(ir[level].length - pc));
+                    ir[level][pc] = Bytecode(IRendoption,cast(uint)(ir[level].length - pc - 1));
                     pc++;
                 }
                 ngroup = maxSub;
@@ -406,9 +406,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         default:
             return;
         }
-        next(); 
         bool greedy = true;
-        if(current == '?')
+        //check only if we managed to get new symbol
+        if(next() && current == '?')
         {
             greedy = false;
             next();
@@ -669,13 +669,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 nref /= 10;
             nref--;
             return Bytecode(IRbackref, nref);
-        case '*', '(', ')', '[', ']', '+', '|', '\\', '{', '}':
+        default:
             auto op = Bytecode(IRchar, current);
             next();
             return op;
-        default:
-            error("Unrecognaized escape sequence");
-            assert(0);
         }
     }
     //
@@ -693,10 +690,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     @property Program program()
     { 
         assert(!ir.empty);
-        writeln("Index ",index);
-        auto prog = Program(ir, index, dict, ngroup, re_flags); 
-        debug prog.print();
-        return prog;
+        return Program(ir, index, dict, ngroup, re_flags); 
     }
 }
 //for backwards comaptibility
@@ -759,6 +753,11 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
     //lookup next match fill matches with indices into input
     bool match(Group matches[])
     {
+        debug
+        {
+            writeln("------------------------------------------");
+            re.print();
+        }
         if(exhausted) //all matches collected
             return false;
         for(;;)
@@ -864,7 +863,10 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
             return true;
         }   
         auto start = origin.length - s.length;
+        writeln("Try match starting at ",origin[inputIndex..$]);
         while(pc<prog.length)
+        {
+            debug writefln("%d\t%s", pc, disassemble(prog, pc, re.index, re.dict));
             switch(prog[pc].code)
             {
             case IRchar:
@@ -918,7 +920,7 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
             case IRwordboundary:
                 //at start & end of input
                 if((s.empty && isUniAlpha(s.front))
-                   || (s.length == origin.length && isUniAlpha(previous)) )
+                   || (s.length == origin.length && isUniAlpha(s.front)) )
                     pc++;
                 else if( (isUniAlpha(s.front) && !isUniAlpha(previous))
                       || (!isUniAlpha(s.front) && isUniAlpha(previous)) )
@@ -959,7 +961,6 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
                     pushState(pc+1, counter);
                     infiniteNesting++;
                     pc -= len;
-                    writeln("SCHECK ",disassemble(prog, pc, re.index, re.dict));
                 }
                 else
                 {
@@ -997,7 +998,7 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
                         pushState(pc - len, counter + step);   
                         counter -= counter%(max+1);
                         pc += 4; 
-                    }                    
+                    }
                 }
                 else
                 {
@@ -1095,6 +1096,7 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
                     return false;
                 }
             }
+        }
         return true;
     }   
 }
@@ -1305,23 +1307,23 @@ unittest
         {  "a+b+c",     "aabbabc","y",  "&",    "abc" },
         {  "a**",       "-",    "c",    "-",    "-" },
         {  "a*?a",      "aa",   "y",    "&",    "a" },
-      //  {  "(a*)*",     "aaa",  "y",    "-",    "-" },
-     //   {  "(a*)+",     "aaa",  "y",    "-",    "-" },
-     //   {  "(a|)*",     "-",    "y",    "-",    "-" },
-     //   {  "(a*|b)*",   "aabb", "y",    "-",    "-" },
+        {  "(a*)*",     "aaa",  "y",    "-",    "-" },
+        {  "(a*)+",     "aaa",  "y",    "-",    "-" },
+        {  "(a|)*",     "-",    "y",    "-",    "-" },
+        {  "(a*|b)*",   "aabb", "y",    "-",    "-" },
         {  "(a|b)*",    "ab",   "y",    "&-\\1",        "ab-b" },
         {  "(a+|b)*",   "ab",   "y",    "&-\\1",        "ab-b" },
         {  "(a+|b)+",   "ab",   "y",    "&-\\1",        "ab-b" },
-    //    {  "(a+|b)?",   "ab",   "y",    "&-\\1",        "a-a" },
-    //    {  "[^ab]*",    "cde",  "y",    "&",    "cde" },
+        {  "(a+|b)?",   "ab",   "y",    "&-\\1",        "a-a" },
+   //     {  "[^ab]*",    "cde",  "y",    "&",    "cde" },
    //     {  "(^)*",      "-",    "y",    "-",    "-" },
    //     {  "(ab|)*",    "-",    "y",    "-",    "-" },
         {  ")(",        "-",    "c",    "-",    "-" },
         {  "",  "abc",  "y",    "&",    "" },
         {  "abc",       "",     "n",    "-",    "-" },
         {  "a*",        "",     "y",    "&",    "" },
-    /*    {  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" },
-        {  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" },
+    //    {  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" },
+    //    {  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" },
         {  "a|b|c|d|e", "e",    "y",    "&",    "e" },
         {  "(a|b|c|d|e)f", "ef",        "y",    "&-\\1",        "ef-e" },
         {  "((a*|b))*", "aabb", "y",    "-",    "-" },
@@ -1329,21 +1331,21 @@ unittest
         {  "ab*",       "xabyabbbz",    "y",    "&",    "ab" },
         {  "ab*",       "xayabbbz",     "y",    "&",    "a" },
         {  "(ab|cd)e",  "abcde",        "y",    "&-\\1",        "cde-cd" },
-        {  "[abhgefdc]ij",      "hij",  "y",    "&",    "hij" },
+      //  {  "[abhgefdc]ij",      "hij",  "y",    "&",    "hij" },
         {  "^(ab|cd)e", "abcde",        "n",    "x\\1y",        "xy" },
         {  "(abc|)ef",  "abcdef",       "y",    "&-\\1",        "ef-" },
         {  "(a|b)c*d",  "abcd", "y",    "&-\\1",        "bcd-b" },
         {  "(ab|ab*)bc",        "abc",  "y",    "&-\\1",        "abc-a" },
-        {  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" },
+    /*    {  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" },
         {  "a([bc]*)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
         {  "a([bc]+)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
         {  "a([bc]*)(c+d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-b-cd" },
         {  "a[bcd]*dcdcde",     "adcdcde",      "y",    "&",    "adcdcde" },
         {  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" },
-        {  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" },
+    */    {  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" },
         {  "((a)(b)c)(d)",      "abcd", "y",    "\\1-\\2-\\3-\\4",      "abc-a-b-d" },
-        {  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "&",    "alpha" },
-        {  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "&-\\1",        "bh-" },
+    //    {  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "&",    "alpha" },
+    //    {  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "&-\\1",        "bh-" },
         {  "(bc+d$|ef*g.|h?i(j|k))",    "effgz",        "y",    "&-\\1-\\2",    "effgz-effgz-" },
         {  "(bc+d$|ef*g.|h?i(j|k))",    "ij",   "y",    "&-\\1-\\2",    "ij-ij-j" },
         {  "(bc+d$|ef*g.|h?i(j|k))",    "effg", "n",    "-",    "-" },
@@ -1356,15 +1358,15 @@ unittest
         {  "\\((.*), (.*)\\)",  "(a, b)",       "y",    "(\\2, \\1)",   "(b, a)" },
         {  "abcd",      "abcd", "y",    "&-\\&-\\\\&",  "abcd-&-\\abcd" },
         {  "a(bc)d",    "abcd", "y",    "\\1-\\\\1-\\\\\\1",    "bc-\\1-\\bc" },
-        {  "[k]",                       "ab",   "n",    "-",    "-" },
+     /*   {  "[k]",                       "ab",   "n",    "-",    "-" },
         {  "[ -~]*",                    "abc",  "y",    "&",    "abc" },
         {  "[ -~ -~]*",         "abc",  "y",    "&",    "abc" },
         {  "[ -~ -~ -~]*",              "abc",  "y",    "&",    "abc" },
         {  "[ -~ -~ -~ -~]*",           "abc",  "y",    "&",    "abc" },
         {  "[ -~ -~ -~ -~ -~]*",        "abc",  "y",    "&",    "abc" },
         {  "[ -~ -~ -~ -~ -~ -~]*",     "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~ -~ -~ -~ -~]*",  "abc",  "y",    "&",    "abc" },*/
-        {  "a{2}",      "candy",                "n",    "",     "" },
+        {  "[ -~ -~ -~ -~ -~ -~ -~]*",  "abc",  "y",    "&",    "abc" },
+     */   {  "a{2}",      "candy",                "n",    "",     "" },
         {  "a{2}",      "caandy",               "y",    "&",    "aa" },
         {  "a{2}",      "caaandy",              "y",    "&",    "aa" },
         {  "a{2,}",     "candy",                "n",    "",     "" },
@@ -1376,7 +1378,7 @@ unittest
         {  "a{1,3}",    "caaaaaandy",           "y",    "&",    "aaa" },
         {  "e?le?",     "angel",                "y",    "&",    "el" },
         {  "e?le?",     "angle",                "y",    "&",    "le" },
-      /*  {  "\\bn\\w",   "noonday",              "y",    "&",    "no" },
+        {  "\\bn\\w",   "noonday",              "y",    "&",    "no" },
         {  "\\wy\\b",   "possibly yesterday",   "y",    "&",    "ly" },
         {  "\\w\\Bn",   "noonday",              "y",    "&",    "on" },
         {  "y\\B\\w",   "possibly yesterday",   "y",    "&",    "ye" },
@@ -1403,7 +1405,7 @@ unittest
         {  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " },
         {"(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" },
         {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
-        {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
+      /*  {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
         {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },*/
 
         ];
