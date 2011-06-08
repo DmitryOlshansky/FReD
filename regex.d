@@ -46,120 +46,107 @@ enum:uint {
     IRneglookbehind     = 28,
     IRret               = 29, //end of lookaround sub
     //TODO: ...
-    IRlambda            = 128
 };
-//IR bit twiddling helpers
 
+//single IR instruction
 struct Bytecode
 {
     uint raw;
-    this(uint code, uint data)
+    this(uint code, uint data, bool hotspot=false)
     { 
         
-        assert(data < (1<<24) && code < 256);
-        raw = code<<24 | data;
+        assert(data < (1<<24) && code < 128);
+        raw = code<<25 | data | (hotspot ? 1<<24  : 0);
     }    
     static Bytecode fromRaw(uint data)
     { 
         Bytecode t;
         t.raw = data;
         return t;
-    }
+    }    
+    //bit twiddling helpers
     @property uint data(){ return raw & 0x00ff_ffff; }
-    @property uint code(){ return raw>>24; }
+    @property uint code(){ return raw>>25; }
+    @property bool hotspot(){ return (raw & (1<<24)) != 0; }
+    //
+    @property string mnemonic()
+    {
+        switch(code)
+        {
+        case IRchar:            return "char";
+        case IRany:             return "any char";
+        case IRword:            return "word";
+        case IRnotword:         return "not word";
+        case IRdigit:           return "digit";
+        case IRnotdigit:        return "not digit";
+        case IRspace:           return "space";
+        case IRnotspace:        return "not space";
+        case IRwordboundary:    return "word-boundary";
+        case IRnotwordboundary: return "not word-boundary";
+        case IRbol:             return "begining-of-line";
+        case IReol:             return "end-of-line";
+        case IRstartrepeat:     return "start repeat";
+        case IRstartinfinite:   return "start infinite";
+        case IRrepeat:          return "repeat";
+        case IRrepeatq:         return "repeatq";
+        case IRinfinite:        return "infinite";
+        case IRinfiniteq:       return "infiniteq";
+        case IRstartoption:     return "start option";
+        case IRoption:          return "option";
+        case IRendoption:       return "end option";
+        case IRstartgroup:      return "start group";
+        case IRendgroup:        return "end group";
+        case IRlookahead:       return "lookahead";
+        case IRneglookahead:    return "neglookahead";
+        case IRlookbehind:      return "lookbehind";
+        case IRneglookbehind:   return "neglookbehind";
+        case IRbackref:         return "backref";
+        case IRret:             return "return";
+        default:    
+            assert(0,"Illegal instruction");
+        }
+    }
+    @property uint length()
+    {
+        switch(code)
+        {
+        case IRrepeat, IRrepeatq:
+             //[opcode | len], step, min, max
+            return 4 + (hotspot ? 1 : 0);
+        default:
+            return 1 + (hotspot ? 1 : 0);
+        }
+    }
 }
-
 
 static assert(Bytecode.sizeof == 4);
 
-uint instSize(Bytecode inst)
-{
-    switch(inst.code)
-    {
-    case IRrepeat, IRrepeatq:
-         //[opcode | len], step, min, max
-        return 4;
-    default:
-        return 1;
-    }    
-}
+
 //debug tool
 string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
 {
     auto output = appender!string();
+    formattedWrite(output,"%s", irb[pc].mnemonic);
     switch(irb[pc].code)
     {
     case IRchar:
-        formattedWrite(output, "char %s",cast(dchar)irb[pc].data);
+        formattedWrite(output, " %s",cast(dchar)irb[pc].data);
         break;
-    case IRany:
-        formattedWrite(output, "any char");
-        break;
-    case IRword:
-        formattedWrite(output, "word");
-        break;
-    case IRnotword:
-        formattedWrite(output, "not word");
-        break;
-    case IRdigit:
-        formattedWrite(output, "digit");
-        break;
-    case IRnotdigit:
-        formattedWrite(output, "not digit");
-        break;
-    case IRspace:
-        formattedWrite(output, "space");
-        break;
-    case IRnotspace:
-        formattedWrite(output, "not space");
-        break;
-    case IRwordboundary:
-        formattedWrite(output, "word-boundary");
-        break;
-    case IRnotwordboundary:
-        formattedWrite(output, "not word-boundary");
-        break;
-    case IRbol:
-        formattedWrite(output, "begining-of-line");
-        break;
-    case IReol:
-        formattedWrite(output, "end-of-line");
-        break;
-    case IRstartrepeat:
+    case IRstartrepeat, IRstartinfinite, IRoption, IRendoption, IRstartoption:
+        //forward-jump instructions
         uint len = irb[pc].data;
-        formattedWrite(output, "start repeat pc=>%u", pc+len+1);
+        formattedWrite(output, " pc=>%u", pc+len+1);
         break;
-    case IRstartinfinite:
+    case IRrepeat, IRrepeatq: //backward-jump instructions
         uint len = irb[pc].data;
-        formattedWrite(output, "start infinite pc=>%u", pc+len+1);
+        formattedWrite(output, " pc=>%u min=%u max=%u step=%u", 
+                pc-len, irb[pc+2].raw, irb[pc+3].raw, irb[pc+1].raw);
         break;
-    case IRrepeat:
-    case IRrepeatq:
+    case IRinfinite, IRinfiniteq: //ditto
         uint len = irb[pc].data;
-        formattedWrite(output, "repeat%s pc=>%u min=%u max=%u step=%u", 
-                irb[pc].code == IRrepeatq ? "q" : "",
-                pc-len, irb[pc+2].raw, irb[pc+3].raw,irb[pc+1].raw);
-        pc += 3;//3 extra operands
+        formattedWrite(output, " pc=>%u ", pc-len);
         break;
-    case IRinfinite:
-    case IRinfiniteq:
-        uint len = irb[pc].data;
-        formattedWrite(output, "infinite%s pc=>%u ", 
-                irb[pc].code == IRinfiniteq ? "q" : "", pc-len);
-        break;
-    case IRstartoption:
-        formattedWrite(output, "start option");
-        break;
-    case IRoption:
-        uint len = irb[pc].data;
-        formattedWrite(output, "option pc=>%u", pc+len+1);
-        break;
-    case IRendoption:
-        uint len = irb[pc].data;
-        formattedWrite(output, "end option pc=>%u", pc+len+1);
-        break;
-    case IRstartgroup: 
-    case IRendgroup:
+    case IRstartgroup, IRendgroup:
         uint n = irb[pc].data;
         // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
         //auto ng = find!((x){ return x.group == n; })(dict); 
@@ -170,46 +157,25 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
                 name = "'"~v.name~"'";
                 break;   
             }
-        if(irb[pc].code == IRstartgroup)
-        {
-            formattedWrite(output, "start group %s #%u (internal %u)",
+        formattedWrite(output, " %s #%u (internal %u)",
                 name, n,  index[n]);    
-        }
-        else
-        {
-            formattedWrite(output, "end group '%s' #%u (internal %u)",
-                name, n, index[n]);
-        }
         break;
-    case IRlookahead:
-        uint dest = irb[pc].data;
-        formattedWrite(output, "lookahead dest=%u",  dest);
-        break;
-    case IRneglookahead: 
-        uint dest = irb[pc].data;
-        formattedWrite(output, "neglookahead dest=%u",  dest);
-        break;
-    case IRlookbehind:
-        uint dest = irb[pc].data;
-        formattedWrite(output, "lookbehind dest=%u",  dest);
-        break;
-    case IRneglookbehind:
-        uint dest = irb[pc].data;
-        formattedWrite(output, "neglookbehind dest=%u",  dest);
+    case IRlookahead, IRneglookahead, IRlookbehind, IRneglookbehind:    
+        uint len = irb[pc].data;
+        formattedWrite(output, " next=%u", pc + len + 1);
         break;
     case IRbackref:
         uint n = irb[pc].data;
-        formattedWrite(output, "backref %u",  n);
+        formattedWrite(output, " %u",  n);
         break;
-    case IRret:
-        formattedWrite(output, "return");
         break;
-    default:
-        assert(0,"Illegal instruction");
+    default://all data-free instructions
     }
+    if(irb[pc].hotspot)
+        formattedWrite(output," HOTSPOT %u", irb[pc+irb[pc].length-1]);
     return output.data;
 }
-                   
+
 enum RegexOption: uint { global = 0x1, caseinsensitive = 0x2, freeform = 0x4};
 
 //multiply-add, throws exception on overflow
@@ -226,6 +192,7 @@ struct NamedGroup
     string name; 
     uint group;
 }
+
 struct Group
 { 
     size_t begin, end;
@@ -238,7 +205,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     dchar _current;
     bool empty;
     R pat, origin;       //keep full pattern for pretty printing error messages
-    Bytecode[][] ir;         //resulting bytecode separated by lookaround levels
+    Bytecode[] ir;       //resulting bytecode
     uint level = 0;      //current lookaround level
     uint[] index;        //user group number -> internal number
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
@@ -250,18 +217,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     {
         pat = origin = pattern;    
         index = [ 0 ]; //map first to start-end of the whole match
-        ir = new Bytecode[][1];
-        ir[0].reserve(pat.length);
+        ir.reserve(pat.length);
         next();
         parseRegex();
     }
     @property dchar current(){ return _current; }
-    void enterLevel()
-    { 
-        if(++level >= ir.length)
-            ir.length += 1;
-    }
-    void leaveLevel(){  --level;   }
     bool next()
     {
         if(pat.empty)
@@ -283,8 +243,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         empty = false;
         next();
     }
-    void put(Bytecode code){  ir[level] ~= code; }   
-    void putRaw(uint number){ ir[level] ~= Bytecode.fromRaw(number); }
+    void put(Bytecode code){  ir ~= code; }   
+    void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
     uint parseDecimal()
     {
         uint r=0;
@@ -302,7 +262,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     */
     void parseRegex()
     {
-        uint start = cast(uint)ir[level].length;
+        uint start = cast(uint)ir.length;
         auto subSave = ngroup;
         while(!empty && current != '|' && current != ')')
             parseRepetition();
@@ -314,15 +274,15 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 nesting--;
                 return;
             case '|':
-                Bytecode[2] piece = [Bytecode.init, Bytecode(IRoption, ir[level].length - start + 1)];
-                insertInPlace(ir[level], start, piece[]); 
+                Bytecode[2] piece = [Bytecode.init, Bytecode(IRoption, ir.length - start + 1)];
+                insertInPlace(ir, start, piece[]); 
                 put(Bytecode(IRendoption, 0)); 
-                uint anchor = cast(uint)(ir[level].length); //points to first option
+                uint anchor = cast(uint)(ir.length); //points to first option
                 uint maxSub = 0; //maximum number of captures out of each code path
                 do
                 {
                     next();
-                    uint offset = cast(uint)(ir[level].length);
+                    uint offset = cast(uint)(ir.length);
                     put(Bytecode.init); //reserve space
                     while(!empty && current != '|' && current != ')')
                         parseRepetition();
@@ -330,21 +290,21 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     {
                         put(Bytecode(IRendoption, 0));//mark now, fixup later   
                     }
-                    uint len = cast(uint)(ir[level].length - offset - 1);
+                    uint len = cast(uint)(ir.length - offset - 1);
                     len < (1<<24) || error("Internal error - overflow");
-                    ir[level][offset] = Bytecode(IRoption,  len);
+                    ir[offset] = Bytecode(IRoption,  len);
                     maxSub = max(ngroup,maxSub);
                     ngroup = subSave; //reuse groups across alternations
                 }while(current == '|');
                 //fixup
-                ir[level][start] = Bytecode(IRstartoption, ir[level].length - start);
+                ir[start] = Bytecode(IRstartoption, ir.length - start - 1);
                 uint pc = start + 1;
-                while(pc < ir[level].length)
+                while(pc < ir.length)
                 {
-                    pc = pc + ir[level][pc].data;
-                    if(ir[level][pc].code != IRendoption)
+                    pc = pc + ir[pc].data;
+                    if(ir[pc].code != IRendoption)
                         break;
-                    ir[level][pc] = Bytecode(IRendoption,cast(uint)(ir[level].length - pc - 1));
+                    ir[pc] = Bytecode(IRendoption,cast(uint)(ir.length - pc - 1));
                     pc++;
                 }
                 ngroup = maxSub;
@@ -359,9 +319,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     */
     void parseRepetition()
     {
-        uint offset = cast(uint)ir[level].length;
+        uint offset = cast(uint)ir.length;
         parseAtom();
-        uint len = cast(uint)ir[level].length - offset;
+        uint len = cast(uint)ir.length - offset;
         if(empty)
             return;
         uint min, max;
@@ -417,7 +377,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1 || max != 1)
             {
-                insertInPlace(ir[level], offset, Bytecode(IRstartrepeat, len));
+                insertInPlace(ir, offset, Bytecode(IRstartrepeat, len));
                 put(Bytecode(greedy ? IRrepeat : IRrepeatq, len));
                 putRaw(counterStep); 
                 putRaw(min*counterStep);
@@ -429,7 +389,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1)
             {
-                insertInPlace(ir[level], offset, Bytecode(IRstartrepeat, len));
+                insertInPlace(ir, offset, Bytecode(IRstartrepeat, len));
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IRrepeat : IRrepeatq, len));
                 putRaw(counterStep);
@@ -438,12 +398,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 counterStep = (min+1)*counterStep;
             }
             put(Bytecode(IRstartinfinite, len));
-            ir[level] ~= ir[level][offset .. offset+len];
+            ir ~= ir[offset .. offset+len];
             put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir[level], offset, Bytecode(IRstartinfinite, len));
+            insertInPlace(ir, offset, Bytecode(IRstartinfinite, len));
             put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
         }
     }
@@ -531,12 +491,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }            
             if(lookaround)
             {
-                enterLevel();
-                uint offset = cast(uint)ir[level].length;
-                parseRegex();//lookarounds are isolated
+                uint offset = cast(uint)ir.length;
+                parseRegex();
                 put(Bytecode(IRret, 0));
-                leaveLevel();
-                put(Bytecode(op.code, offset));//aims to the next level
+                put(Bytecode(op.code, cast(uint)(ir.length - offset)));
             }
             else
             {
@@ -684,12 +642,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-
     /*
     */
     @property Program program()
     { 
-        assert(!ir.empty);
         return Program(ir, index, dict, ngroup, re_flags); 
     }
 }
@@ -702,32 +658,34 @@ struct Regex(Char)
     alias storage this;
 
 }
-//holds all persistent information about regex
+//holds all persistent data about compiled regex
 struct Program
 {
-    Bytecode[][] ir;
+    Bytecode[] ir;
     uint[] index;       //user group number -> internal number
     NamedGroup[] dict;  //maps name -> user group number
-    uint ngroup;          //number of local groups
+    uint ngroup;        //number of internal groups
     uint flags;         //global regex flags   
     //
     void print()
     {
-        foreach(lvl, irb; ir)
+        writefln("PC\tINST\n");
+        for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
-            writefln("%sPC\tINST", lvl ? "Lookaround level #"~to!string(lvl)~"\n" : "");
-            for(size_t i=0; i<irb.length; i+=instSize(irb[i]))
-            {
-                writefln("%d\t%s", i, disassemble(irb, i, index, dict));
-            }
+            writefln("%d\t%s", i, disassemble(ir, i, index, dict));
         }
     }
 }
 
-//low level construct, doesn't 'own' any memory
-struct BacktrackingMatcher(String)
-if(isForwardRange!String && !is(String.init[0] : dchar))
+/*
+    BacktrackingMatcher implements backtracking scheme of matching
+    regular expressions. 
+    low level construct, doesn't 'own' any memory
+*/
+struct BacktrackingMatcher(Char)
+if( is(Char : dchar) )
 {
+    alias immutable(Char)[] String;
     Program re;           //regex program
     enum initialStack = 2048;
     String origin, s;
@@ -763,7 +721,7 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
         for(;;)
         {
             size_t start = origin.length - s.length;
-            if(matchImpl(0, matches[1..$], mainStack))
+            if(matchImpl(matches[1..$], mainStack))
             {//s updated
                 matches[0].begin = start;
                 matches[0].end = origin.length - s.length;
@@ -796,19 +754,19 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
         uint[] stack = mem[0..initialStack];
         //stack can be reallocated in matchImpl
         scope(exit) if(stackOnHeap) free(stack.ptr);
-        return matchImpl(level, matches, mem[0..initialStack]);
+        return matchImpl(matches, mem[0..initialStack]);
     }
     /*
         match subexpression against input, being on lookaround level 'level'
         storing results in matches
     */
-    bool matchImpl(uint level, Group[] matches, ref uint[] stack)
+    bool matchImpl(Group[] matches, ref uint[] stack)
     {  
         enum headWords = size_t.sizeof/uint.sizeof + 3;//size of a thread state head
         enum groupSize = Group.sizeof/uint.sizeof;
         uint pc, counter;
         uint last;          //top of stack
-        Bytecode[] prog = re.ir[level];
+        Bytecode[] prog = re.ir;
         //TODO: it's smaller, make parser count nested infinite loops
         size_t[] trackers = new uint[matches.length+1];
         uint infiniteNesting = -1;// intentional
@@ -863,7 +821,7 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
             return true;
         }   
         auto start = origin.length - s.length;
-        writeln("Try match starting at ",origin[inputIndex..$]);
+        debug writeln("Try match starting at ",origin[inputIndex..$]);
         while(pc<prog.length)
         {
             debug writefln("%d\t%s", pc, disassemble(prog, pc, re.index, re.dict));
@@ -1100,8 +1058,19 @@ if(isForwardRange!String && !is(String.init[0] : dchar))
         return true;
     }   
 }
+/*
+    
+*/
+struct ThompsonMatcher(R)
+if(isForwardRange!R && !is(ElementType!R : dchar))
+{
+    Program re;           //regex program
+    
+}
 
-struct RegexMatch(R, Engine = BacktrackingMatcher!R)
+/**
+*/
+struct RegexMatch(R, alias Engine = BacktrackingMatcher)
 {
 private: 
     R input;
@@ -1110,7 +1079,8 @@ private:
     uint[] index;
     uint flags;
     NamedGroup[] named;
-    Engine engine;
+    alias Engine!(typeof(R.init[0])) EngineType;
+    EngineType engine;
     struct Captures
     {
         RegexMatch m;
@@ -1155,7 +1125,7 @@ public:
         input = _input;
         index = prog.index;
         matches = new Group[prog.ngroup];
-        engine = BacktrackingMatcher!(R)(prog, input);
+        engine = EngineType(prog, input);
         popFront();
     }
     @property R pre()
@@ -1174,7 +1144,7 @@ public:
         return input[matches[0].begin .. matches[0].end]; 
     }
     void popFront()
-    { //previous one can have escaped references from Capture
+    { //previous one can have escaped references from Capture object
         matches = new Group[matches.length];
         _empty = !engine.match(matches);
     }
@@ -1316,8 +1286,8 @@ unittest
         {  "(a+|b)+",   "ab",   "y",    "&-\\1",        "ab-b" },
         {  "(a+|b)?",   "ab",   "y",    "&-\\1",        "a-a" },
    //     {  "[^ab]*",    "cde",  "y",    "&",    "cde" },
-   //     {  "(^)*",      "-",    "y",    "-",    "-" },
-   //     {  "(ab|)*",    "-",    "y",    "-",    "-" },
+        {  "(^)*",      "-",    "y",    "-",    "-" },
+        {  "(ab|)*",    "-",    "y",    "-",    "-" },
         {  ")(",        "-",    "c",    "-",    "-" },
         {  "",  "abc",  "y",    "&",    "" },
         {  "abc",       "",     "n",    "-",    "-" },
@@ -1405,6 +1375,7 @@ unittest
         {  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " },
         {"(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" },
         {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
+        //no lookahead yet
       /*  {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
         {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },*/
 
@@ -1472,20 +1443,17 @@ unittest
                 i = 1;
                 r = regex(to!(String)(tvd.pattern));
             }
-            catch (Exception e)
+            catch (RegexException e)
             {
                 i = 0;
             }
 
-            //writefln("\tcompile() = %d", i);
             assert((c == 'c') ? !i : i);
 
             if (c != 'c')
             {
                 auto m = match(to!(String)(tvd.input), r);
                 i = !m.empty;
-                //writefln("\ttest() = %d", i);
-                //fflush(stdout);
                 assert((c == 'y') ? i : !i, text("Match failed pattern: ", tvd.pattern));
                 if (c == 'y')
                 {
