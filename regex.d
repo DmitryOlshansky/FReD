@@ -172,7 +172,7 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     default://all data-free instructions
     }
     if(irb[pc].hotspot)
-        formattedWrite(output," HOTSPOT %u", irb[pc+irb[pc].length-1]);
+        formattedWrite(output," HOTSPOT %u", irb[pc+irb[pc].length-1].raw);
     return output.data;
 }
 
@@ -198,7 +198,7 @@ struct Group
     size_t begin, end;
 }
 
-struct RecursiveParser(R)
+struct RecursiveParser(R,bool markHotspots)
 if (isForwardRange!R && is(ElementType!R : dchar))
 {
     enum infinite = ~0u;
@@ -211,8 +211,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
-    uint ngroup = 1, nesting = 0, counterStep = 1; 
-    
+    uint ngroup = 1, nesting = 0;
+    uint counterStep = 1, counterDepth = 0; 
+    static if (markHotspots)
+    {
+        bool nextHotspot;
+        uint hotspotIndex;
+    }
     this(R pattern)
     {
         pat = origin = pattern;    
@@ -264,18 +269,38 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     {
         uint start = cast(uint)ir.length;
         auto subSave = ngroup;
+        auto maxStep = counterStep;
+        auto maxCounterDepth = counterDepth;
         while(!empty && current != '|' && current != ')')
+        {
+            auto saveStep = counterStep;
+            auto saveCounterDepth = counterDepth;
             parseRepetition();
+            maxStep = max(counterStep, maxStep);
+            maxCounterDepth = max(counterDepth, maxCounterDepth);
+            counterStep = saveStep;
+            counterDepth = saveCounterDepth;
+        } 
         if(!empty)
             switch(current)
             {
             case ')':
                 nesting || error("Unmatched ')'");
                 nesting--;
-                return;
+                break;
             case '|':
-                Bytecode[2] piece = [Bytecode.init, Bytecode(IRoption, ir.length - start + 1)];
-                insertInPlace(ir, start, piece[]); 
+                static if(markHotspots)
+                {
+                    Bytecode[3] piece = nextHotspot ? 
+                    [Bytecode.init, Bytecode.init, Bytecode(IRoption, ir.length - start + 1)] 
+                    : [Bytecode.init, Bytecode(IRoption, ir.length - start + 1), Bytecode.init];
+                    insertInPlace(ir, start, piece[0..$-nextHotspot]); 
+                }
+                else
+                {
+                    Bytecode[2] piece = [Bytecode.init, Bytecode(IRoption, ir.length - start + 1)];
+                    insertInPlace(ir, start, piece[]);
+                }
                 put(Bytecode(IRendoption, 0)); 
                 uint anchor = cast(uint)(ir.length); //points to first option
                 uint maxSub = 0; //maximum number of captures out of each code path
@@ -284,8 +309,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     next();
                     uint offset = cast(uint)(ir.length);
                     put(Bytecode.init); //reserve space
+                    
                     while(!empty && current != '|' && current != ')')
+                    {
+                        auto saveStep = counterStep;
+                        auto saveCounterDepth = counterDepth;
                         parseRepetition();
+                        maxStep = max(counterStep,maxStep);
+                        maxCounterDepth = max(counterDepth, maxCounterDepth);
+                        counterStep = saveStep;
+                        counterDepth = saveCounterDepth;
+                    }
                     if(current == '|')      //another option?
                     {
                         put(Bytecode(IRendoption, 0));//mark now, fixup later   
@@ -296,9 +330,25 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     maxSub = max(ngroup,maxSub);
                     ngroup = subSave; //reuse groups across alternations
                 }while(current == '|');
+                static if(markHotspots)
+                {
+                    ir[start] = Bytecode(
+                        IRstartoption, 
+                        ir.length - start - 1 + (nextHotspot ? 1 : 0),nextHotspot);   
+                    uint pc = start + 1 + nextHotspot;
+                    if(nextHotspot)
+                    {
+                        ir[start+1] = Bytecode.fromRaw(hotspotIndex);
+                        hotspotIndex += counterStep;
+                    }
+                    nextHotspot = true; //hotspot comes after option
+                }
+                else
+                {
+                    ir[start] = Bytecode(IRstartoption, ir.length - start - 1);                
+                    uint pc = start + 1;
+                }
                 //fixup
-                ir[start] = Bytecode(IRstartoption, ir.length - start - 1);
-                uint pc = start + 1;
                 while(pc < ir.length)
                 {
                     pc = pc + ir[pc].data;
@@ -313,6 +363,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 break;
             default:
             }
+        counterStep = maxStep;
+        counterDepth = maxCounterDepth;
     }
     /*
         Parse and store IR for atom-quantifier pair
@@ -343,7 +395,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next() || error("Unexpected end of regex pattern");
             isdigit(current) || error("First number required in repetition"); 
             min = parseDecimal();    
-            skipSpace();
+            //skipSpace();
             if(current == '}')
                 max = min;
             else if(current == ',')
@@ -383,6 +435,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 putRaw(min*counterStep);
                 putRaw(max*counterStep);
                 counterStep = (max+1)*counterStep;
+                counterDepth++;
             }
         }
         else if(min) // && max is infinite
@@ -395,16 +448,33 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 putRaw(counterStep);
                 putRaw(min*counterStep);
                 putRaw(min*counterStep);
-                counterStep = (min+1)*counterStep;
+                counterDepth++;
             }
             put(Bytecode(IRstartinfinite, len));
             ir ~= ir[offset .. offset+len];
-            put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
+            //IRinfinteX is always a hotspot
+            static if(markHotspots)
+            {
+                put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len, true));
+                putRaw(0);
+            }
+            else
+                put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
+            if(min != 1) 
+                counterStep = (min+1)*counterStep;
         }
         else//vanila {0,inf}
         {
             insertInPlace(ir, offset, Bytecode(IRstartinfinite, len));
-            put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
+            //IRinfinteX is always a hotspot
+            static if(markHotspots)
+            {
+                put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len, true));
+                putRaw(0);
+            }
+            else
+                put(Bytecode(greedy ? IRinfinite : IRinfiniteq, len));
+            
         }
     }
     /*
@@ -502,7 +572,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 {
                     put(op);
                 }
+                //auto saveStep = counterStep;
                 parseRegex();
+                //counterStep = saveStep;
             }
             if(op.code == IRstartgroup)
             {
@@ -646,7 +718,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     */
     @property Program program()
     { 
-        return Program(ir, index, dict, ngroup, re_flags); 
+        return Program(this); 
     }
 }
 //for backwards comaptibility
@@ -665,7 +737,46 @@ struct Program
     uint[] index;       //user group number -> internal number
     NamedGroup[] dict;  //maps name -> user group number
     uint ngroup;        //number of internal groups
+    uint maxCounterDepth; //max depth of nested {n,m} repetitions
     uint flags;         //global regex flags   
+    //
+    this(Parser)(Parser p)
+    {
+        ir = p.ir;
+        index = p.index;
+        dict = p.dict;
+        ngroup = p.ngroup;
+        maxCounterDepth = p.counterDepth;
+        flags = p.re_flags;
+    }
+    //
+    void processHotspots()
+    {
+        uint[] counterRange = new uint[maxCounterDepth+1];
+        uint hotspotIndex = 0;
+        uint top = 0;
+        counterRange[0] = 1;
+        
+        for(size_t i=0; i<ir.length; i+=ir[i].length)
+        {
+            
+            if(ir[i].code == IRstartrepeat)
+            {
+                uint len = ir[i].data;
+                assert(ir[i+len+1].code == IRrepeat);
+                counterRange[++top] = ir[i+len+4].raw;
+            }
+            else if(ir[i].code == IRrepeat)
+            {
+                top--;
+            }
+            if(ir[i].hotspot)
+            {
+                ir[i+1].raw = hotspotIndex;
+                hotspotIndex += counterRange[top];
+            }
+        }
+    }
     //
     void print()
     {
@@ -674,6 +785,7 @@ struct Program
         {
             writefln("%d\t%s", i, disassemble(ir, i, index, dict));
         }
+        writefln("Max counter nesting depth %u ",maxCounterDepth);
     }
 }
 
@@ -1154,7 +1266,7 @@ public:
 
 auto regex(S)(S pattern, S flags=[])
 {
-    auto parser = RecursiveParser!(typeof(pattern))(pattern);
+    auto parser = RecursiveParser!(typeof(pattern),false)(pattern);
     Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
     return r;
 }
