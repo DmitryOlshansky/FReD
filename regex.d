@@ -429,7 +429,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1 || max != 1)
             {
-                insertInPlace(ir, offset, Bytecode(IRstartrepeat, len));
+                static if(markHotspots)
+                {
+                    insertInPlace(ir, offset, Bytecode(IRstartrepeat, len, true), Bytecode.init);
+                }
+                else
+                    insertInPlace(ir, offset, Bytecode(IRstartrepeat, len));
                 put(Bytecode(greedy ? IRrepeat : IRrepeatq, len));
                 putRaw(counterStep); 
                 putRaw(min*counterStep);
@@ -562,9 +567,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             if(lookaround)
             {
                 uint offset = cast(uint)ir.length;
+                put(Bytecode.init);
                 parseRegex();
                 put(Bytecode(IRret, 0));
-                put(Bytecode(op.code, cast(uint)(ir.length - offset)));
+                ir[offset] = Bytecode(op.code, cast(uint)(ir.length - offset - 1));
             }
             else
             {
@@ -833,7 +839,7 @@ if( is(Char : dchar) )
         for(;;)
         {
             size_t start = origin.length - s.length;
-            if(matchImpl(matches[1..$], mainStack))
+            if(matchImpl(re.ir, matches[1..$], mainStack))
             {//s updated
                 matches[0].begin = start;
                 matches[0].end = origin.length - s.length;
@@ -854,7 +860,7 @@ if( is(Char : dchar) )
     /*
         same as three argument version, but creates temporary buffer
     */
-    bool matchImpl(uint level, Group[] matches)
+    bool matchImpl(Bytecode[] prog, Group[] matches)
     {
         bool stackOnHeap;
         uint* mem = cast(uint*)alloca(initialStack*uint.sizeof);
@@ -866,19 +872,18 @@ if( is(Char : dchar) )
         uint[] stack = mem[0..initialStack];
         //stack can be reallocated in matchImpl
         scope(exit) if(stackOnHeap) free(stack.ptr);
-        return matchImpl(matches, mem[0..initialStack]);
+        return matchImpl(prog, matches, mem[0..initialStack]);
     }
     /*
         match subexpression against input, being on lookaround level 'level'
         storing results in matches
     */
-    bool matchImpl(Group[] matches, ref uint[] stack)
+    bool matchImpl(Bytecode[] prog, Group[] matches, ref uint[] stack)
     {  
         enum headWords = size_t.sizeof/uint.sizeof + 3;//size of a thread state head
         enum groupSize = Group.sizeof/uint.sizeof;
         uint pc, counter;
         uint last;          //top of stack
-        Bytecode[] prog = re.ir;
         //TODO: it's smaller, make parser count nested infinite loops
         size_t[] trackers = new uint[matches.length+1];
         uint infiniteNesting = -1;// intentional
@@ -1058,7 +1063,7 @@ if( is(Char : dchar) )
                 else if(cnt < max)
                 {
                     if(prog[pc].code == IRrepeat)
-                    {    
+                    {
                         pushState(pc + 4, counter - counter%(max+1));
                         counter += step;
                         pc -= len;
@@ -1095,11 +1100,11 @@ if( is(Char : dchar) )
                     pushState(pc+1, counter);
                     infiniteNesting++;
                     pc -= len;
-                    writeln("CHECK ",disassemble(prog, pc, re.index, re.dict));
+                    //writeln("CHECK ",disassemble(prog, pc, re.index, re.dict));
                 }
                 else
                 {
-                    writeln("CHECK2 ",disassemble(prog, pc - len, re.index, re.dict));
+                    //writeln("CHECK2 ",disassemble(prog, pc - len, re.index, re.dict));
                     pushState(pc-len, counter);
                     pc++;    
                     infiniteNesting--;
@@ -1132,17 +1137,21 @@ if( is(Char : dchar) )
                 pc++;
                 break;
             case IRlookahead:
-                assert(0, "No impl!");
-                break;
             case IRneglookahead: 
-                assert(0, "No impl!");
+                static assert(IRneglookahead - IRlookahead == 1);
+                uint len = prog[pc].data;
+                auto save = inputIndex;
+                uint failed = matchImpl(prog[pc+1 .. pc+1+len], matches);
+                s = origin[save .. $];
+                failed = failed ^ (IRneglookahead - prog[pc].code);
+                if(failed)
+                    goto L_backtrack;
+                pc += 1 + len;
                 break;
             case IRlookbehind:
                 assert(0, "No impl!");
-                break;
             case IRneglookbehind:
                 assert(0, "No impl!");
-                break;
             case IRbackref:
                 uint n = re.index[prog[pc].data];
                 auto referenced = origin[matches[n].begin .. matches[n].end];
@@ -1155,8 +1164,7 @@ if( is(Char : dchar) )
                     goto L_backtrack;
                 break;
             case IRret:
-                assert(0, "No impl!");
-                break;
+                return true;
             default:
                 assert(0);
             L_backtrack:
@@ -1175,7 +1183,14 @@ if( is(Char : dchar) )
 */
 struct ThompsonMatcher(R)
 if(isForwardRange!R && !is(ElementType!R : dchar))
-{
+{    
+    struct Thread
+    {
+        Group[] subs;
+        Thread* next;
+        uint pc;
+    }
+    Thread* freelist, clist, nlist;
     Program re;           //regex program
     
 }
@@ -1487,9 +1502,8 @@ unittest
         {  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " },
         {"(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" },
         {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
-        //no lookahead yet
-      /*  {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
-        {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },*/
+        {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
+        {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },
 
         ];
 
