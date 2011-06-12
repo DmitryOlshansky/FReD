@@ -7,7 +7,7 @@
  * Authors: Dmitry Olshansky
  *
  */
-module regex;
+module fred;
 
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
@@ -20,6 +20,7 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
 ///      10: close, closing of a group, has length of contained IR in the low bits 
 ///      11 unused
 ///
+//  Loops with Q (non-greedy, with ? mark) must have the same size / other properties as non Q version
 /// open questions:
 /// * encode non eagerness (*q) and groups with content (B) differently?
 /// * merge equivalent ends?
@@ -69,7 +70,11 @@ enum IR:uint {
     NeglookbehindEnd  = 0b1_01001_10, /// end of negative lookbehind (length)
     //TODO: ...
 }
-
+///a shorthand for IR length - full length of specific opcode evaluated at compile time
+template IRL(IR code)
+{
+    enum IRL =  lengthOfIR(code);
+}
 /// how many paramenters follow the IR, should be optimized fixing some IR bits
 int immediateParamsIR(IR i){
     switch (i){
@@ -86,21 +91,35 @@ int lengthOfIR(IR i)
 {
     return 1 + immediateParamsIR(i);
 }
+int lengthOfPairedIR(IR i)
+{
+    return 1 + immediateParamsIR(cast(IR)(i ^ 0b11));
+}
 /// if the operation has a merge point (this relies on the order of the ops)
-bool hasMerge(IR i){
+bool hasMerge(IR i)
+{
     return (i&0b11)==0b10 && i<=IR.RepeatQEnd;
 }
 /// is an IR that opens a "group"
-bool isStartIR(IR i){
+bool isStartIR(IR i)
+{
     return (i&0b11)==0b01;
 }
 /// is an IR that ends a "group"
-bool isEndIR(IR i){
+bool isEndIR(IR i)
+{
     return (i&0b11)==0b10;
 }
 /// is a standalone IR
-bool isAtomIR(IR i){
+bool isAtomIR(IR i)
+{
     return (i&0b11)==0b00;
+}
+/// makes respective pair out of IR i, swapping start/end bits of instruction
+IR pairedIR(IR i)
+{
+    assert(isStartIR(i) || isEndIR(i));
+    return cast(IR)(i ^ 0b11);
 }
 
 /// encoded IR instruction
@@ -118,11 +137,16 @@ struct Bytecode
         t.raw = data;
         return t;
     }
-    //bit twiddling helpers
+    ///bit twiddling helpers
     @property uint data(){ return raw & 0x00ff_ffff; }
+    ///ditto
     @property IR code(){ return cast(IR)(raw>>24); }
+    ///ditto
     @property bool hotspot(){ return hasMerge(code); }
-    //
+    ///ditto
+    @property bool isStart(){ return isStartIR(code); }
+    ///ditto
+    @property bool isEnd(){ return isStartIR(code); }    
     @property string mnemonic()
     {
         return to!string(code);
@@ -131,10 +155,13 @@ struct Bytecode
     {
         return lengthOfIR(code);
     }
+    @property uint pairedLength()
+    {
+        return lengthOfPairedIR(code);
+    }
 }
 
 static assert(Bytecode.sizeof == 4);
-
 
 /// debuging tool, prints out instruction along with opcodes
 string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
@@ -156,10 +183,13 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         formattedWrite(output, " pc=>%u min=%u max=%u step=%u", 
                 pc-len, irb[pc+2].raw, irb[pc+3].raw, irb[pc+1].raw);
         break;
-    case IR.InfiniteEnd, IR.InfiniteQEnd, //ditto
-        IR.LookaheadEnd, IR.NeglookaheadEnd:
+    case IR.InfiniteEnd, IR.InfiniteQEnd: //ditto
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u %u", pc-len, irb[pc+1].raw);
+        break;
+    case  IR.LookaheadEnd, IR.NeglookaheadEnd: //ditto
+        uint len = irb[pc].data;
+        formattedWrite(output, " pc=>%u", pc-len);
         break;
     case IR.GroupStart, IR.GroupEnd:
         uint n = irb[pc].data;
@@ -282,7 +312,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
-    uint counterStep = 1, counterDepth = 0; 
+    uint counterDepth = 0; 
     this(R pattern)
     {
         pat = origin = pattern;    
@@ -334,16 +364,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     {
         uint start = cast(uint)ir.length;
         auto subSave = ngroup;
-        auto maxStep = counterStep;
         auto maxCounterDepth = counterDepth;
         while(!empty && current != '|' && current != ')')
         {
-            auto saveStep = counterStep;
             auto saveCounterDepth = counterDepth;
             parseRepetition();
-            maxStep = max(counterStep, maxStep);
             maxCounterDepth = max(counterDepth, maxCounterDepth);
-            counterStep = saveStep;
             counterDepth = saveCounterDepth;
         } 
         if(!empty)
@@ -367,12 +393,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     
                     while(!empty && current != '|' && current != ')')
                     {
-                        auto saveStep = counterStep;
                         auto saveCounterDepth = counterDepth;
                         parseRepetition();
-                        maxStep = max(counterStep,maxStep);
                         maxCounterDepth = max(counterDepth, maxCounterDepth);
-                        counterStep = saveStep;
                         counterDepth = saveCounterDepth;
                     }
                     if(current == '|')      //another option?
@@ -398,14 +421,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 }
                 //end and start use the same length
                 put(Bytecode(IR.OrEnd, ir[start].data));
-                
+                put(Bytecode.init); //merge point
                 ngroup = maxSub;
                 if(current == ')') 
                     goto case ')';
                 break;
             default:
             }
-        counterStep = maxStep;
         counterDepth = maxCounterDepth;
     }
     /*
@@ -473,10 +495,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
-                putRaw(counterStep); 
-                putRaw(min*counterStep);
-                putRaw(max*counterStep);
-                counterStep = (max+1)*counterStep;
+                putRaw(1); 
+                putRaw(min);
+                putRaw(max);
                 counterDepth++;
             }
         }
@@ -487,9 +508,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
-                putRaw(counterStep);
-                putRaw(min*counterStep);
-                putRaw(min*counterStep);
+                putRaw(1);
+                putRaw(min);
+                putRaw(min);
                 counterDepth++;
             }
             put(Bytecode(IR.InfiniteStart, len));
@@ -497,8 +518,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
             put(Bytecode.init); //merge index
-            if(min != 1) 
-                counterStep = (min+1)*counterStep;
         }
         else//vanila {0,inf}
         {
@@ -596,9 +615,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 uint offset = cast(uint)ir.length;
                 put(Bytecode.init);
                 parseRegex();
-                put(Bytecode(IR.LookaheadEnd, cast(uint)(ir.length - offset - 1)));
-                ir[offset] = Bytecode(op.code, cast(uint)(ir.length - offset - 1));
-                //assert(false,"to fix");
+                uint sz = cast(uint)(ir.length - offset - 1);
+                put(Bytecode(pairedIR(op.code), sz));
+                ir[offset] = Bytecode(op.code, sz);
             }
             else
             {
@@ -606,10 +625,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 {
                     put(op);
                 }
-                //auto saveStep = counterStep;
                 parseRegex();
-                //counterStep = saveStep;
             }
+            
             if(op.code == IR.GroupStart)
             {
                 put(Bytecode(IR.GroupEnd, nglob));
@@ -642,7 +660,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
         }
     }
-    
+
     Bytecode escape()
     {
         switch(current)
@@ -754,7 +772,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         return Program(this); 
     }
 }
-///std.regex like Regex object wrapper, provided for backwards compatibility
+///std.regex-like Regex object wrapper, provided for backwards compatibility
 struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
@@ -815,7 +833,7 @@ struct Program
         writefln("PC\tINST\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
-            writefln("%d\t%s", i, disassemble(ir, i, index, dict));
+            writefln("%d\t%s   LEN %d", i, disassemble(ir, i, index, dict), ir[i].length);
         }
         writefln("Max counter nesting depth %u ",maxCounterDepth);
     }
@@ -852,7 +870,7 @@ if( is(Char : dchar) )
         return origin[0..$-s.length].back;
     }
     @property size_t inputIndex(){ return origin.length - s.length; }
-    //lookup next match fill matches with indices into input
+    ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
     {
         debug
@@ -883,9 +901,9 @@ if( is(Char : dchar) )
         exhausted = true;
         return false;
     }
-    /*
+    /++
         same as three argument version, but creates temporary buffer
-    */
+    ++/
     bool matchImpl(Bytecode[] prog, Group[] matches)
     {
         bool stackOnHeap;
@@ -900,10 +918,10 @@ if( is(Char : dchar) )
         scope(exit) if(stackOnHeap) free(stack.ptr);
         return matchImpl(prog, matches, mem[0..initialStack]);
     }
-    /*
+    /++
         match subexpression against input, being on lookaround level 'level'
         storing results in matches
-    */
+    ++/
     bool matchImpl(Bytecode[] prog, Group[] matches, ref uint[] stack)
     {  
         enum headWords = size_t.sizeof/uint.sizeof + 3;//size of a thread state head
@@ -973,59 +991,59 @@ if( is(Char : dchar) )
             case IR.Char:
                 if(s.empty || s.front != prog[pc].data)
                    goto L_backtrack;
-                pc++;
+                pc += IRL!(IR.Char);
                 s.popFront();
             break;
             case IR.Any:
                 if(s.empty)
                     goto L_backtrack;
-                pc++;
+                pc += IRL!(IR.Any);
                 s.popFront();
                 break;
             case IR.Word:
                 if(s.empty || !isUniAlpha(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Word);
                 break;
             case IR.Notword:
                 if(s.empty || isUniAlpha(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Word);
                 break;
             case IR.Digit:
                 if(s.empty || !isdigit(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Word);
                 break;
             case IR.Notdigit:
                 if(s.empty || isdigit(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Notdigit);
                 break;
             case IR.Space:
                 if(s.empty || !isspace(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Space);
                 break;
             case IR.Notspace:
                 if(s.empty || isspace(s.front))
                     goto L_backtrack;
                 s.popFront();
-                pc++;
+                pc += IRL!(IR.Notspace);
                 break;
             case IR.Wordboundary:
                 //at start & end of input
                 if((s.empty && isUniAlpha(s.front))
                    || (s.length == origin.length && isUniAlpha(s.front)) )
-                    pc++;
+                    pc += IRL!(IR.Wordboundary);
                 else if( (isUniAlpha(s.front) && !isUniAlpha(previous))
                       || (!isUniAlpha(s.front) && isUniAlpha(previous)) )
-                    pc++;
+                    pc += IRL!(IR.Wordboundary);
                 else
                     goto L_backtrack;
                 break;
@@ -1037,40 +1055,41 @@ if( is(Char : dchar) )
                       || (!isUniAlpha(s.front) && isUniAlpha(previous)) )
                     goto L_backtrack;
                 else
-                    pc++;
+                    pc += IRL!(IR.Notwordboundary);
                 break;
             case IR.Bol:
                 //TODO: multiline & attributes, unicode line terminators
                 if(s.length == origin.length || previous == '\n')
-                    pc++;
+                    pc += IRL!(IR.Bol);
                 else
                     goto L_backtrack;
                 break;
             case IR.Eol:
                 //TODO: ditto for the begining of line
                 if(s.empty || s.front == '\n')
-                    pc++;
+                    pc += IRL!(IR.Eol);
                 else
                     goto L_backtrack;
                 break;
             case IR.InfiniteStart: 
                 trackers[infiniteNesting+1] = inputIndex;
-                pc += prog[pc].data + 1;
+                pc += prog[pc].data + IRL!(IR.InfiniteStart);
+                //now pc is at end IR.Infininite(Q)End
                 uint len = prog[pc].data;
                 if(prog[pc].code == IR.InfiniteEnd)
                 {
-                    pushState(pc+1, counter);
+                    pushState(pc + IRL!(IR.InfiniteEnd), counter);
                     infiniteNesting++;
                     pc -= len;
                 }
                 else
                 {
-                    pushState(pc-len, counter);
-                    pc++;
+                    pushState(pc - len, counter);
+                    pc += IRL!(IR.InfiniteEnd);
                 }
                 break;
             case IR.RepeatStart:
-                pc += prog[pc].data + 1;
+                pc += prog[pc].data + IRL!(IR.RepeatStart);
                 break;
             case IR.RepeatEnd:
             case IR.RepeatQEnd:
@@ -1090,7 +1109,7 @@ if( is(Char : dchar) )
                 {
                     if(prog[pc].code == IR.RepeatEnd)
                     {
-                        pushState(pc + 4, counter - counter%(max+1));
+                        pushState(pc + IRL!(IR.RepeatEnd), counter - counter%(max+1));
                         counter += step;
                         pc -= len;
                     }
@@ -1098,13 +1117,13 @@ if( is(Char : dchar) )
                     {
                         pushState(pc - len, counter + step);   
                         counter -= counter%(max+1);
-                        pc += 4; 
+                        pc += IRL!(IR.RepeatEnd);
                     }
                 }
                 else
                 {
                     counter -= counter%(max+1);
-                    pc += 4;
+                    pc += IRL!(IR.RepeatEnd);
                 }                       
                 break;
             case IR.InfiniteEnd:
@@ -1113,7 +1132,7 @@ if( is(Char : dchar) )
                 assert(infiniteNesting < trackers.length);
                 if(trackers[infiniteNesting] == inputIndex)
                 {//source not consumed
-                    pc += lengthOfIR(IR.InfiniteEnd);
+                    pc += IRL!(IR.InfiniteEnd);
                     infiniteNesting--;
                     break;
                 }
@@ -1123,22 +1142,22 @@ if( is(Char : dchar) )
                 if(prog[pc].code == IR.InfiniteEnd)
                 {
                     infiniteNesting--;
-                    pushState(pc + lengthOfIR(IR.InfiniteEnd), counter);
+                    pushState(pc + IRL!(IR.InfiniteEnd), counter);
                     infiniteNesting++;
                     pc -= len;
                 }
                 else
                 {
                     pushState(pc-len, counter);
-                    pc += lengthOfIR(IR.InfiniteEnd);    
+                    pc += IRL!(IR.InfiniteEnd);    
                     infiniteNesting--;
                 }
                 break;
             case IR.OrEnd:
-                pc += lengthOfIR(IR.OrEnd);
+                pc += IRL!(IR.OrEnd);
                 break;
             case IR.OrStart:
-                pc += lengthOfIR(IR.OrStart);
+                pc += IRL!(IR.OrStart);
                 goto case;
             case IR.OptionStart:
                 uint len = prog[pc].data;
@@ -1146,7 +1165,7 @@ if( is(Char : dchar) )
                 {
                    pushState(pc + len + 1, counter); //remember 2nd branch
                 }
-                pc++;
+                pc += IRL!(IR.OptionStart);
                 break;
             case IR.OptionEnd:
                 pc = pc + prog[pc].data + 1;
@@ -1155,13 +1174,13 @@ if( is(Char : dchar) )
                 uint n = prog[pc].data;
                 matches[re.index[n]].begin = inputIndex;
                 debug  writefln("IR group #%u starts at %u", n, inputIndex);
-                pc++;
+                pc += IRL!(IR.GroupStart);
                 break;
             case IR.GroupEnd:   //TODO: ditto
                 uint n = prog[pc].data;
                 matches[re.index[n]].end = inputIndex;
                 debug writefln("IR group #%u ends at %u", n, inputIndex);
-                pc++;
+                pc += IRL!(IR.GroupEnd);
                 break;
             case IR.LookaheadStart:
             case IR.NeglookaheadStart: 
@@ -1169,9 +1188,9 @@ if( is(Char : dchar) )
                 auto save = inputIndex;
                 uint matched = matchImpl(prog[pc+1 .. pc+1+len], matches);
                 s = origin[save .. $];
-                if(matched ^ (prog[pc].code == IR.NeglookaheadStart))
+                if(matched ^ (prog[pc].code == IR.LookaheadStart))
                     goto L_backtrack;
-                pc += 1 + len;
+                pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + len;
                 break;
             case IR.LookbehindStart:
                 assert(0, "No impl!");
@@ -1317,308 +1336,6 @@ auto match(R,C)(R input, Regex!C re)
     return RegexMatch!(Unqual!(typeof(input)))(re, input);
 }
 
-unittest
-{//sanity checks
-    regex("abc|edf|ighrg");
-    auto r = regex("abc");
-    assert(match("abcdef",r).hit == "abc");
-    assert(match("wida",regex("(gylba)")).empty);
-}
-
-/* The test vectors in this file are altered from Henry Spencer's regexp
-   test code. His copyright notice is:
-
-        Copyright (c) 1986 by University of Toronto.
-        Written by Henry Spencer.  Not derived from licensed software.
-
-        Permission is granted to anyone to use this software for any
-        purpose on any computer system, and to redistribute it freely,
-        subject to the following restrictions:
-
-        1. The author is not responsible for the consequences of use of
-                this software, no matter how awful, even if they arise
-                from defects in it.
-
-        2. The origin of this software must not be misrepresented, either
-                by explicit claim or by omission.
-
-        3. Altered versions must be plainly marked as such, and must not
-                be misrepresented as being the original software.
-
-
- */
-
-unittest
-{
-    struct TestVectors
-    {
-        string pattern;
-        string input;
-        string result;
-        string format;
-        string replace;
-    };
-
-    static TestVectors tv[] = [
-        {  "(a)\\1",    "abaab","y",    "&",    "aa" },
-        {  "abc",       "abc",  "y",    "&",    "abc" },
-        {  "abc",       "xbc",  "n",    "-",    "-" },
-        {  "abc",       "axc",  "n",    "-",    "-" },
-        {  "abc",       "abx",  "n",    "-",    "-" },
-        {  "abc",       "xabcy","y",    "&",    "abc" },
-        {  "abc",       "ababc","y",    "&",    "abc" },
-        {  "ab*c",      "abc",  "y",    "&",    "abc" },
-        {  "ab*bc",     "abc",  "y",    "&",    "abc" },
-        {  "ab*bc",     "abbc", "y",    "&",    "abbc" },
-        {  "ab*bc",     "abbbbc","y",   "&",    "abbbbc" },
-        {  "ab+bc",     "abbc", "y",    "&",    "abbc" },
-        {  "ab+bc",     "abc",  "n",    "-",    "-" },
-        {  "ab+bc",     "abq",  "n",    "-",    "-" },
-        {  "ab+bc",     "abbbbc","y",   "&",    "abbbbc" },
-        {  "ab?bc",     "abbc", "y",    "&",    "abbc" },
-        {  "ab?bc",     "abc",  "y",    "&",    "abc" },
-        {  "ab?bc",     "abbbbc","n",   "-",    "-" },
-        {  "ab?c",      "abc",  "y",    "&",    "abc" },
-        {  "^abc$",     "abc",  "y",    "&",    "abc" },
-        {  "^abc$",     "abcc", "n",    "-",    "-" },
-        {  "^abc",      "abcc", "y",    "&",    "abc" },
-        {  "^abc$",     "aabc", "n",    "-",    "-" },
-        {  "abc$",      "aabc", "y",    "&",    "abc" },
-        {  "^",         "abc",  "y",    "&",    "" },
-        {  "$",         "abc",  "y",    "&",    "" },
-        {  "a.c",       "abc",  "y",    "&",    "abc" },
-        {  "a.c",       "axc",  "y",    "&",    "axc" },
-        {  "a.*c",      "axyzc","y",    "&",    "axyzc" },
-        {  "a.*c",      "axyzd","n",    "-",    "-" },
-      //no codepoint sets yet
-     /* {  "a[bc]d",    "abc",  "n",    "-",    "-" },
-        {  "a[bc]d",    "abd",  "y",    "&",    "abd" },
-        {  "a[b-d]e",   "abd",  "n",    "-",    "-" },
-        {  "a[b-d]e",   "ace",  "y",    "&",    "ace" },
-        {  "a[b-d]",    "aac",  "y",    "&",    "ac" },
-        {  "a[-b]",     "a-",   "y",    "&",    "a-" },
-        {  "a[b-]",     "a-",   "y",    "&",    "a-" },
-        {  "a[b-a]",    "-",    "c",    "-",    "-" },
-        {  "a[]b",      "-",    "c",    "-",    "-" },
-        {  "a[",        "-",    "c",    "-",    "-" },
-        {  "a]",        "a]",   "y",    "&",    "a]" },
-        {  "a[]]b",     "a]b",  "y",    "&",    "a]b" },
-        {  "a[^bc]d",   "aed",  "y",    "&",    "aed" },
-        {  "a[^bc]d",   "abd",  "n",    "-",    "-" },
-        {  "a[^-b]c",   "adc",  "y",    "&",    "adc" },
-        {  "a[^-b]c",   "a-c",  "n",    "-",    "-" },
-        {  "a[^]b]c",   "a]c",  "n",    "-",    "-" },
-        {  "a[^]b]c",   "adc",  "y",    "&",    "adc" }, */
-        {  "ab|cd",     "abc",  "y",    "&",    "ab" },
-        {  "ab|cd",     "abcd", "y",    "&",    "ab" },
-        {  "()ef",      "def",  "y",    "&-\\1",        "ef-" },
-        {  "()*",       "-",    "y",    "-",    "-" },
-        {  "*a",        "-",    "c",    "-",    "-" },
-        {  "^*",        "-",    "y",    "-",    "-" },
-        {  "$*",        "-",    "y",    "-",    "-" },
-        {  "(*)b",      "-",    "c",    "-",    "-" },
-        {  "$b",        "b",    "n",    "-",    "-" },
-        {  "a\\",       "-",    "c",    "-",    "-" }, 
-        {  "a\\(b",     "a(b",  "y",    "&-\\1",        "a(b-" },
-        {  "a\\(*b",    "ab",   "y",    "&",    "ab" },
-        {  "a\\(*b",    "a((b", "y",    "&",    "a((b" },
-        {  "a\\\\b",    "a\\b", "y",    "&",    "a\\b" },
-        {  "abc)",      "-",    "c",    "-",    "-" },
-        {  "(abc",      "-",    "c",    "-",    "-" },
-        {  "((a))",     "abc",  "y",    "&-\\1-\\2",    "a-a-a" },
-        {  "(a)b(c)",   "abc",  "y",    "&-\\1-\\2",    "abc-a-c" },
-        {  "a+b+c",     "aabbabc","y",  "&",    "abc" },
-        {  "a**",       "-",    "c",    "-",    "-" },
-        {  "a*?a",      "aa",   "y",    "&",    "a" },
-        {  "(a*)*",     "aaa",  "y",    "-",    "-" },
-        {  "(a*)+",     "aaa",  "y",    "-",    "-" },
-        {  "(a|)*",     "-",    "y",    "-",    "-" },
-        {  "(a*|b)*",   "aabb", "y",    "-",    "-" },
-        {  "(a|b)*",    "ab",   "y",    "&-\\1",        "ab-b" },
-        {  "(a+|b)*",   "ab",   "y",    "&-\\1",        "ab-b" },
-        {  "(a+|b)+",   "ab",   "y",    "&-\\1",        "ab-b" },
-        {  "(a+|b)?",   "ab",   "y",    "&-\\1",        "a-a" },
-   //     {  "[^ab]*",    "cde",  "y",    "&",    "cde" },
-        {  "(^)*",      "-",    "y",    "-",    "-" },
-        {  "(ab|)*",    "-",    "y",    "-",    "-" },
-        {  ")(",        "-",    "c",    "-",    "-" },
-        {  "",  "abc",  "y",    "&",    "" },
-        {  "abc",       "",     "n",    "-",    "-" },
-        {  "a*",        "",     "y",    "&",    "" },
-    //    {  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" },
-    //    {  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" },
-        {  "a|b|c|d|e", "e",    "y",    "&",    "e" },
-        {  "(a|b|c|d|e)f", "ef",        "y",    "&-\\1",        "ef-e" },
-        {  "((a*|b))*", "aabb", "y",    "-",    "-" },
-        {  "abcd*efg",  "abcdefg",      "y",    "&",    "abcdefg" },
-        {  "ab*",       "xabyabbbz",    "y",    "&",    "ab" },
-        {  "ab*",       "xayabbbz",     "y",    "&",    "a" },
-        {  "(ab|cd)e",  "abcde",        "y",    "&-\\1",        "cde-cd" },
-      //  {  "[abhgefdc]ij",      "hij",  "y",    "&",    "hij" },
-        {  "^(ab|cd)e", "abcde",        "n",    "x\\1y",        "xy" },
-        {  "(abc|)ef",  "abcdef",       "y",    "&-\\1",        "ef-" },
-        {  "(a|b)c*d",  "abcd", "y",    "&-\\1",        "bcd-b" },
-        {  "(ab|ab*)bc",        "abc",  "y",    "&-\\1",        "abc-a" },
-    /*    {  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" },
-        {  "a([bc]*)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
-        {  "a([bc]+)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
-        {  "a([bc]*)(c+d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-b-cd" },
-        {  "a[bcd]*dcdcde",     "adcdcde",      "y",    "&",    "adcdcde" },
-        {  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" },
-    */    {  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" },
-        {  "((a)(b)c)(d)",      "abcd", "y",    "\\1-\\2-\\3-\\4",      "abc-a-b-d" },
-    //    {  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "&",    "alpha" },
-    //    {  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "&-\\1",        "bh-" },
-        {  "(bc+d$|ef*g.|h?i(j|k))",    "effgz",        "y",    "&-\\1-\\2",    "effgz-effgz-" },
-        {  "(bc+d$|ef*g.|h?i(j|k))",    "ij",   "y",    "&-\\1-\\2",    "ij-ij-j" },
-        {  "(bc+d$|ef*g.|h?i(j|k))",    "effg", "n",    "-",    "-" },
-        {  "(bc+d$|ef*g.|h?i(j|k))",    "bcdd", "n",    "-",    "-" },
-        {  "(bc+d$|ef*g.|h?i(j|k))",    "reffgz",       "y",    "&-\\1-\\2",    "effgz-effgz-" },
-        {  "(((((((((a)))))))))",       "a",    "y",    "&",    "a" },
-        {  "multiple words of text",    "uh-uh",        "n",    "-",    "-" },
-        {  "multiple words",    "multiple words, yeah", "y",    "&",    "multiple words" },
-        {  "(.*)c(.*)", "abcde",        "y",    "&-\\1-\\2",    "abcde-ab-de" },
-        {  "\\((.*), (.*)\\)",  "(a, b)",       "y",    "(\\2, \\1)",   "(b, a)" },
-        {  "abcd",      "abcd", "y",    "&-\\&-\\\\&",  "abcd-&-\\abcd" },
-        {  "a(bc)d",    "abcd", "y",    "\\1-\\\\1-\\\\\\1",    "bc-\\1-\\bc" },
-     /*   {  "[k]",                       "ab",   "n",    "-",    "-" },
-        {  "[ -~]*",                    "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~]*",         "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~]*",              "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~ -~]*",           "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~ -~ -~]*",        "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~ -~ -~ -~]*",     "abc",  "y",    "&",    "abc" },
-        {  "[ -~ -~ -~ -~ -~ -~ -~]*",  "abc",  "y",    "&",    "abc" },
-     */   {  "a{2}",      "candy",                "n",    "",     "" },
-        {  "a{2}",      "caandy",               "y",    "&",    "aa" },
-        {  "a{2}",      "caaandy",              "y",    "&",    "aa" },
-        {  "a{2,}",     "candy",                "n",    "",     "" },
-        {  "a{2,}",     "caandy",               "y",    "&",    "aa" },
-        {  "a{2,}",     "caaaaaandy",           "y",    "&",    "aaaaaa" },
-        {  "a{1,3}",    "cndy",                 "n",    "",     "" },
-        {  "a{1,3}",    "candy",                "y",    "&",    "a" },
-        {  "a{1,3}",    "caandy",               "y",    "&",    "aa" },
-        {  "a{1,3}",    "caaaaaandy",           "y",    "&",    "aaa" },
-        {  "e?le?",     "angel",                "y",    "&",    "el" },
-        {  "e?le?",     "angle",                "y",    "&",    "le" },
-        {  "\\bn\\w",   "noonday",              "y",    "&",    "no" },
-        {  "\\wy\\b",   "possibly yesterday",   "y",    "&",    "ly" },
-        {  "\\w\\Bn",   "noonday",              "y",    "&",    "on" },
-        {  "y\\B\\w",   "possibly yesterday",   "y",    "&",    "ye" },
-        {  "\\cJ",      "abc\ndef",             "y",    "&",    "\n" },
-        {  "\\d",       "B2 is",                "y",    "&",    "2" },
-        {  "\\D",       "B2 is",                "y",    "&",    "B" },
-        {  "\\s\\w*",   "foo bar",              "y",    "&",    " bar" },
-        {  "\\S\\w*",   "foo bar",              "y",    "&",    "foo" },
-        {  "abc",       "ababc",                "y",    "&",    "abc" },
-        {  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "&", "apple, orange," },
-        {  "(\\w+)\\s(\\w+)",           "John Smith", "y", "\\2, \\1", "Smith, John" },
-        {  "\\n\\f\\r\\t\\v",           "abc\n\f\r\t\vdef", "y", "&", "\n\f\r\t\v" },
-        {  ".*c",       "abcde",                "y",    "&",    "abc" },
-        {  "^\\w+((;|=)\\w+)+$", "some=host=tld", "y", "&-\\1-\\2", "some=host=tld-=tld-=" },
-        {  "^\\w+((\\.|-)\\w+)+$", "some.host.tld", "y", "&-\\1-\\2", "some.host.tld-.tld-." },
-        {  "q(a|b)*q",  "xxqababqyy",           "y",    "&-\\1",        "qababq-b" },
-        {  "^(a)(b){0,1}(c*)",   "abcc", "y", "\\1 \\2 \\3", "a b cc" },
-        {  "^(a)((b){0,1})(c*)", "abcc", "y", "\\1 \\2 \\3", "a b b" },
-        {  "^(a)(b)?(c*)",       "abcc", "y", "\\1 \\2 \\3", "a b cc" },
-        {  "^(a)((b)?)(c*)",     "abcc", "y", "\\1 \\2 \\3", "a b b" },
-        {  "^(a)(b){0,1}(c*)",   "acc",  "y", "\\1 \\2 \\3", "a  cc" },
-        {  "^(a)((b){0,1})(c*)", "acc",  "y", "\\1 \\2 \\3", "a  " },
-        {  "^(a)(b)?(c*)",       "acc",  "y", "\\1 \\2 \\3", "a  cc" },
-        {  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " },
-        {"(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" },
-        {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
-        {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
-        {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },
-
-        ];
-
-    int i;
-    sizediff_t a;
-    uint c;
-    sizediff_t start;
-    sizediff_t end;
-    TestVectors tvd;
-
-    foreach (Char; TypeTuple!(char, wchar, dchar))
-    {
-        alias immutable(Char)[] String;
-        String produceExpected(Range)(RegexMatch!(Range) m, String fmt)
-        {
-            String result;
-            while (!fmt.empty)
-                switch (fmt.front)
-                {
-                    case '\\':
-                        fmt.popFront();
-                        if (!isdigit(fmt.front) )
-                        {
-                            result ~= fmt.front;
-                            fmt.popFront();
-                            break;
-                        }
-                        auto nmatch = parse!uint(fmt);
-                        if (nmatch < m.captures.length)
-                            result ~= m.captures[nmatch];
-                    break;
-                    case '&':
-                        result ~= m.hit;
-                        fmt.popFront();
-                    break;
-                    default:
-                        result ~= fmt.front;
-                        fmt.popFront();
-                }
-            return result;
-        }
-        Regex!(Char) r;
-        start = 0;
-        end = tv.length;
-
-        for (a = start; a < end; a++)
-        {
-//             writef("width: %d tv[%d]: pattern='%s' input='%s' result=%s"
-//                     " format='%s' replace='%s'\n",
-//                     Char.sizeof, a,
-//                     tv[a].pattern,
-//                     tv[a].input,
-//                     tv[a].result,
-//                     tv[a].format,
-//                     tv[a].replace);
-
-            tvd = tv[a];
-
-            c = tvd.result[0];
-
-            try
-            {
-                i = 1;
-                r = regex(to!(String)(tvd.pattern));
-            }
-            catch (RegexException e)
-            {
-                i = 0;
-            }
-
-            assert((c == 'c') ? !i : i);
-
-            if (c != 'c')
-            {
-                auto m = match(to!(String)(tvd.input), r);
-                i = !m.empty;
-                assert((c == 'y') ? i : !i, text("Match failed pattern: ", tvd.pattern));
-                if (c == 'y')
-                {
-                    auto result = produceExpected(m, to!(String)(tvd.format));
-                    assert(result == to!String(tvd.replace),
-                           text("Mismatch pattern: ", tvd.pattern," expected:",
-                                tvd.replace, " vs ", result));
-                }
-
-            }
-        }
-    }
-}
 /// Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception
 {
