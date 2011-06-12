@@ -13,61 +13,115 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons;
 
+/// starting from the low bits [to do: format for doc]
+///  bits 0-1
+///      00: atom, a normal instruction
+///      01: open, opening of a group, has length of contained IR in the low bits 
+///      10: close, closing of a group, has length of contained IR in the low bits 
+///      11 unused
+///
+/// open questions:
+/// * encode non eagerness (*q) and groups with content (B) differently?
+/// * merge equivalent ends?
+/// * reorganize groups to make n args easier to find, or simplify the check for groups of similar ops
+///   (like lookaround), or make it easier to identify hotspots.
+/// * there is still an unused bit that might be used for something
 enum IR:uint {
-    Char              =  0, // a
-    Any               =  1, // .
-    Charset           =  2, // [...]
-    Startoption       =  3, // size prefix
-    Option            =  4, // x | y
-    Endoption         =  5, // option separator
-    Startinfinite     =  6, // size prefix
-    Startrepeat       =  7, // ditto
-    Repeat            =  8, // x{n,m}
-    Repeatq           =  9, // x{n,m}?
-    Infinite          = 10, // x*
-    Infiniteq         = 11, // x*?
-    Digit             = 12, 
-    Notdigit          = 13,
-    Space             = 14,
-    Notspace          = 15,
-    Word              = 16,
-    Notword           = 17,    
-    Startgroup        = 18, // (
-    Endgroup          = 19, // )
-    Bol               = 20, // ^
-    Eol               = 21, // $ 
     
-    Backref           = 22,
-    Wordboundary      = 23,
-    Notwordboundary   = 24,
-    Lookahead         = 25,
-    Neglookahead      = 26,
-    Lookbehind        = 27,
-    Neglookbehind     = 28,
-    Ret               = 29, //end of lookaround sub
-    //TODO: ...
-};
+    Char              = 0b1_00000_00, /// a character
+    Any               = 0b1_00001_00, /// any character
+    Digit             = 0b1_00010_00, /// a digit
+    Notdigit          = 0b1_00011_00, /// not a digit
+    Space             = 0b1_00100_00, /// a space
+    Notspace          = 0b1_00101_00, /// not a space
+    Word              = 0b1_00110_00, /// a word
+    Notword           = 0b1_00111_00, /// not a word
+    Bol               = 0b1_01000_00, /// beginning of a string ^
+    Eol               = 0b1_01001_00, /// end of a string $ 
+    Wordboundary      = 0b1_01010_00, /// boundary of a word
+    Notwordboundary   = 0b1_01011_00, /// not a word boundary
+    Backref           = 0b1_01100_00, /// backreference to a group (that has to be pinned, i.e. locally unique) (group index)
+    GroupStart        = 0b1_01101_00, /// start of a group (x) (groupIndex+groupPinning(1bit))
+    GroupEnd          = 0b1_01110_00, /// end of a group (x) (groupIndex+groupPinning(1bit))
+    Charset           = 0b1_01111_00, /// a most generic charset [...]
 
-//single IR instruction
+    OrStart           = 0b1_00000_01, /// start of alternation group  (length)
+    OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
+    InfiniteStart     = 0b1_00001_01, /// start of an infinite repetition x* (length)
+    InfiniteEnd       = 0b1_00001_10, /// end of infinite repetition x* (length,mergeIndex)
+    InfiniteQStart    = 0b1_00010_01, /// start of a non eager infinite repetition x*? (length)
+    InfiniteQEnd      = 0b1_00010_10, /// end of non eager infinite repetition x*? (length,mergeIndex)
+    RepeatStart       = 0b1_00011_01, /// start of a {n,m} repetition (length)
+    RepeatEnd         = 0b1_00011_10, /// end of x{n,m} repetition (length,mergeIndex,step,maxRep)
+    RepeatQStart      = 0b1_00100_01, /// start of a non eager x{n,m}? repetition (length)
+    RepeatQEnd        = 0b1_00100_10, /// end of non eager x{n,m}? repetition (length,mergeIndex,step,maxRep)
+    
+    OptionStart       = 0b1_00101_01, /// start of an option within an alternation x | y (length)
+    OptionEnd         = 0b1_00101_10, /// end of an option (length)
+    
+    LookaheadStart    = 0b1_00110_01, /// begin of the lookahead group (length)
+    LookaheadEnd      = 0b1_00110_10, /// end of a lookahead group (length)
+    NeglookaheadStart = 0b1_00111_01, /// start of a negative lookahead (length)
+    NeglookaheadEnd   = 0b1_00111_10, /// end of a negative lookahead (length)
+    LookbehindStart   = 0b1_01000_01, /// start of a lookbehind (length)
+    LookbehindEnd     = 0b1_01000_10, /// end of a lookbehind (length)
+    NeglookbehindStart= 0b1_01001_01, /// start of a negative lookbehind (length)
+    NeglookbehindEnd  = 0b1_01001_10, /// end of negative lookbehind (length)
+    //TODO: ...
+}
+
+/// how many paramenters follow the IR, should be optimized fixing some IR bits
+int immediateParamsIR(IR i){
+    switch (i){
+    case IR.OrEnd,IR.InfiniteEnd,IR.InfiniteQEnd:
+        return 1;
+    case IR.RepeatEnd,IR.RepeatQEnd:
+        return 3;
+    default:
+        return 0;
+    }
+}
+/// full length of IR instruction inlcuding all parameters that might follow it
+int lengthOfIR(IR i)
+{
+    return 1 + immediateParamsIR(i);
+}
+/// if the operation has a merge point (this relies on the order of the ops)
+bool hasMerge(IR i){
+    return (i&0b11)==0b10 && i<=IR.RepeatQEnd;
+}
+/// is an IR that opens a "group"
+bool isStartIR(IR i){
+    return (i&0b11)==0b01;
+}
+/// is an IR that ends a "group"
+bool isEndIR(IR i){
+    return (i&0b11)==0b10;
+}
+/// is a standalone IR
+bool isAtomIR(IR i){
+    return (i&0b11)==0b00;
+}
+
+/// encoded IR instruction
 struct Bytecode
 {
     uint raw;
-    this(IR code, uint data, bool hotspot=false)
+    this(IR code, uint data)
     { 
-        
-        assert(data < (1<<24) && code < 128);
-        raw = code<<25 | data | (hotspot ? 1<<24  : 0);
+        assert(data < (1<<24) && code < 256);
+        raw = code<<24 | data;
     }    
     static Bytecode fromRaw(uint data)
     { 
         Bytecode t;
         t.raw = data;
         return t;
-    }    
+    }
     //bit twiddling helpers
     @property uint data(){ return raw & 0x00ff_ffff; }
-    @property IR code(){ return cast(IR)(raw>>25); }
-    @property bool hotspot(){ return (raw & (1<<24)) != 0; }
+    @property IR code(){ return cast(IR)(raw>>24); }
+    @property bool hotspot(){ return hasMerge(code); }
     //
     @property string mnemonic()
     {
@@ -75,21 +129,14 @@ struct Bytecode
     }
     @property uint length()
     {
-        switch(code)
-        {
-        case IR.Repeat, IR.Repeatq:
-             //[opcode | len], step, min, max
-            return 4 + (hotspot ? 1 : 0);
-        default:
-            return 1 + (hotspot ? 1 : 0);
-        }
+        return lengthOfIR(code);
     }
 }
 
 static assert(Bytecode.sizeof == 4);
 
 
-//debug tool
+/// debuging tool, prints out instruction along with opcodes
 string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
 {
     auto output = appender!string();
@@ -99,21 +146,22 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     case IR.Char:
         formattedWrite(output, " %s",cast(dchar)irb[pc].data);
         break;
-    case IR.Startrepeat, IR.Startinfinite, IR.Option, IR.Endoption, IR.Startoption:
+    case IR.RepeatStart, IR.InfiniteStart, IR.OptionStart, IR.OptionEnd, IR.OrStart:
         //forward-jump instructions
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u", pc+len+1);
         break;
-    case IR.Repeat, IR.Repeatq: //backward-jump instructions
+    case IR.RepeatEnd, IR.RepeatQEnd: //backward-jump instructions
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u min=%u max=%u step=%u", 
                 pc-len, irb[pc+2].raw, irb[pc+3].raw, irb[pc+1].raw);
         break;
-    case IR.Infinite, IR.Infiniteq: //ditto
+    case IR.InfiniteEnd, IR.InfiniteQEnd, //ditto
+        IR.LookaheadEnd, IR.NeglookaheadEnd:
         uint len = irb[pc].data;
-        formattedWrite(output, " pc=>%u ", pc-len);
+        formattedWrite(output, " pc=>%u %u", pc-len, irb[pc+1].raw);
         break;
-    case IR.Startgroup, IR.Endgroup:
+    case IR.GroupStart, IR.GroupEnd:
         uint n = irb[pc].data;
         // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
         //auto ng = find!((x){ return x.group == n; })(dict); 
@@ -127,9 +175,9 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         formattedWrite(output, " %s #%u (internal %u)",
                 name, n,  index[n]);    
         break;
-    case IR.Lookahead, IR.Neglookahead, IR.Lookbehind, IR.Neglookbehind:    
+    case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:    
         uint len = irb[pc].data;
-        formattedWrite(output, " next=%u", pc + len + 1);
+        formattedWrite(output, " pc=>%u", pc + len + 1);
         break;
     case IR.Backref:
         uint n = irb[pc].data;
@@ -137,9 +185,65 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         break;
     default://all data-free instructions
     }
-    if(irb[pc].hotspot)
-        formattedWrite(output," HOTSPOT %u", irb[pc+irb[pc].length-1].raw);
     return output.data;
+}
+
+/// another pretty printer, writes out the bytecode of a regex and where the pc is
+void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.max,int indent=3,size_t index=0) if (isOutputRange!(Sink,Char))
+{
+    while(irb.length>0){
+        format(sink,"%3d",index);
+        if (pc==0 && irb[0]!=IR.Char){
+            for (int i=0;i<indent-2;++i)
+                put(sink,"=");
+            put(sink,"> ");
+        } else {
+            if (isEndIR(irb.code)){
+                indent-=2;
+            }
+            if (indent>0){
+                string spaces="             ";
+                put(sink,spaces[0..(indent%spaces.length)]);
+                for (size_t i=indent/spaces.length;i>0;--i)
+                    put(sink,spaces);
+            }
+        }
+        if (code==IR.Char)
+        {
+            put(sink,`"`);
+            int i=0;
+            do{
+                put(sink,cast(char[])([cast(dchar)(irb[i]&0x00FF_FFFF)]));
+                ++i;
+            } while(i<irb.length && irb[i].code==IR.Char);
+            put(sink,"\"\n");
+            if (pc<i){
+                for (int i=0;i<indent+pc+1;++i)
+                    put(sink,"=");
+                put(sink,"^\n");
+            }
+            index+=i;
+            irb=irb[i..$];
+        } else {
+            put(sink,codeToString(irb.code));
+            put(sink,"(");
+            sinkHex(irb.data);
+            int nArgs=immediateArgs(irb.code);
+            for (int iarg=nArgs;iarg>0;--iarg){
+                if (iarg+1<irb.length){
+                    format(sink,",%d",irb[iarg+1]);
+                } else {
+                    put(sink,"*error* incomplete irb stream");
+                }
+            }
+            put(sink,")");
+            if (isStartIR(irb.code)){
+                indent+=2;
+            }
+            irb=irb[1+immediateArgs(irb.code)..$];
+        }
+        put(sink,"\n");
+    }
 }
 
 enum RegexOption: uint { global = 0x1, caseinsensitive = 0x2, freeform = 0x4};
@@ -164,7 +268,7 @@ struct Group
     size_t begin, end;
 }
 
-struct RecursiveParser(R,bool markHotspots)
+struct RecursiveParser(R)
 if (isForwardRange!R && is(ElementType!R : dchar))
 {
     enum infinite = ~0u;
@@ -179,11 +283,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
     uint counterStep = 1, counterDepth = 0; 
-    static if (markHotspots)
-    {
-        bool nextHotspot;
-        uint hotspotIndex;
-    }
     this(R pattern)
     {
         pat = origin = pattern;    
@@ -255,19 +354,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 nesting--;
                 break;
             case '|':
-                static if(markHotspots)
-                {
-                    Bytecode[3] piece = nextHotspot ? 
-                    [Bytecode.init, Bytecode.init, Bytecode(IR.Option, ir.length - start + 1)] 
-                    : [Bytecode.init, Bytecode(IR.Option, ir.length - start + 1), Bytecode.init];
-                    insertInPlace(ir, start, piece[0..$-nextHotspot]); 
-                }
-                else
-                {
-                    Bytecode[2] piece = [Bytecode.init, Bytecode(IR.Option, ir.length - start + 1)];
-                    insertInPlace(ir, start, piece[]);
-                }
-                put(Bytecode(IR.Endoption, 0)); 
+                Bytecode[2] piece = [Bytecode.init, Bytecode(IR.OptionStart, ir.length - start + 1)];
+                insertInPlace(ir, start, piece[]);
+                put(Bytecode(IR.OptionEnd, 0)); 
                 uint anchor = cast(uint)(ir.length); //points to first option
                 uint maxSub = 0; //maximum number of captures out of each code path
                 do
@@ -288,41 +377,28 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     }
                     if(current == '|')      //another option?
                     {
-                        put(Bytecode(IR.Endoption, 0));//mark now, fixup later   
+                        put(Bytecode(IR.OptionEnd, 0));//mark now, fixup later   
                     }
                     uint len = cast(uint)(ir.length - offset - 1);
                     len < (1<<24) || error("Internal error - overflow");
-                    ir[offset] = Bytecode(IR.Option,  len);
+                    ir[offset] = Bytecode(IR.OptionStart,  len);
                     maxSub = max(ngroup,maxSub);
                     ngroup = subSave; //reuse groups across alternations
                 }while(current == '|');
-                static if(markHotspots)
-                {
-                    ir[start] = Bytecode(
-                        IR.Startoption, 
-                        ir.length - start - 1 + (nextHotspot ? 1 : 0),nextHotspot);   
-                    uint pc = start + 1 + nextHotspot;
-                    if(nextHotspot)
-                    {
-                        ir[start+1] = Bytecode.fromRaw(hotspotIndex);
-                        hotspotIndex += counterStep;
-                    }
-                    nextHotspot = true; //hotspot comes after option
-                }
-                else
-                {
-                    ir[start] = Bytecode(IR.Startoption, ir.length - start - 1);                
-                    uint pc = start + 1;
-                }
-                //fixup
+                ir[start] = Bytecode(IR.OrStart, ir.length - start - 1);
+                uint pc = start + 1;
+                //fixup OptionEnds so that they point to the last OrEnd
                 while(pc < ir.length)
                 {
                     pc = pc + ir[pc].data;
-                    if(ir[pc].code != IR.Endoption)
+                    if(ir[pc].code != IR.OptionEnd)
                         break;
-                    ir[pc] = Bytecode(IR.Endoption,cast(uint)(ir.length - pc - 1));
+                    ir[pc] = Bytecode(IR.OptionEnd,cast(uint)(ir.length - pc - 1));
                     pc++;
                 }
+                //end and start use the same length
+                put(Bytecode(IR.OrEnd, ir[start].data));
+                
                 ngroup = maxSub;
                 if(current == ')') 
                     goto case ')';
@@ -395,8 +471,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1 || max != 1)
             {
-                insertInPlace(ir, offset, Bytecode(IR.Startrepeat, len));
-                put(Bytecode(greedy ? IR.Repeat : IR.Repeatq, len));
+                insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
+                put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(counterStep); 
                 putRaw(min*counterStep);
                 putRaw(max*counterStep);
@@ -408,38 +484,28 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1)
             {
-                insertInPlace(ir, offset, Bytecode(IR.Startrepeat, len));
+                insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
                 offset += 1;//so it still points to the repeated block
-                put(Bytecode(greedy ? IR.Repeat : IR.Repeatq, len));
+                put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(counterStep);
                 putRaw(min*counterStep);
                 putRaw(min*counterStep);
                 counterDepth++;
             }
-            put(Bytecode(IR.Startinfinite, len));
+            put(Bytecode(IR.InfiniteStart, len));
             ir ~= ir[offset .. offset+len];
             //IR.InfinteX is always a hotspot
-            static if(markHotspots)
-            {
-                put(Bytecode(greedy ? IR.Infinite : IR.Infiniteq, len, true));
-                putRaw(0);
-            }
-            else
-                put(Bytecode(greedy ? IR.Infinite : IR.Infiniteq, len));
+            put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
+            put(Bytecode.init); //merge index
             if(min != 1) 
                 counterStep = (min+1)*counterStep;
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir, offset, Bytecode(IR.Startinfinite, len));
+            insertInPlace(ir, offset, Bytecode(IR.InfiniteStart, len));
             //IR.InfinteX is always a hotspot
-            static if(markHotspots)
-            {
-                put(Bytecode(greedy ? IR.Infinite : IR.Infiniteq, len, true));
-                putRaw(0);
-            }
-            else
-                put(Bytecode(greedy ? IR.Infinite : IR.Infiniteq, len));
+            put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
+            put(Bytecode.init); //merge index
             
         }
     }
@@ -475,12 +541,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     next();
                     break;
                 case '=':
-                    op = Bytecode(IR.Lookahead, 0);
+                    op = Bytecode(IR.LookaheadStart, 0);
                     next();
                     lookaround = true;
                     break;
                 case '!':
-                    op = Bytecode(IR.Neglookahead, 0);
+                    op = Bytecode(IR.NeglookaheadStart, 0);
                     next();
                     lookaround = true;
                     break;
@@ -502,14 +568,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     auto d = assumeSorted!"a.name < b.name"(dict);
                     auto ind = d.lowerBound(t).length;
                     insertInPlace(dict, ind, t);
-                    op = Bytecode(IR.Startgroup, nglob);
+                    op = Bytecode(IR.GroupStart, nglob);
                     break;
                 case '<':
                     next();
                     if(current == '=')
-                        op = Bytecode(IR.Lookbehind, 0);
+                        op = Bytecode(IR.LookbehindStart, 0);
                     else if(current == '!')
-                        op = Bytecode(IR.Neglookbehind, 0);
+                        op = Bytecode(IR.NeglookbehindStart, 0);
                     else
                         error("'!' or '=' expected after '<'");
                     next();
@@ -523,15 +589,16 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 nglob = cast(uint)index.length-1;//not counting whole match
                 index ~= ngroup++; //put local index
-                op = Bytecode(IR.Startgroup, nglob);
+                op = Bytecode(IR.GroupStart, nglob);
             }            
             if(lookaround)
             {
                 uint offset = cast(uint)ir.length;
                 put(Bytecode.init);
                 parseRegex();
-                put(Bytecode(IR.Ret, 0));
+                put(Bytecode(IR.LookaheadEnd, cast(uint)(ir.length - offset - 1)));
                 ir[offset] = Bytecode(op.code, cast(uint)(ir.length - offset - 1));
+                //assert(false,"to fix");
             }
             else
             {
@@ -543,9 +610,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 parseRegex();
                 //counterStep = saveStep;
             }
-            if(op.code == IR.Startgroup)
+            if(op.code == IR.GroupStart)
             {
-                put(Bytecode(IR.Endgroup, nglob));
+                put(Bytecode(IR.GroupEnd, nglob));
             }
             if(current != ')')
             {
@@ -654,8 +721,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return Bytecode(IR.Char, 0);//NUL character
         case '1': .. case '9':
             uint nref = cast(uint)current - '0'; 
-            //groups counted from zero, so nref comes greater by 1 hence '<='
-            nref <=  index.length || error("Backref to unseen group");
+            nref <  index.length || error("Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
             while(nref <= index.length && next() && isdigit(current))
@@ -688,7 +754,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         return Program(this); 
     }
 }
-//for backwards comaptibility
+///std.regex like Regex object wrapper, provided for backwards compatibility
 struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
@@ -697,7 +763,7 @@ struct Regex(Char)
     alias storage this;
 
 }
-//holds all persistent data about compiled regex
+///Object that holds all persistent data about compiled regex
 struct Program
 {
     Bytecode[] ir;
@@ -726,14 +792,13 @@ struct Program
         
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
-            
-            if(ir[i].code == IR.Startrepeat)
+            if(ir[i].code == IR.RepeatStart)
             {
                 uint len = ir[i].data;
-                assert(ir[i+len+1].code == IR.Repeat);
-                counterRange[++top] = ir[i+len+4].raw;
+                assert(ir[i+len+1].code == IR.RepeatEnd);
+                counterRange[++top] = ir[i+len+lengthOfIR(IR.RepeatEnd)].raw;
             }
-            else if(ir[i].code == IR.Repeat)
+            else if(ir[i].code == IR.RepeatEnd)
             {
                 top--;
             }
@@ -988,11 +1053,11 @@ if( is(Char : dchar) )
                 else
                     goto L_backtrack;
                 break;
-            case IR.Startinfinite: 
+            case IR.InfiniteStart: 
                 trackers[infiniteNesting+1] = inputIndex;
                 pc += prog[pc].data + 1;
                 uint len = prog[pc].data;
-                if(prog[pc].code == IR.Infinite)
+                if(prog[pc].code == IR.InfiniteEnd)
                 {
                     pushState(pc+1, counter);
                     infiniteNesting++;
@@ -1004,11 +1069,11 @@ if( is(Char : dchar) )
                     pc++;
                 }
                 break;
-            case IR.Startrepeat:
+            case IR.RepeatStart:
                 pc += prog[pc].data + 1;
                 break;
-            case IR.Repeat:
-            case IR.Repeatq:
+            case IR.RepeatEnd:
+            case IR.RepeatQEnd:
                 // len, step, min, max
                 uint len = prog[pc].data;
                 uint step =  prog[pc+1].raw;
@@ -1023,7 +1088,7 @@ if( is(Char : dchar) )
                 }
                 else if(cnt < max)
                 {
-                    if(prog[pc].code == IR.Repeat)
+                    if(prog[pc].code == IR.RepeatEnd)
                     {
                         pushState(pc + 4, counter - counter%(max+1));
                         counter += step;
@@ -1042,76 +1107,75 @@ if( is(Char : dchar) )
                     pc += 4;
                 }                       
                 break;
-            case IR.Infinite:
-            case IR.Infiniteq:
+            case IR.InfiniteEnd:
+            case IR.InfiniteQEnd:
                 uint len = prog[pc].data;
                 assert(infiniteNesting < trackers.length);
                 if(trackers[infiniteNesting] == inputIndex)
                 {//source not consumed
-                    pc++;
+                    pc += lengthOfIR(IR.InfiniteEnd);
                     infiniteNesting--;
                     break;
                 }
                 else
                     trackers[infiniteNesting] = inputIndex;
                 
-                if(prog[pc].code == IR.Infinite)
+                if(prog[pc].code == IR.InfiniteEnd)
                 {
                     infiniteNesting--;
-                    pushState(pc+1, counter);
+                    pushState(pc + lengthOfIR(IR.InfiniteEnd), counter);
                     infiniteNesting++;
                     pc -= len;
-                    //writeln("CHECK ",disassemble(prog, pc, re.index, re.dict));
                 }
                 else
                 {
-                    //writeln("CHECK2 ",disassemble(prog, pc - len, re.index, re.dict));
                     pushState(pc-len, counter);
-                    pc++;    
+                    pc += lengthOfIR(IR.InfiniteEnd);    
                     infiniteNesting--;
                 }
                 break;
-            case IR.Startoption:
-                pc++;
+            case IR.OrEnd:
+                pc += lengthOfIR(IR.OrEnd);
+                break;
+            case IR.OrStart:
+                pc += lengthOfIR(IR.OrStart);
                 goto case;
-            case IR.Option:
+            case IR.OptionStart:
                 uint len = prog[pc].data;
-                if(prog[pc+len].code == IR.Endoption)//not a last one
+                if(prog[pc+len].code == IR.OptionEnd)//not a last one
                 {
                    pushState(pc + len + 1, counter); //remember 2nd branch
                 }
                 pc++;
                 break;
-            case IR.Endoption:
+            case IR.OptionEnd:
                 pc = pc + prog[pc].data + 1;
                 break;
-            case IR.Startgroup: //TODO: mark which global matched and do the other alternatives
+            case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                 uint n = prog[pc].data;
                 matches[re.index[n]].begin = inputIndex;
                 debug  writefln("IR group #%u starts at %u", n, inputIndex);
                 pc++;
                 break;
-            case IR.Endgroup:   //TODO: ditto
+            case IR.GroupEnd:   //TODO: ditto
                 uint n = prog[pc].data;
                 matches[re.index[n]].end = inputIndex;
                 debug writefln("IR group #%u ends at %u", n, inputIndex);
                 pc++;
                 break;
-            case IR.Lookahead:
-            case IR.Neglookahead: 
-                static assert(IRneglookahead - IRlookahead == 1);
+            case IR.LookaheadStart:
+            case IR.NeglookaheadStart: 
                 uint len = prog[pc].data;
                 auto save = inputIndex;
-                uint failed = matchImpl(prog[pc+1 .. pc+1+len], matches);
+                uint matched = matchImpl(prog[pc+1 .. pc+1+len], matches);
                 s = origin[save .. $];
-                failed = failed ^ (IRneglookahead - prog[pc].code);
-                if(failed)
+                if(matched ^ (prog[pc].code == IR.NeglookaheadStart))
                     goto L_backtrack;
                 pc += 1 + len;
                 break;
-            case IR.Lookbehind:
+            case IR.LookbehindStart:
                 assert(0, "No impl!");
-            case IR.Neglookbehind:
+            case IR.NeglookbehindEnd:
                 assert(0, "No impl!");
             case IR.Backref:
                 uint n = re.index[prog[pc].data];
@@ -1124,7 +1188,8 @@ if( is(Char : dchar) )
                 else
                     goto L_backtrack;
                 break;
-            case IR.Ret:
+            case IR.LookaheadEnd:
+            case IR.NeglookaheadEnd:
                 return true;
             default:
                 assert(0);
@@ -1242,7 +1307,7 @@ public:
 
 auto regex(S)(S pattern, S flags=[])
 {
-    auto parser = RecursiveParser!(typeof(pattern),false)(pattern);
+    auto parser = RecursiveParser!(typeof(pattern))(pattern);
     Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
     return r;
 }
@@ -1554,7 +1619,7 @@ unittest
         }
     }
 }
-
+/// Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception
 {
     this(string msg)

@@ -5,6 +5,7 @@ import regex;
 
 int main(string[] argv)
 {
+    writeln(to!string(IR.Char));
     if(argv.length < 2)
     {
         writefln("regex test\nUsage %s <compile | exec> [file1] [file2] \n"
@@ -24,7 +25,7 @@ int main(string[] argv)
             write(s);
             try
             {
-                auto p = RecursiveParser!(string,true)(s);
+                auto p = RecursiveParser!(string)(s);
                 write(" OK \n");
                 auto re = p.program;
                 re.processHotspots();
