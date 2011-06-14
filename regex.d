@@ -91,6 +91,7 @@ int lengthOfIR(IR i)
 {
     return 1 + immediateParamsIR(i);
 }
+/// full length of the paired IR instruction inlcuding all parameters that might follow it
 int lengthOfPairedIR(IR i)
 {
     return 1 + immediateParamsIR(cast(IR)(i ^ 0b11));
@@ -222,13 +223,13 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
 void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.max,int indent=3,size_t index=0) if (isOutputRange!(Sink,Char))
 {
     while(irb.length>0){
-        format(sink,"%3d",index);
-        if (pc==0 && irb[0]!=IR.Char){
+        formattedWrite(sink,"%3x",index);
+        if (pc==0 && irb[0].code!=IR.Char){
             for (int i=0;i<indent-2;++i)
                 put(sink,"=");
             put(sink,"> ");
         } else {
-            if (isEndIR(irb.code)){
+            if (isEndIR(irb[0].code)){
                 indent-=2;
             }
             if (indent>0){
@@ -238,39 +239,41 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
                     put(sink,spaces);
             }
         }
-        if (code==IR.Char)
+        if (irb[0].code==IR.Char)
         {
             put(sink,`"`);
             int i=0;
             do{
-                put(sink,cast(char[])([cast(dchar)(irb[i]&0x00FF_FFFF)]));
+                put(sink,cast(char[])([cast(dchar)irb[i].data]));
                 ++i;
             } while(i<irb.length && irb[i].code==IR.Char);
-            put(sink,"\"\n");
+            put(sink,"\"");
             if (pc<i){
-                for (int i=0;i<indent+pc+1;++i)
+                put(sink,"\n");
+                for (int ii=indent+pc+1;ii>0;++ii)
                     put(sink,"=");
-                put(sink,"^\n");
+                put(sink,"^");
             }
             index+=i;
             irb=irb[i..$];
         } else {
-            put(sink,codeToString(irb.code));
+            put(sink,to!string(irb[0].code));
             put(sink,"(");
-            sinkHex(irb.data);
-            int nArgs=immediateArgs(irb.code);
+            formattedWrite(sink,"%x",irb[0].data);
+            int nArgs=immediateParamsIR(irb[0].code);
             for (int iarg=nArgs;iarg>0;--iarg){
                 if (iarg+1<irb.length){
-                    format(sink,",%d",irb[iarg+1]);
+                    formattedWrite(sink,",%x",irb[iarg+1]);
                 } else {
                     put(sink,"*error* incomplete irb stream");
                 }
             }
             put(sink,")");
-            if (isStartIR(irb.code)){
+            if (isStartIR(irb[0].code)){
                 indent+=2;
             }
-            irb=irb[1+immediateArgs(irb.code)..$];
+            index+=lengthOfIR(irb[0].code);
+            irb=irb[lengthOfIR(irb[0].code)..$];
         }
         put(sink,"\n");
     }
@@ -831,6 +834,8 @@ struct Program
     void print()
     {
         writefln("PC\tINST\n");
+        prettyPrint(delegate void(const(char)[] s){ writef(s); },ir);
+        writefln("\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
             writefln("%d\t%s   LEN %d", i, disassemble(ir, i, index, dict), ir[i].length);
