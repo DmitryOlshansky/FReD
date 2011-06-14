@@ -7,6 +7,7 @@
  * Authors: Dmitry Olshansky
  *
  */
+//TODO: kill GC allocations when possible (everywhere)
 module fred;
 
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
@@ -53,9 +54,9 @@ enum IR:uint {
     InfiniteQStart    = 0b1_00010_01, /// start of a non eager infinite repetition x*? (length)
     InfiniteQEnd      = 0b1_00010_10, /// end of non eager infinite repetition x*? (length,mergeIndex)
     RepeatStart       = 0b1_00011_01, /// start of a {n,m} repetition (length)
-    RepeatEnd         = 0b1_00011_10, /// end of x{n,m} repetition (length,mergeIndex,step,maxRep)
+    RepeatEnd         = 0b1_00011_10, /// end of x{n,m} repetition (length,step,minRep,maxRep)
     RepeatQStart      = 0b1_00100_01, /// start of a non eager x{n,m}? repetition (length)
-    RepeatQEnd        = 0b1_00100_10, /// end of non eager x{n,m}? repetition (length,mergeIndex,step,maxRep)
+    RepeatQEnd        = 0b1_00100_10, /// end of non eager x{n,m}? repetition (length,step,minRep,maxRep)
     
     OptionStart       = 0b1_00101_01, /// start of an option within an alternation x | y (length)
     OptionEnd         = 0b1_00101_10, /// end of an option (length)
@@ -75,7 +76,8 @@ template IRL(IR code)
 {
     enum IRL =  lengthOfIR(code);
 }
-/// how many paramenters follow the IR, should be optimized fixing some IR bits
+
+/// how many parameters follow the IR, should be optimized fixing some IR bits
 int immediateParamsIR(IR i){
     switch (i){
     case IR.OrEnd,IR.InfiniteEnd,IR.InfiniteQEnd:
@@ -98,7 +100,7 @@ int lengthOfPairedIR(IR i)
 /// if the operation has a merge point (this relies on the order of the ops)
 bool hasMerge(IR i)
 {
-    return (i&0b11)==0b10 && i<=IR.RepeatQEnd;
+    return (i&0b11)==0b10 && i<=IR.InfiniteQEnd;
 }
 /// is an IR that opens a "group"
 bool isStartIR(IR i)
@@ -130,7 +132,7 @@ struct Bytecode
     { 
         assert(data < (1<<24) && code < 256);
         raw = code<<24 | data;
-    }    
+    }
     static Bytecode fromRaw(uint data)
     { 
         Bytecode t;
@@ -147,6 +149,9 @@ struct Bytecode
     @property bool isStart(){ return isStartIR(code); }
     ///ditto
     @property bool isEnd(){ return isStartIR(code); }    
+    /// number of arguments
+    @property int args(){ return immediateParamsIR(code); }
+    /// human readable name of instruction
     @property string mnemonic()
     {
         return to!string(code);
@@ -215,20 +220,23 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         break;
     default://all data-free instructions
     }
+    if(irb[pc].hotspot)
+        formattedWrite(output, " Hotspot %u", irb[pc+1].raw);
     return output.data;
 }
 
 /// another pretty printer, writes out the bytecode of a regex and where the pc is
-void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.max,int indent=3,size_t index=0) if (isOutputRange!(Sink,Char))
+void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.max,int indent=3,size_t index=0)
+    if (isOutputRange!(Sink,Char))
 {
     while(irb.length>0){
-        format(sink,"%3d",index);
-        if (pc==0 && irb[0]!=IR.Char){
+        formattedWrite(sink,"%3d",index);
+        if (pc==0 && irb[0].code!=IR.Char){
             for (int i=0;i<indent-2;++i)
                 put(sink,"=");
             put(sink,"> ");
         } else {
-            if (isEndIR(irb.code)){
+            if (isEndIR(irb[0].code)){
                 indent-=2;
             }
             if (indent>0){
@@ -238,39 +246,39 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
                     put(sink,spaces);
             }
         }
-        if (code==IR.Char)
+        if (irb[0].code==IR.Char)
         {
             put(sink,`"`);
             int i=0;
             do{
-                put(sink,cast(char[])([cast(dchar)(irb[i]&0x00FF_FFFF)]));
+                put(sink,cast(char[])([cast(dchar)irb[i].data]));
                 ++i;
             } while(i<irb.length && irb[i].code==IR.Char);
             put(sink,"\"\n");
             if (pc<i){
-                for (int i=0;i<indent+pc+1;++i)
+                for (int j=0;j<indent+pc+1;++j)
                     put(sink,"=");
                 put(sink,"^\n");
             }
             index+=i;
             irb=irb[i..$];
         } else {
-            put(sink,codeToString(irb.code));
+            put(sink,irb[0].mnemonic);
             put(sink,"(");
-            sinkHex(irb.data);
-            int nArgs=immediateArgs(irb.code);
+            formattedWrite(sink,"%x",irb[0].data);
+            int nArgs= irb[0].args;
             for (int iarg=nArgs;iarg>0;--iarg){
-                if (iarg+1<irb.length){
-                    format(sink,",%d",irb[iarg+1]);
+                if (iarg<irb.length){
+                    formattedWrite(sink,",%s",irb[iarg].raw);
                 } else {
                     put(sink,"*error* incomplete irb stream");
                 }
             }
             put(sink,")");
-            if (isStartIR(irb.code)){
+            if (isStartIR(irb[0].code)){
                 indent+=2;
             }
-            irb=irb[1+immediateArgs(irb.code)..$];
+            irb=irb[irb[0].length .. $];
         }
         put(sink,"\n");
     }
@@ -768,7 +776,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     /*
     */
     @property Program program()
-    { 
+    {
         return Program(this); 
     }
 }
@@ -799,8 +807,10 @@ struct Program
         ngroup = p.ngroup;
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
+        processHotspots();
     }
-    //
+    ///lightweight post process step - no GC allocations (TODO!),
+    ///only essentials
     void processHotspots()
     {
         uint[] counterRange = new uint[maxCounterDepth+1];
@@ -812,9 +822,14 @@ struct Program
         {
             if(ir[i].code == IR.RepeatStart)
             {
-                uint len = ir[i].data;
-                assert(ir[i+len+1].code == IR.RepeatEnd);
-                counterRange[++top] = ir[i+len+lengthOfIR(IR.RepeatEnd)].raw;
+                uint repEnd = i + ir[i].data + IRL!(IR.RepeatStart);
+                assert(ir[repEnd].code == IR.RepeatEnd);
+                uint max = ir[repEnd + 3].raw;
+                ir[repEnd+1].raw = counterRange[top];
+                ir[repEnd+2].raw *= counterRange[top];
+                ir[repEnd+3].raw *= counterRange[top];
+                counterRange[top+1] = (max+1) * counterRange[top];
+                top++;
             }
             else if(ir[i].code == IR.RepeatEnd)
             {
@@ -826,14 +841,15 @@ struct Program
                 hotspotIndex += counterRange[top];
             }
         }
+        debug writeln("---\nHotspots & counters fixed, total merge table size: ",hotspotIndex);
     }
-    //
+    /// print out disassembly a program's IR
     void print()
     {
         writefln("PC\tINST\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
-            writefln("%d\t%s   LEN %d", i, disassemble(ir, i, index, dict), ir[i].length);
+            writefln("%d\t%s ", i, disassemble(ir, i, index, dict));
         }
         writefln("Max counter nesting depth %u ",maxCounterDepth);
     }
@@ -919,8 +935,8 @@ if( is(Char : dchar) )
         return matchImpl(prog, matches, mem[0..initialStack]);
     }
     /++
-        match subexpression against input, being on lookaround level 'level'
-        storing results in matches
+        match subexpression against input, using provided malloca'ed array as stack
+        results are stored in matches
     ++/
     bool matchImpl(Bytecode[] prog, Group[] matches, ref uint[] stack)
     {  
@@ -979,13 +995,14 @@ if( is(Char : dchar) )
             }
             else
                 pragma(error,"32 & 64 bits only");
+            debug writeln("Backtracked");
             return true;
         }   
         auto start = origin.length - s.length;
         debug writeln("Try match starting at ",origin[inputIndex..$]);
         while(pc<prog.length)
         {
-            debug writefln("%d\t%s", pc, disassemble(prog, pc, re.index, re.dict));
+            debug writefln("PC: %s\tCNT: %s\t%s", pc, counter, disassemble(prog, pc, re.index, re.dict));
             switch(prog[pc].code)
             {
             case IR.Char:
@@ -1099,30 +1116,30 @@ if( is(Char : dchar) )
                 uint min = prog[pc+2].raw;
                 uint max = prog[pc+3].raw;
                 //debug writefln("repeat pc=%u, counter=%u",pc,counter);
-                uint cnt = counter % (max+1);
-                if(cnt < min)
+
+                if(counter < min)
                 {
                     counter += step;
                     pc -= len;
                 }
-                else if(cnt < max)
+                else if(counter < max)
                 {
                     if(prog[pc].code == IR.RepeatEnd)
                     {
-                        pushState(pc + IRL!(IR.RepeatEnd), counter - counter%(max+1));
+                        pushState(pc + IRL!(IR.RepeatEnd), counter%step);
                         counter += step;
                         pc -= len;
                     }
                     else
                     {
                         pushState(pc - len, counter + step);   
-                        counter -= counter%(max+1);
+                        counter = counter%step;
                         pc += IRL!(IR.RepeatEnd);
                     }
                 }
                 else
                 {
-                    counter -= counter%(max+1);
+                    counter = counter%step;
                     pc += IRL!(IR.RepeatEnd);
                 }                       
                 break;
@@ -1163,12 +1180,12 @@ if( is(Char : dchar) )
                 uint len = prog[pc].data;
                 if(prog[pc+len].code == IR.OptionEnd)//not a last one
                 {
-                   pushState(pc + len + 1, counter); //remember 2nd branch
+                   pushState(pc + len + IRL!(IR.OptionStart), counter); //remember 2nd branch
                 }
                 pc += IRL!(IR.OptionStart);
                 break;
             case IR.OptionEnd:
-                pc = pc + prog[pc].data + 1;
+                pc = pc + prog[pc].data + IRL!(IR.OptionEnd);
                 break;
             case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                 uint n = prog[pc].data;

@@ -217,7 +217,8 @@ unittest
         {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
         {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
         {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" },
-
+//more repetitions!
+        {  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" },
         ];
 
     int i;
@@ -304,22 +305,26 @@ unittest
 
             }
         }
-        writeln("! bulk test  done !");
+        writeln("!!! FReD bulk test done !!!");
     }
 }
-
-
+version(unittest){
+void main(){}
+}
+else{
+    
 int main(string[] argv)
 {
     if(argv.length < 2)
     {
-        writefln("regex test\nUsage %s <compile | exec> \n"
-                 "Patterns to test and input are read by line till empty one (always from STDIN!)\n",argv[0],argv[0]);
+        writefln("regex test\nUsage %s <compile | exec | pretty> \n"
+                 "Patterns to test and input are read from STDIN by line till empty one\n",argv[0]);
         return 0;
     }      
     switch(argv[1])
     {
     case "compile":
+    case "pretty": // experimental ;)
         string s;
         for(;;)
         {
@@ -332,7 +337,14 @@ int main(string[] argv)
                 auto p = RecursiveParser!(string)(s);
                 write(" OK \n");
                 auto re = p.program;
-                re.print();
+                if(argv[1] == "compile")
+                    re.print();
+                else
+                {
+                    auto sink = appender!string();
+                    prettyPrint(sink,re.ir);
+                    writeln(sink.data);
+                }    
             }
             catch(Exception ex)
             {
@@ -369,3 +381,5 @@ int main(string[] argv)
     return 0;
 }
 
+
+}
