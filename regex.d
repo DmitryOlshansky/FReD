@@ -269,9 +269,9 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
             put(sink,"(");
             formattedWrite(sink,"%x",irb[0].data);
             int nArgs= irb[0].args;
-            for (int iarg=nArgs;iarg>0;--iarg){
+            for (int iarg=0;iarg<nArgs;++iarg){
                 if (iarg+1<irb.length){
-                    formattedWrite(sink,",%x",irb[iarg+1]);
+                    formattedWrite(sink,",%x",irb[iarg+1].data);
                 } else {
                     put(sink,"*error* incomplete irb stream");
                 }
