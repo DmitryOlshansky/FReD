@@ -93,6 +93,7 @@ int lengthOfIR(IR i)
 {
     return 1 + immediateParamsIR(i);
 }
+/// full length of the paired IR instruction inlcuding all parameters that might follow it
 int lengthOfPairedIR(IR i)
 {
     return 1 + immediateParamsIR(cast(IR)(i ^ 0b11));
@@ -254,11 +255,12 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
                 put(sink,cast(char[])([cast(dchar)irb[i].data]));
                 ++i;
             } while(i<irb.length && irb[i].code==IR.Char);
-            put(sink,"\"\n");
+            put(sink,"\"");
             if (pc<i){
-                for (int j=0;j<indent+pc+1;++j)
+                put(sink,"\n");
+                for (int ii=indent+pc+1;ii>0;++ii)
                     put(sink,"=");
-                put(sink,"^\n");
+                put(sink,"^");
             }
             index+=i;
             irb=irb[i..$];
@@ -268,8 +270,8 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
             formattedWrite(sink,"%x",irb[0].data);
             int nArgs= irb[0].args;
             for (int iarg=nArgs;iarg>0;--iarg){
-                if (iarg<irb.length){
-                    formattedWrite(sink,",%s",irb[iarg].raw);
+                if (iarg+1<irb.length){
+                    formattedWrite(sink,",%x",irb[iarg+1]);
                 } else {
                     put(sink,"*error* incomplete irb stream");
                 }
@@ -278,7 +280,8 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
             if (isStartIR(irb[0].code)){
                 indent+=2;
             }
-            irb=irb[irb[0].length .. $];
+            index+=lengthOfIR(irb[0].code);
+            irb=irb[lengthOfIR(irb[0].code)..$];
         }
         put(sink,"\n");
     }
@@ -847,6 +850,8 @@ struct Program
     void print()
     {
         writefln("PC\tINST\n");
+        prettyPrint(delegate void(const(char)[] s){ writef(s); },ir);
+        writefln("\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
             writefln("%d\t%s ", i, disassemble(ir, i, index, dict));
