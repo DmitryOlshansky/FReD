@@ -331,14 +331,13 @@ int main(string[] argv)
 {    
     if(argv.length < 2)
     {
-        writefln("regex test\nUsage %s <compile | exec | pretty> \n"
+        writefln("regex test\nUsage %s <compile | exec> \n"
                  "Patterns to test and input are read from STDIN by line till empty one\n",argv[0]);
         return 0;
     }    
     switch(argv[1])
     {
     case "compile":
-    case "pretty": // experimental ;)
         string s;
         for(;;)
         {
@@ -351,14 +350,7 @@ int main(string[] argv)
                 auto p = RecursiveParser!(string)(s);
                 write(" OK \n");
                 auto re = p.program;
-                if(argv[1] == "compile")
-                    re.print();
-                else
-                {
-                    auto sink = appender!string();
-                    prettyPrint(sink,re.ir);
-                    writeln(sink.data);
-                }    
+                re.print(); 
             }
             catch(Exception ex)
             {

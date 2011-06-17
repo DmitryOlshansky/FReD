@@ -12,10 +12,11 @@ module fred;
 
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
-       std.uni, std.utf, std.format, std.typecons;
+       std.uni, std.utf, std.format, std.typecons, std.bitmanip;
 
-/// starting from the low bits [to do: format for doc]
-///  bits 0-1
+/// [TODO: format for doc]
+///  IR bit pattern: 0b1_xxxxx_yy
+///  where yy idicates class of instruction, xxxxx for actual operation code
 ///      00: atom, a normal instruction
 ///      01: open, opening of a group, has length of contained IR in the low bits 
 ///      10: close, closing of a group, has length of contained IR in the low bits 
@@ -51,6 +52,8 @@ enum IR:uint {
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
+    //with this instruction order
+    //bit mask 0b1_00001_00 could be used to test/set greediness
     InfiniteStart     = 0b1_00001_01, /// start of an infinite repetition x* (length)
     InfiniteEnd       = 0b1_00001_10, /// end of infinite repetition x* (length,mergeIndex)
     InfiniteQStart    = 0b1_00010_01, /// start of a non eager infinite repetition x*? (length)
@@ -58,10 +61,8 @@ enum IR:uint {
     RepeatStart       = 0b1_00011_01, /// start of a {n,m} repetition (length)
     RepeatEnd         = 0b1_00011_10, /// end of x{n,m} repetition (length,step,minRep,maxRep)
     RepeatQStart      = 0b1_00100_01, /// start of a non eager x{n,m}? repetition (length)
-    RepeatQEnd        = 0b1_00100_10, /// end of non eager x{n,m}? repetition (length,step,minRep,maxRep)
-    
-   
-    
+    RepeatQEnd        = 0b1_00100_10, /// end of non eager x{n,m}? repetition (length,step,minRep,maxRep)   
+    //
     LookaheadStart    = 0b1_00110_01, /// begin of the lookahead group (length)
     LookaheadEnd      = 0b1_00110_10, /// end of a lookahead group (length)
     NeglookaheadStart = 0b1_00111_01, /// start of a negative lookahead (length)
@@ -147,10 +148,12 @@ struct Bytecode
     @property IR code(){ return cast(IR)(raw>>24); }
     ///ditto
     @property bool hotspot(){ return hasMerge(code); }
+    ///test the class of this instruction
+    @property bool isAtom(){ return isAtomIR(code); }
     ///ditto
     @property bool isStart(){ return isStartIR(code); }
     ///ditto
-    @property bool isEnd(){ return isStartIR(code); }    
+    @property bool isEnd(){ return isEndIR(code); }    
     /// number of arguments
     @property int args(){ return immediateParamsIR(code); }
     /// human readable name of instruction
@@ -167,6 +170,18 @@ struct Bytecode
     @property uint pairedLength()
     {
         return lengthOfPairedIR(code);
+    }
+    ///returns bytecode of paired instruction (assuming this one is start or end)
+    @property Bytecode paired()
+    {//depends on bit and struct layout order
+        assert(isStart || isEnd);
+        return Bytecode.fromRaw(raw ^ (0b11<<24));
+    }
+    /// gets an index into IR block of the respective pair
+    uint indexOfPair(uint pc)
+    {
+        assert(isStart || isEnd);
+        return isStart ? pc + data + length  : pc - data - lengthOfPairedIR(code);
     }
 }
 
@@ -192,9 +207,9 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         formattedWrite(output, " pc=>%u min=%u max=%u step=%u", 
                 pc-len, irb[pc+2].raw, irb[pc+3].raw, irb[pc+1].raw);
         break;
-    case IR.InfiniteEnd, IR.InfiniteQEnd: //ditto
+    case IR.InfiniteEnd, IR.InfiniteQEnd, IR.OrEnd: //ditto 
         uint len = irb[pc].data;
-        formattedWrite(output, " pc=>%u %u", pc-len, irb[pc+1].raw);
+        formattedWrite(output, " pc=>%u", pc-len);
         break;
     case  IR.LookaheadEnd, IR.NeglookaheadEnd: //ditto
         uint len = irb[pc].data;
@@ -513,7 +528,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1 || max != 1)
             {
-                insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
+                insertInPlace(ir, offset, Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len));
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1); 
                 putRaw(min);
@@ -525,7 +540,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1)
             {
-                insertInPlace(ir, offset, Bytecode(IR.RepeatStart, len));
+                insertInPlace(ir, offset, Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len));
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1);
@@ -533,7 +548,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 putRaw(min);
                 counterDepth++;
             }
-            put(Bytecode(IR.InfiniteStart, len));
+            put(Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
             ir ~= ir[offset .. offset+len];
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
@@ -541,7 +556,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir, offset, Bytecode(IR.InfiniteStart, len));
+            insertInPlace(ir, offset, Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
             put(Bytecode.init); //merge index
@@ -785,8 +800,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-    /*
-    */
+    ///packages parsing results into a Program object
     @property Program program()
     {
         return Program(this); 
@@ -821,9 +835,16 @@ struct Program
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
         processHotspots();
+        debug
+        {
+            print();
+            validate();
+        }
     }
-    ///lightweight post process step - no GC allocations (TODO!),
-    ///only essentials
+    /++
+        lightweight post process step - no GC allocations (TODO!),
+        only essentials
+    +/
     void processHotspots()
     {
         uint[] counterRange = new uint[maxCounterDepth+1];
@@ -855,27 +876,47 @@ struct Program
             }
         }
         hotspotTableSize = hotspotIndex;
-        debug writeln("---\nHotspots & counters fixed, total merge table size: ",hotspotTableSize);
+        debug writeln("---\nHotspots & counters fixed, total merge table size: ", hotspotTableSize);
+    }
+    /// IR code validator - proper nesting, illegal instructions, etc.
+    void validate()
+    {
+        for(size_t pc=0; pc<ir.length; pc+=ir[pc].length)
+        {
+            if(ir[pc].isStart || ir[pc].isEnd)
+            {
+                uint dest =  ir[pc].indexOfPair(pc);
+                assert(dest < ir.length, text("Wrong length in opcode at pc=",pc));
+                assert(ir[dest].paired ==  ir[pc],
+                        text("Wrong pairing of opcodes at pc=", pc, "and pc=", dest));
+            }
+            else if(ir[pc].isAtom)
+            {
+                
+            }
+            else 
+               assert(0, text("Unknown type of instruction at pc=", pc));
+        }
     }
     /// print out disassembly a program's IR
     void print()
     {
         writefln("PC\tINST\n");
-        prettyPrint(delegate void(const(char)[] s){ writef(s); },ir);
+        prettyPrint(delegate void(const(char)[] s){ write(s); },ir);
         writefln("\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
             writefln("%d\t%s ", i, disassemble(ir, i, index, dict));
         }
-        writefln("Max counter nesting depth %u ",maxCounterDepth);
+        writefln("Max counter nesting depth %u ", maxCounterDepth);
     }
 }
 
-/*
+/++
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions. 
     low level construct, doesn't 'own' any memory
-*/
++/
 struct BacktrackingMatcher(Char)
 if( is(Char : dchar) )
 {
@@ -908,7 +949,6 @@ if( is(Char : dchar) )
         debug
         {
             writeln("------------------------------------------");
-            re.print();
         }
         if(exhausted) //all matches collected
             return false;
@@ -1104,7 +1144,7 @@ if( is(Char : dchar) )
                 else
                     goto L_backtrack;
                 break;
-            case IR.InfiniteStart: 
+            case IR.InfiniteStart, IR.InfiniteQStart:
                 trackers[infiniteNesting+1] = inputIndex;
                 pc += prog[pc].data + IRL!(IR.InfiniteStart);
                 //now pc is at end IR.Infininite(Q)End
@@ -1121,7 +1161,7 @@ if( is(Char : dchar) )
                     pc += IRL!(IR.InfiniteEnd);
                 }
                 break;
-            case IR.RepeatStart:
+            case IR.RepeatStart, IR.RepeatQStart:
                 pc += prog[pc].data + IRL!(IR.RepeatStart);
                 break;
             case IR.RepeatEnd:
@@ -1368,7 +1408,6 @@ struct ThompsonMatcher(Char)
         debug
         {
             writeln("------------------------------------------");
-            re.print();
         }
         matched = false; //reset match flag
         Bytecode[] prog = re.ir;
@@ -1586,11 +1625,11 @@ struct ThompsonMatcher(Char)
                     else
                         t = worklist.fetch();
                     break;
-                case IR.InfiniteStart: 
+                case IR.InfiniteStart, IR.InfiniteQStart: 
                     t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
                     goto case IR.InfiniteEnd; // both Q and non-Q
                     break;
-                case IR.RepeatStart:
+                case IR.RepeatStart, IR.RepeatQStart:
                     t.pc += prog[t.pc].data + IRL!(IR.RepeatStart);
                     goto case IR.RepeatEnd; // both Q and non-Q
                 case IR.RepeatEnd:
