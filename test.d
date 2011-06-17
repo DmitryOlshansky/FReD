@@ -319,7 +319,7 @@ unittest
         }
         writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
     }
-    //run_tests!match(); //backtracker
+    run_tests!match(); //backtracker
     run_tests!tmatch(); //thompson VM
 }
 version(unittest){
