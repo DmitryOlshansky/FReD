@@ -119,6 +119,18 @@ bool isAtomIR(IR i)
 {
     return (i&0b11)==0b00;
 }
+/// is IR consumes any input on match (i.e. non zero-width)
+bool consumesInput(IR i)
+{
+    switch(i)//TODO: should be optimized with bittwidling
+    {
+    case IR.Char, IR.Any, IR.Digit, IR.Notdigit, IR.Space, IR.Notspace,
+            IR.Word, IR.Notword, IR.Backref, IR.Charset:
+        return true;
+    default:
+        return false;
+    }
+}
 /// makes respective pair out of IR i, swapping start/end bits of instruction
 IR pairedIR(IR i)
 {
@@ -158,14 +170,22 @@ struct Bytecode
     {
         return to!string(code);
     }
+    /// full length of instruction
     @property uint length()
     {
         return lengthOfIR(code);
     }
+    /// full length of respective start/end of this instruction
     @property uint pairedLength()
     {
         return lengthOfPairedIR(code);
     }
+    /// true if this instruction is of 'consume input' class
+    @property bool consumesInput()
+    {
+        return .consumesInput(code);
+    }
+
 }
 
 static assert(Bytecode.sizeof == 4);
@@ -308,7 +328,7 @@ struct NamedGroup
 struct Group
 { 
     size_t begin, end;
-    string toString()
+    string toString() const
     {
         auto a = appender!string();
         formattedWrite(a, "%s..%s", begin, end);
@@ -1275,8 +1295,23 @@ struct ThompsonMatcher(Char)
     {
         Thread* tip=null, toe=null;
         uint length;
+        /// add new thread to the start of list
+        void insertFront(Thread* t)
+        {
+            if(tip)
+            {
+                t.next = tip;
+                tip = t;
+            }
+            else
+            {
+                t.next = null;
+                tip = toe = t;
+            }
+            length++;
+        }
         //add new thread to the end of list
-        void insert(Thread* t)
+        void insertBack(Thread* t)
         {
             if(toe)
             {
@@ -1288,7 +1323,7 @@ struct ThompsonMatcher(Char)
             toe.next = null;
             length++;
         }
-        //null on end
+        ///move head element out of list
         Thread* fetch()
         {
             auto t = tip;
@@ -1296,37 +1331,43 @@ struct ThompsonMatcher(Char)
                 tip = toe = null;
             else
                 tip = tip.next;
+            length--;
             return t;
         }
-        /+ dropped for now
-        /// input range troika
-        Thread* front()
+        ///non-destructive iteration of ThreadList
+        struct ThreadRange
         {
-            return tip;
+            const(Thread)* ct;
+            this(ThreadList tlist){ ct = tlist.tip; }
+            @property bool empty(){ return ct == null; }
+            @property const(Thread)* front(){ return ct; }
+            @property popFront()
+            { 
+                assert(ct);
+                ct = ct.next; 
+            }
         }
-        ///ditto
-        void popFront()
-        {
-            assert(!empty);
-            if(tip == toe)
-                tip = toe = null;
-            else
-                tip = tip.next;
-            length --;
-        }
-        ///ditto
         @property bool empty()
         {
             return tip == null;
-        }+/
+        }
+        ThreadRange opSlice()
+        {
+            return ThreadRange(this);
+        }
     }
     enum threadAllocSize = 16;
     Thread* freelist;
     ThreadList clist, nlist;
     uint[] merge;
     Program re;           //regex program
-    String origin;
+    String origin, s;
+    dchar cur;
     size_t genCounter;    //merge trace counter, goes up on every dchar
+    bool matched;
+    
+    @property inputIndex(){ return origin.length - s.length; }
+    
     this(Program prog, String input)
     {
         re = prog;
@@ -1338,310 +1379,222 @@ struct ThompsonMatcher(Char)
         genCounter = 1;
     }
     /++
-        run threads to exhaustion at the end of input  
-    +/
-    bool matchEnd(Group[] matches)
-    {
-        debug writeln("TRY match the END");
-        Bytecode[] prog = re.ir;
-        for(Thread* t = clist.fetch(); t; t = clist.fetch())
-        {
-            if(t.pc == prog.length)
-            {
-                matches[] = t.matches[];
-                matches[0].end = origin.length;//end of the whole match
-                debug writefln("FOUND AT END: %s..%s", matches[0].begin, matches[0].end);
-                return true;
-            }
-            switch(prog[t.pc].code)
-            {
-            case IR.Wordboundary:
-                assert(0, "No impl yet");
-                break;
-            case IR.Notwordboundary:
-                assert(0, "No impl yet");
-                break;
-            case IR.Bol:
-                //TODO: multiline & attributes, unicode line terminators
-                if(origin.empty)
-                {
-                    t.pc += IRL!(IR.Bol);
-                    clist.insert(t);
-                }
-                break;
-            case IR.Eol:
-                //TODO: ditto for the end of line
-                t.pc += IRL!(IR.Eol);
-                clist.insert(t);
-                break;
-            case IR.InfiniteStart: 
-                t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
-                goto case IR.InfiniteEnd; // both Q and non-Q
-                break;
-            case IR.RepeatStart:
-                t.pc += prog[t.pc].data + IRL!(IR.RepeatStart);
-                goto case IR.RepeatEnd; // both Q and non-Q
-            case IR.RepeatEnd:
-            case IR.RepeatQEnd:
-                // len, step, min, max
-                uint len = prog[t.pc].data;
-                uint step =  prog[t.pc+1].raw;
-                uint min = prog[t.pc+2].raw;
-                if(t.counter < min)
-                {
-                    t.counter += step;
-                    t.pc -= len;
-                    clist.insert(t);
-                    break;
-                }
-                uint max = prog[t.pc+3].raw;
-                if(t.counter < max)
-                {
-                        
-                    if(prog[t.pc].code == IR.RepeatEnd)
-                    {
-                        clist.insert(fork(t, t.pc  - len,  t.counter + step));
-                        t.counter %= step;
-                        t.pc += IRL!(IR.RepeatEnd);
-                        //inserted later == lesser priority
-                        clist.insert(t);
-                    }
-                    else
-                    {
-                        clist.insert(fork(t, t.pc + IRL!(IR.RepeatQEnd),  t.counter % step));
-                        t.counter += step;
-                        t.pc -= len;
-                        //inserted later == lesser priority
-                        clist.insert(t);
-                    }
-                    break;
-                }
-                t.counter %= step;
-                t.pc += IRL!(IR.RepeatEnd);                       
-                clist.insert(t);
-                break;
-            case IR.InfiniteEnd:
-            case IR.InfiniteQEnd:
-                // merge point
-                uint idx = prog[t.pc + 1].raw + t.counter;
-                if(merge[idx] < genCounter)
-                    merge[idx] = genCounter;
-                else
-                {
-                    recycle(t);
-                    break;
-                }
-                uint len = prog[t.pc].data;
-                if(prog[t.pc].code == IR.InfiniteEnd)
-                {
-                    clist.insert(fork(t, t.pc - len, t.counter));
-                    t.pc += IRL!(IR.InfiniteEnd);
-                    //inserted later == lesser priority
-                    clist.insert(t);
-                }
-                else
-                {
-                    clist.insert(fork(t, t.pc + IRL!(IR.InfiniteQEnd), t.counter));
-                    t.pc -= len;
-                    //inserted later == lesser priority
-                    clist.insert(t);
-                }
-                break;
-            case IR.OrEnd:
-                // merge point
-                uint idx = prog[t.pc + 1].raw + t.counter;
-                if(merge[idx] < genCounter)
-                    merge[idx] = genCounter;
-                else
-                {
-                    recycle(t);
-                    break;
-                }
-                t.pc += IRL!(IR.OrEnd);
-                clist.insert(t);
-                break;
-            case IR.OrStart:
-                // add a thread for each option in turn
-                uint pc = t.pc + IRL!(IR.OrStart);
-                while(prog[pc].code == IR.OptionStart)
-                {
-                    uint len = prog[pc].data;
-                    clist.insert(fork(t, pc + IRL!(IR.OptionStart), t.counter));
-                    pc += len + IRL!(IR.OptionStart);
-                }
-                recycle(t);
-                break;
-            case IR.OptionStart:
-                assert(0, "Faulty OrStart in Thompson VM");
-            case IR.OptionEnd:
-                t.pc = t.pc + prog[t.pc].data + IRL!(IR.OptionEnd);
-                clist.insert(t);
-                break;
-            case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
-                uint n = prog[t.pc].data;
-                t.matches[re.index[n]+1].begin = origin.length;
-                t.pc += IRL!(IR.GroupStart);
-                clist.insert(t);
-                break;
-            case IR.GroupEnd:   //TODO: ditto
-                uint n = prog[t.pc].data;
-                t.matches[re.index[n]+1].end = origin.length;
-                t.pc += IRL!(IR.GroupEnd);
-                clist.insert(t);
-                break;
-            case IR.LookaheadStart:
-            case IR.NeglookaheadStart: 
-            case IR.LookbehindStart:
-            case IR.NeglookbehindStart:
-            case IR.LookaheadEnd:
-            case IR.NeglookaheadEnd:
-            case IR.LookbehindEnd:
-            case IR.NeglookbehindEnd:
-                assert(0, "No lookaround for ThompsonVM yet!");
-            default:
-                recycle(t);
-            }
-        }
-        return false;
-    }
-    /++
         the usual match the input and fill matches
     +/
     bool match(Group[] matches)
     {
-        bool matched = false;
         debug
         {
             writeln("------------------------------------------");
             re.print();
         }
+        matched = false; //reset match flag
         Bytecode[] prog = re.ir;
         debug writeln("Threaded matching started");
-        if(origin.empty)
+        s = origin;
+        //if(origin.empty)
+            addThread(createStart(0), matches, clist);// in hope that the whole regex is zero-width
+        while(!s.empty)
         {
-            clist.insert(createStart(0));
-            return matchEnd(matches);
-        }
-        foreach(i, dchar ch; origin)
-        {
-            if(!matched)//if we already have match no need to gouge the engine
-                clist.insert(createStart(i));//initiate a new thread staring a this position
-            writefln("Threaded matching index %s",i);
-            Thread* t = clist.tip;
-            while(t)
+            //fetch a codepoint
+            cur = s.front;
+            s.popFront();
+            writefln("Threaded matching at index %s", inputIndex);
+            foreach(t; clist[])
             {
                 assert(t);
                 writef("pc=%s ",t.pc);
                 write(t.matches);
                 writeln();
-                t = t.next;
             }
-        L_threadLoop:
-            for(t = clist.fetch(); t; t = clist.fetch())
+            for(Thread* t = clist.fetch(); t; t = clist.fetch())
             {
-                if(t.pc == prog.length)
-                {
-                    writeln(t.matches);
-                    matches[] = t.matches[];
-                    matches[0].end = i;//end of the whole match
-                    debug writefln("FOUND pc=%s prog_len=%s: %s..%s", 
-                                   t.pc, prog.length,matches[0].begin, matches[0].end);
-                    matched = true;
-                    //TODO: recylce the whole clist 
-                    clist = ThreadList.init;//cut off low priority threads
-                    break;
-                }
                 switch(prog[t.pc].code)
                 {
                 case IR.Char:
-                    if(ch == prog[t.pc].data)
+                    if(cur == prog[t.pc].data)
                     {   
                         t.pc += IRL!(IR.Char);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Any:
                     t.pc += IRL!(IR.Any);
-                    nlist.insert(t);
+                    addThread(t, matches, nlist);
                     break;
                 case IR.Word:
-                    if(isUniAlpha(ch))
+                    if(isUniAlpha(cur))
                     {
                         t.pc += IRL!(IR.Word);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Notword:
-                    if(!isUniAlpha(ch))
+                    if(!isUniAlpha(cur))
                     {
                         t.pc += IRL!(IR.Notword);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Digit:
-                    if(isdigit(ch))
+                    if(isdigit(cur))
                     {
                         t.pc += IRL!(IR.Digit);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Notdigit:
-                    if(!isdigit(ch))
+                    if(!isdigit(cur))
                     {
                         t.pc += IRL!(IR.Notdigit);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Space:
-                    if(isspace(ch))
+                    if(isspace(cur))
                     {
                         t.pc += IRL!(IR.Space);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
                 case IR.Notspace:
-                    if(!isspace(ch))
+                    if(!isspace(cur))
                     {
                         t.pc += IRL!(IR.Space);
-                        nlist.insert(t);
+                        addThread(t, matches, nlist);
                     }
                     else
                         recycle(t);
                     break;
+                case IR.Backref:
+                    assert(0, "No backref for ThompsonVM yet!");
+                default:
+                    assert(!prog[t.pc].consumesInput, "Control flow leaked into main loop");
+                    assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
+                }
+            }
+            if(!matched)//if we already have match no need to push the engine
+                addThread(createStart(inputIndex), matches, nlist);//put a new thread to nlist staring a this position 
+            else if(nlist.empty)
+            {
+                debug writeln("Stopped  matching before consuming full input");
+                break;
+            }
+            clist =  nlist;
+            nlist = ThreadList.init;
+            genCounter++;
+            writefln("Now list has %d threads", clist.length);
+        }
+        if(!matched)
+        {
+            foreach(t; clist[])
+                if(t.pc == prog.length)
+                {
+                    finish(cast(Thread*)t,matches);//hack our way in
+                    break;
+                }
+        }
+        return matched;//TODO: here happens partial match
+    }
+    /++
+        handle succesful threads
+    +/
+    void finish(Thread* t, Group[] matches)
+    {
+        writeln(t.matches);
+        matches[] = t.matches[];
+        //end of the whole match happens after current symbol
+        matches[0].end = inputIndex;
+        debug writefln("FOUND pc=%s prog_len=%s: %s..%s", 
+                        t.pc, re.ir.length,matches[0].begin, matches[0].end);
+        matched = true;
+        recycle(clist);//cut off low priority threads
+    }
+    /++
+        add a thread to new list, cutting trough all 0-width instructions 
+        and taking care of control flow
+    +/
+    void addThread(Thread* t, Group[] matches, ref ThreadList list)
+    {
+        Bytecode[] prog = re.ir;
+        ThreadList worklist;
+        do
+        {
+            if(t.pc == prog.length)
+            {
+                finish(t, matches);
+                recycle(worklist);
+                return;
+            }
+            else if(prog[t.pc].consumesInput)
+            {
+                list.insertBack(t);
+                t = worklist.fetch();
+            }
+            else
+            {
+                switch(prog[t.pc].code)
+                {
                 case IR.Wordboundary:
-                    assert(0, "No impl yet");
+                    //at start & end of input
+                    if((s.empty && isUniAlpha(s.front))
+                       || (s.length == origin.length && isUniAlpha(cur)) )
+                        t.pc += IRL!(IR.Wordboundary);
+                    else if( (isUniAlpha(s.front) && !isUniAlpha(cur))
+                          || (!isUniAlpha(s.front) && isUniAlpha(cur)) )
+                        t.pc += IRL!(IR.Wordboundary);
+                    else
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                    }
                     break;
                 case IR.Notwordboundary:
-                    assert(0, "No impl yet");
+                    if((s.empty && isUniAlpha(s.front))
+                       || (s.length == origin.length && isUniAlpha(cur)) )
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                    }
+                    else if( (isUniAlpha(s.front) && !isUniAlpha(cur))
+                          || (!isUniAlpha(s.front) && isUniAlpha(cur)) )
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                    }
+                    else
+                        t.pc += IRL!(IR.Wordboundary);
                     break;
                 case IR.Bol:
                     //TODO: multiline & attributes, unicode line terminators
-                    if(i == 0 || origin[0..i].back == '\n')
+                    if(s.length == origin.length || (cur == '\n'))
                     {
                         t.pc += IRL!(IR.Bol);
-                        clist.insert(t);
                     }
+                    else
+                        t = worklist.fetch();
                     break;
                 case IR.Eol:
                     //TODO: ditto for the end of line
-                    writeln("EOL", std.utf.stride(origin,i) + i ," vs ", origin.length);
-                    if(ch == '\n')
+                    writeln("EOL ", s);
+                    if(s.empty || s.front == '\n')//s.front - next symbol
                     {
                         t.pc += IRL!(IR.Eol);
-                        clist.insert(t);
                     }
+                    else
+                        t = worklist.fetch();
                     break;
                 case IR.InfiniteStart: 
                     t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
@@ -1660,34 +1613,31 @@ struct ThompsonMatcher(Char)
                     {
                         t.counter += step;
                         t.pc -= len;
-                        clist.insert(t);
                         break;
                     }
                     uint max = prog[t.pc+3].raw;
                     if(t.counter < max)
                     {
-                        
                         if(prog[t.pc].code == IR.RepeatEnd)
                         {
-                            clist.insert(fork(t, t.pc  - len,  t.counter + step));
-                            t.counter %= step;
-                            t.pc += IRL!(IR.RepeatEnd);
-                            //inserted later == lesser priority
-                            clist.insert(t);
+                            //queue out-of-loop thread
+                            worklist.insertFront(fork(t, t.pc + IRL!(IR.RepeatEnd),  t.counter % step));
+                            t.counter += step;
+                            t.pc -= len;
                         }
                         else
                         {
-                            clist.insert(fork(t, t.pc + IRL!(IR.RepeatQEnd),  t.counter % step));
-                            t.counter += step;
-                            t.pc -= len;
-                            //inserted later == lesser priority
-                            clist.insert(t);
+                            //queue into-loop thread
+                            worklist.insertFront(fork(t, t.pc - len,  t.counter + step));
+                            t.counter %= step;
+                            t.pc += IRL!(IR.RepeatEnd);
                         }
-                        break;
                     }
-                    t.counter %= step;
-                    t.pc += IRL!(IR.RepeatEnd);                       
-                    clist.insert(t);
+                    else
+                    {
+                        t.counter %= step;
+                        t.pc += IRL!(IR.RepeatEnd);
+                    }
                     break;
                 case IR.InfiniteEnd:
                 case IR.InfiniteQEnd:
@@ -1696,24 +1646,23 @@ struct ThompsonMatcher(Char)
                         merge[prog[t.pc + 1].raw] = genCounter;
                     else
                     {
-                        debug writeln("A thread(pc=%u) got merged there: ", origin[i..$]);
+                        debug writeln("A thread(pc=%u) got merged there: ", origin[inputIndex..$]);
                         recycle(t);
-                        continue L_threadLoop;
+                        t = worklist.fetch();
+                        break;
                     }
                     uint len = prog[t.pc].data;
                     if(prog[t.pc].code == IR.InfiniteEnd)
                     {
-                        clist.insert(fork(t, t.pc - len, t.counter));
-                        t.pc += IRL!(IR.InfiniteEnd);
-                        //inserted later == lesser priority
-                        clist.insert(t);
+                         //queue out-of-loop thread
+                        worklist.insertFront(fork(t, t.pc +IRL!(IR.InfiniteEnd), t.counter));
+                        t.pc -= len;
                     }
                     else
                     {
-                        clist.insert(fork(t, t.pc + IRL!(IR.InfiniteQEnd), t.counter));
-                        t.pc -= len;
-                        //inserted later == lesser priority
-                        clist.insert(t);
+                        //queue into-loop thread
+                        worklist.insertFront(fork(t, t.pc - len, t.counter));
+                        t.pc += IRL!(IR.InfiniteQEnd);
                     }
                     break;
                 case IR.OrEnd:
@@ -1722,43 +1671,43 @@ struct ThompsonMatcher(Char)
                         merge[prog[t.pc + 1].raw] = genCounter;
                     else
                     {
-                        debug writeln("A thread(pc=%u) got merged there: ", origin[i..$]);
+                        debug writeln("A thread(pc=%u) got merged there: ", origin[inputIndex..$]);
                         recycle(t);
-                        continue L_threadLoop;
+                        t = worklist.fetch();
+                        break;
                     }
                     t.pc += IRL!(IR.OrEnd);
-                    clist.insert(t);
                     break;
                 case IR.OrStart:
                     // add a thread for each option in turn
                     uint pc = t.pc + IRL!(IR.OrStart);
+                    assert(prog[pc].code == IR.OptionStart);
                     while(prog[pc].code == IR.OptionStart)
                     {
-                       uint len = prog[pc].data;
-                       clist.insert(fork(t, pc + IRL!(IR.OptionStart), t.counter));
-                       pc += len + IRL!(IR.OptionStart);
+                        uint len = prog[pc].data;
+                        //debug writeln("**StartOr** ",disassemble(prog, pc, re.index, re.dict));
+                        worklist.insertFront(fork(t, pc + IRL!(IR.OptionStart), t.counter));
+                        pc += len + IRL!(IR.OptionStart);
                     }
-                    recycle(t);//TODO: can omit this step and fork less
+                    recycle(t);//TODO: can omit this step and fork by one less
+                    t = worklist.fetch();
                     break;
                 case IR.OptionStart:
                     assert(0, "Faulty OrStart in Thompson VM");
                 case IR.OptionEnd:
                     t.pc = t.pc + prog[t.pc].data + IRL!(IR.OptionEnd);
-                    clist.insert(t);
                     break;
                 case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].begin = i;
+                    t.matches[re.index[n]+1].begin = inputIndex;
                     t.pc += IRL!(IR.GroupStart);
                     //debug  writefln("IR group #%u starts at %u", n, i);
-                    clist.insert(t);
                     break;
                 case IR.GroupEnd:   //TODO: ditto
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].end = i;
+                    t.matches[re.index[n]+1].end = inputIndex;
                     t.pc += IRL!(IR.GroupEnd);
                     //debug writefln("IR group #%u ends at %u", n, i);
-                    clist.insert(t);
                     break;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart: 
@@ -1769,18 +1718,11 @@ struct ThompsonMatcher(Char)
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
                     assert(0, "No lookaround for ThompsonVM yet!");
-                case IR.Backref:
-                    assert(0, "No backref for ThompsonVM yet!");
                 default:
                     assert(0);   
                 }
-            }            
-            clist =  nlist;
-            nlist = ThreadList.init;
-            genCounter++;
-            writefln("Now list has %d threads", clist.length);
-        }
-        return matchEnd(matches) || matched;//TODO: here happens partial match
+            }
+        }while(t);
     }
 
     ///get a dirty recycled Thread 
@@ -1808,6 +1750,18 @@ struct ThompsonMatcher(Char)
     {
         t.next = freelist;
         freelist = t;
+    }
+    //dispose list of threads
+    void recycle(ref ThreadList list)
+    {
+        auto t = list.tip;
+        while(t)
+        {
+            auto next = t.next;
+            recycle(t);
+            t = next;
+        }
+        list = list.init;
     }
     ///creates a copy of master thread with given pc
     Thread* fork(Thread* master, uint pc, size_t counter)
