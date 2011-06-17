@@ -52,8 +52,9 @@ unittest
     };
 
     static TestVectors tv[] = [
-        //doesn't work with Thompson VM yet
-       // {  "(a)\\1",    "abaab","y",    "&",    "aa" },
+        
+        {  "(a)b\\1",   "abaab","y",    "&",    "aba" },
+        {  "()b\\1",     "aaab", "y",    "&",    "b" },
         {  "abc",       "abc",  "y",    "&",    "abc" },
         {  "abc",       "xbc",  "n",    "-",    "-" },
         {  "abc",       "axc",  "n",    "-",    "-" },
@@ -112,10 +113,10 @@ unittest
         {  "(*)b",      "-",    "c",    "-",    "-" },
         {  "$b",        "b",    "n",    "-",    "-" },
         {  "a\\",       "-",    "c",    "-",    "-" }, 
-       /* {  "a\\(b",     "a(b",  "y",    "&-\\1",        "a(b-" },
+        {  "a\\(b",     "a(b",  "y",    "&-\\1",        "a(b-" },
         {  "a\\(*b",    "ab",   "y",    "&",    "ab" },
         {  "a\\(*b",    "a((b", "y",    "&",    "a((b" },
-        {  "a\\\\b",    "a\\b", "y",    "&",    "a\\b" },*/
+        {  "a\\\\b",    "a\\b", "y",    "&",    "a\\b" },
         {  "abc)",      "-",    "c",    "-",    "-" },
         {  "(abc",      "-",    "c",    "-",    "-" },
         {  "((a))",     "abc",  "y",    "&-\\1-\\2",    "a-a-a" },
@@ -138,8 +139,8 @@ unittest
         {  "",  "abc",  "y",    "&",    "" },
         {  "abc",       "",     "n",    "-",    "-" },
         {  "a*",        "",     "y",    "&",    "" },
-    //    {  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" },
-    //    {  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" },
+      //  {  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" },
+      //  {  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" },
         {  "a|b|c|d|e", "e",    "y",    "&",    "e" },
         {  "(a|b|c|d|e)f", "ef",        "y",    "&-\\1",        "ef-e" },
         {  "((a*|b))*", "aabb", "y",    "-",    "-" },
@@ -204,8 +205,7 @@ unittest
         {  "\\s\\w*",   "foo bar",              "y",    "&",    " bar" },
         {  "\\S\\w*",   "foo bar",              "y",    "&",    "foo" },
         {  "abc",       "ababc",                "y",    "&",    "abc" },
-    //no backref for thompson yet
-    //    {  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "&", "apple, orange," },
+        {  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "&", "apple, orange," },
         {  "(\\w+)\\s(\\w+)",           "John Smith", "y", "\\2, \\1", "Smith, John" },
         {  "\\n\\f\\r\\t\\v",           "abc\n\f\r\t\vdef", "y", "&", "\n\f\r\t\v" },
         {  ".*c",       "abcde",                "y",    "&",    "abc" },
@@ -221,8 +221,9 @@ unittest
         {  "^(a)(b)?(c*)",       "acc",  "y", "\\1 \\2 \\3", "a  cc" },
         {  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " },
         {"(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" }, 
-     /+   {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },//for now for Thompson VM
-        {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
+        {"(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" },
+        //no lookaround for Thompson VM
+     /+   {"foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" },
         {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" }, +/
 //more repetitions!
         {  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" }, 

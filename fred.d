@@ -119,18 +119,6 @@ bool isAtomIR(IR i)
 {
     return (i&0b11)==0b00;
 }
-/// is IR consumes any input on match (i.e. non zero-width)
-bool consumesInput(IR i)
-{
-    switch(i)//TODO: should be optimized with bittwidling
-    {
-    case IR.Char, IR.Any, IR.Digit, IR.Notdigit, IR.Space, IR.Notspace,
-            IR.Word, IR.Notword, IR.Backref, IR.Charset:
-        return true;
-    default:
-        return false;
-    }
-}
 /// makes respective pair out of IR i, swapping start/end bits of instruction
 IR pairedIR(IR i)
 {
@@ -180,12 +168,6 @@ struct Bytecode
     {
         return lengthOfPairedIR(code);
     }
-    /// true if this instruction is of 'consume input' class
-    @property bool consumesInput()
-    {
-        return .consumesInput(code);
-    }
-
 }
 
 static assert(Bytecode.sizeof == 4);
@@ -1392,14 +1374,13 @@ struct ThompsonMatcher(Char)
         Bytecode[] prog = re.ir;
         debug writeln("Threaded matching started");
         s = origin;
-        //if(origin.empty)
-            addThread(createStart(0), matches, clist);// in hope that the whole regex is zero-width
+        addThread(createStart(0), matches, clist);
         while(!s.empty)
         {
             //fetch a codepoint
             cur = s.front;
             s.popFront();
-            writefln("Threaded matching at index %s", inputIndex);
+            writefln("Threaded matching %d threads at index %s", clist.length, inputIndex);
             foreach(t; clist[])
             {
                 assert(t);
@@ -1479,9 +1460,24 @@ struct ThompsonMatcher(Char)
                         recycle(t);
                     break;
                 case IR.Backref:
-                    assert(0, "No backref for ThompsonVM yet!");
+                    uint n = prog[t.pc].data;
+                    uint idx = t.matches[n+1].begin + t.uopCounter;
+                    if(origin[idx..$].front == cur)
+                    {
+                       t.uopCounter += std.utf.stride(origin, idx);
+                       if(t.uopCounter + t.matches[n+1].begin == t.matches[n+1].end)
+                       {//last codepoint
+                            t.pc += IRL!(IR.Backref);
+                            t.uopCounter = 0;
+                            addThread(t, matches, nlist);
+                       }
+                       else
+                           nlist.insertBack(t);
+                    }
+                    else
+                        recycle(t);
+                    break;
                 default:
-                    assert(!prog[t.pc].consumesInput, "Control flow leaked into main loop");
                     assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
                 }
             }
@@ -1495,7 +1491,6 @@ struct ThompsonMatcher(Char)
             clist =  nlist;
             nlist = ThreadList.init;
             genCounter++;
-            writefln("Now list has %d threads", clist.length);
         }
         if(!matched)
         {
@@ -1523,7 +1518,7 @@ struct ThompsonMatcher(Char)
         recycle(clist);//cut off low priority threads
     }
     /++
-        add a thread to new list, cutting trough all 0-width instructions 
+        add a thread to list, cutting trough all 0-width instructions 
         and taking care of control flow
     +/
     void addThread(Thread* t, Group[] matches, ref ThreadList list)
@@ -1537,11 +1532,6 @@ struct ThompsonMatcher(Char)
                 finish(t, matches);
                 recycle(worklist);
                 return;
-            }
-            else if(prog[t.pc].consumesInput)
-            {
-                list.insertBack(t);
-                t = worklist.fetch();
             }
             else
             {
@@ -1709,6 +1699,15 @@ struct ThompsonMatcher(Char)
                     t.pc += IRL!(IR.GroupEnd);
                     //debug writefln("IR group #%u ends at %u", n, i);
                     break;
+                case IR.Backref:
+                    uint n = prog[t.pc].data;
+                    if(t.matches[n+1].begin == t.matches[n+1].end)//zero-width Backref!
+                    {
+                        t.pc += IRL!(IR.Backref);
+                    }
+                    else
+                        goto default;
+                    break;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart: 
                 case IR.LookbehindStart:
@@ -1719,7 +1718,8 @@ struct ThompsonMatcher(Char)
                 case IR.NeglookbehindEnd:
                     assert(0, "No lookaround for ThompsonVM yet!");
                 default:
-                    assert(0);   
+                    list.insertBack(t);
+                    t = worklist.fetch();
                 }
             }
         }while(t);
