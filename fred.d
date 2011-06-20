@@ -15,9 +15,9 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip;
 
 /// [TODO: format for doc]
-///  IR bit pattern: 0b1_xxxxx_yy
-///  where yy idicates class of instruction, xxxxx for actual operation code
-///      00: atom, a normal instruction
+///  IR bit pattern: 0b1_xxxxx_yy 
+///  where yy indicates class of instruction, xxxxx for actual operation code 
+///      00: atom, a normal instruction 
 ///      01: open, opening of a group, has length of contained IR in the low bits 
 ///      10: close, closing of a group, has length of contained IR in the low bits 
 ///      11 unused
@@ -49,6 +49,7 @@ enum IR:uint {
     OptionStart       = 0b1_01111_00, /// start of an option within an alternation x | y (length)
     OptionEnd         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
+    Nop               = 0b1_10010_00, /// no operation (padding)
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
@@ -285,11 +286,11 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
         } else {
             put(sink,irb[0].mnemonic);
             put(sink,"(");
-            formattedWrite(sink,"%x",irb[0].data);
+            formattedWrite(sink,"%d",irb[0].data);
             int nArgs= irb[0].args;
             for (int iarg=0;iarg<nArgs;++iarg){
                 if (iarg+1<irb.length){
-                    formattedWrite(sink,",%x",irb[iarg+1].data);
+                    formattedWrite(sink,",%d",irb[iarg+1].data);
                 } else {
                     put(sink,"*error* incomplete irb stream");
                 }
@@ -332,8 +333,35 @@ struct Group
         return a.data;
     }
 }
-
-struct RecursiveParser(R)
+///basic stack, just in case it gets used anywhere else then Parser
+struct Stack(T)//TODO: redo with TmpAlloc
+{
+    Appender!(T[]) stack;
+    @property bool empty(){ return stack.data.empty; }
+    void push(T item)
+    {
+        stack.put(item);
+    }
+    @property ref T top()
+    {
+        assert(!empty);
+        return stack.data[$-1];
+    }
+    @property void top(T val)
+    {
+        assert(!empty);
+        stack.data[$-1] = val;
+    }
+    @property size_t length(){  return stack.data.length; }
+    T pop()
+    {
+        assert(!empty);
+        auto t = stack.data[$-1];
+        stack.shrinkTo(stack.data.length-1);
+        return t;
+    }
+}
+struct Parser(R)
 if (isForwardRange!R && is(ElementType!R : dchar))
 {
     enum infinite = ~0u;
@@ -344,6 +372,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     uint level = 0;      //current lookaround level
     uint[] index;        //user group number -> internal number
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
+    Stack!uint fixupStack;  //stack of opened start instructions 
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
@@ -397,84 +426,183 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     */
     void parseRegex()
     {
-        uint start = cast(uint)ir.length;
+        fixupStack.push(0); 
         auto subSave = ngroup;
         auto maxCounterDepth = counterDepth;
-        while(!empty && current != '|' && current != ')')
+        uint fix;//fixup pointer
+        void finishAlternation()
         {
-            auto saveCounterDepth = counterDepth;
-            parseRepetition();
-            maxCounterDepth = max(counterDepth, maxCounterDepth);
-            counterDepth = saveCounterDepth;
-        } 
-        if(!empty)
+            ir[fix].code == IR.OptionStart || error("LR syntax error");
+            ir[fix] = Bytecode(ir[fix].code, ir.length - fix - IRL!(IR.OrStart));
+            fix = fixupStack.pop();
+            ir[fix].code == IR.OrStart || error("LR syntax error");
+            ir[fix] = Bytecode(IR.OrStart, ir.length - fix - IRL!(IR.OrStart));
+            put(Bytecode(IR.OrEnd, ir.length - fix - IRL!(IR.OrStart)));
+            uint pc = fix + IRL!(IR.OrStart);
+            while(ir[pc].code == IR.OptionStart)
+            {
+                pc = pc + ir[pc].data;
+                if(ir[pc].code != IR.OptionEnd)
+                    break;
+                ir[pc] = Bytecode(IR.OptionEnd,cast(uint)(ir.length - pc - IRL!(IR.OrEnd)));
+                pc += IRL!(IR.OptionEnd);
+            }
+            put(Bytecode.fromRaw(0));                
+        }
+        while(!empty)
+        {
+            debug writeln("*LR*\nSource: ", pat, "\nStack: ",fixupStack.stack.data);
+
             switch(current)
             {
+            case '(':
+                next();
+                nesting++;
+                uint nglob;
+                fixupStack.push(cast(uint)ir.length);
+                if(current == '?')
+                {
+                    next();
+                    switch(current)
+                    {
+                    case ':':
+                        next();
+                        break;
+                    case '=':
+                        put(Bytecode(IR.LookaheadStart, 0));
+                        next();
+                        break;
+                    case '!':
+                        put(Bytecode(IR.NeglookaheadStart, 0));
+                        next();
+                        break;
+                    case 'P':
+                        next();
+                        if(current != '<')
+                            error("Expected '<' in named group");
+                        string name;
+                        while(next() && isalpha(current))
+                        {
+                            name ~= current;
+                        }
+                        if(current != '>')
+                            error("Expected '>' closing named group");
+                        next();
+                        nglob = cast(uint)index.length-1;//not counting whole match
+                        index ~= ngroup++;
+                        auto t = NamedGroup(name,nglob);
+                        auto d = assumeSorted!"a.name < b.name"(dict);
+                        auto ind = d.lowerBound(t).length;
+                        insertInPlace(dict, ind, t);
+                        put(Bytecode(IR.GroupStart, nglob));
+                        break;
+                    case '<':
+                        next();
+                        if(current == '=')
+                            put(Bytecode(IR.LookbehindStart, 0));
+                        else if(current == '!')
+                            put(Bytecode(IR.NeglookbehindStart, 0));
+                        else
+                            error("'!' or '=' expected after '<'");
+                        next();
+                        break;
+                    default:
+                        error(" ':', '=', '<', 'P' or '!' expected after '(?' ");
+                    }
+                }
+                else
+                {
+                    nglob = cast(uint)index.length-1;//not counting whole match
+                    index ~= ngroup++; //put local index
+                    put(Bytecode(IR.GroupStart, nglob));
+                }
+                break;
             case ')':
                 nesting || error("Unmatched ')'");
                 nesting--;
+                next();
+                fix = fixupStack.pop();
+                
+                switch(ir[fix].code)
+                {
+                case IR.GroupStart:
+                    put(Bytecode(IR.GroupEnd,ir[fix].data));
+                    parseQuantifier(fix); 
+                    break;
+                case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
+                    ir[fix] = Bytecode(ir[fix].code, ir.length - fix - 1);
+                    put(ir[fix].paired);
+                    break;
+                case IR.OptionStart: // | xxx )
+                    // two fixups: last option + full OR
+                    finishAlternation();
+                    fix = fixupStack.top;
+                    if(ir[fix].code == IR.GroupStart)//was also a group
+                    {
+                        fixupStack.pop();
+                        put(Bytecode(IR.GroupEnd,ir[fix].data));
+                        parseQuantifier(fix); 
+                    }
+                    break;
+                default://(?:xxx)
+                    parseQuantifier(fix);
+                }
                 break;
             case '|':
-                Bytecode[2] piece = [Bytecode.init, Bytecode(IR.OptionStart, ir.length - start + 1)];
-                insertInPlace(ir, start, piece[]);
-                put(Bytecode(IR.OptionEnd, 0)); 
-                uint anchor = cast(uint)(ir.length); //points to first option
-                uint maxSub = 0; //maximum number of captures out of each code path
-                do
+                next();
+                fix = fixupStack.top;
+                switch(ir[fix].code)
                 {
-                    next();
-                    uint offset = cast(uint)(ir.length);
-                    put(Bytecode.init); //reserve space
-                    
-                    while(!empty && current != '|' && current != ')')
-                    {
-                        auto saveCounterDepth = counterDepth;
-                        parseRepetition();
-                        maxCounterDepth = max(counterDepth, maxCounterDepth);
-                        counterDepth = saveCounterDepth;
-                    }
-                    if(current == '|')      //another option?
-                    {
-                        put(Bytecode(IR.OptionEnd, 0));//mark now, fixup later   
-                    }
-                    uint len = cast(uint)(ir.length - offset - 1);
-                    len < (1<<24) || error("Internal error - overflow");
-                    ir[offset] = Bytecode(IR.OptionStart,  len);
-                    maxSub = max(ngroup,maxSub);
-                    ngroup = subSave; //reuse groups across alternations
-                }while(current == '|');
-                ir[start] = Bytecode(IR.OrStart, ir.length - start - 1);
-                uint pc = start + 1;
-                //fixup OptionEnds so that they point to the last OrEnd
-                while(pc < ir.length)
-                {
-                    pc = pc + ir[pc].data;
-                    if(ir[pc].code != IR.OptionEnd)
-                        break;
-                    ir[pc] = Bytecode(IR.OptionEnd,cast(uint)(ir.length - pc - 1));
-                    pc++;
+                case IR.OptionStart:
+                    ir[fix] = Bytecode(ir[fix].code, ir.length - fix);
+                    put(Bytecode(IR.OptionEnd, 0));
+                    fixupStack.top = ir.length; // replace latest fixup for OptionStart
+                    put(Bytecode(IR.OptionStart, 0));
+                    break;
+                default:    //start a new option
+                    if(fixupStack.length == 1)//only one entry 
+                        fix = -1;
+                    uint len = ir.length - fix;    
+                    Bytecode[2] piece = [Bytecode(IR.OrStart, 0), Bytecode(IR.OptionStart, len)];
+                    insertInPlace(ir, fix+1, piece[]);
+                    assert(ir[fix+1].code == IR.OrStart);
+                    put(Bytecode(IR.OptionEnd, 0));
+                    fixupStack.push(fix+1); // fixup for StartOR
+                    fixupStack.push(ir.length); //for OptionStart
+                    put(Bytecode(IR.OptionStart, 0));
                 }
-                //end and start use the same length
-                put(Bytecode(IR.OrEnd, ir[start].data));
-                put(Bytecode.init); //merge point
-                ngroup = maxSub;
-                if(current == ')') 
-                    goto case ')';
+                
+                /*uint maxSub = 0; //maximum number of captures out of each code path
+               
+                ngroup = maxSub;*/
                 break;
-            default:
+            default://no groups or whatever
+                uint start = cast(uint)ir.length;
+                parseAtom();
+                parseQuantifier(start);
             }
-        counterDepth = maxCounterDepth;
+        }
+        //unwind fixup stack, check for errors
+        if(fixupStack.length != 1)
+        {
+            fix = fixupStack.pop();
+            if(ir[fix].code == IR.OptionStart)
+            {
+                finishAlternation();
+                fixupStack.length == 1 || error(" LR syntax error");
+            }
+            else
+                error(" LR syntax error");
+        }
     }
     /*
         Parse and store IR for atom-quantifier pair
     */
-    void parseRepetition()
+    void parseQuantifier(uint offset)
     {
-        uint offset = cast(uint)ir.length;
-        parseAtom();
-        uint len = cast(uint)ir.length - offset;
         if(empty)
             return;
+        uint len = cast(uint)ir.length - offset;
         uint min, max;
         switch(current)
         {
@@ -577,101 +705,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             break;
         case '.':
             put(Bytecode(IR.Any, 0));
-            next();
-            break;
-        case '(':
-            R save = pat;
-            next();
-            Bytecode op;
-            uint nglob;
-            bool lookaround  = false;
-            nesting++;
-            if(current == '?')
-            {
-                next();
-                switch(current)
-                {
-                case ':':
-                    next();
-                    break;
-                case '=':
-                    op = Bytecode(IR.LookaheadStart, 0);
-                    next();
-                    lookaround = true;
-                    break;
-                case '!':
-                    op = Bytecode(IR.NeglookaheadStart, 0);
-                    next();
-                    lookaround = true;
-                    break;
-                case 'P':
-                    next();
-                    if(current != '<')
-                        error("Expected '<' in named group");
-                    string name;
-                    while(next() && isalpha(current))
-                    {
-                        name ~= current;
-                    }
-                    if(current != '>')
-                        error("Expected '>' closing named group");
-                    next();
-                    nglob = cast(uint)index.length-1;//not counting whole match
-                    index ~= ngroup++;
-                    auto t = NamedGroup(name,nglob);
-                    auto d = assumeSorted!"a.name < b.name"(dict);
-                    auto ind = d.lowerBound(t).length;
-                    insertInPlace(dict, ind, t);
-                    op = Bytecode(IR.GroupStart, nglob);
-                    break;
-                case '<':
-                    next();
-                    if(current == '=')
-                        op = Bytecode(IR.LookbehindStart, 0);
-                    else if(current == '!')
-                        op = Bytecode(IR.NeglookbehindStart, 0);
-                    else
-                        error("'!' or '=' expected after '<'");
-                    next();
-                    lookaround = true;
-                    break;
-                default:
-                    error(" ':', '=', '<', 'P' or '!' expected after '(?' ");
-                }
-            }
-            else
-            {
-                nglob = cast(uint)index.length-1;//not counting whole match
-                index ~= ngroup++; //put local index
-                op = Bytecode(IR.GroupStart, nglob);
-            }            
-            if(lookaround)
-            {
-                uint offset = cast(uint)ir.length;
-                put(Bytecode.init);
-                parseRegex();
-                uint sz = cast(uint)(ir.length - offset - 1);
-                put(Bytecode(pairedIR(op.code), sz));
-                ir[offset] = Bytecode(op.code, sz);
-            }
-            else
-            {
-                if(op != Bytecode.init) //currently only groups
-                {
-                    put(op);
-                }
-                parseRegex();
-            }
-            
-            if(op.code == IR.GroupStart)
-            {
-                put(Bytecode(IR.GroupEnd, nglob));
-            }
-            if(current != ')')
-            {
-                pat = save;
-                error("Unmatched '(' in regex pattern");
-            }
             next();
             break;
         case '[':
@@ -871,6 +904,7 @@ struct Program
             }
             if(ir[i].hotspot)
             {
+                assert(i + 1 < ir.length, "unexpected end of IR while looking for hotspot");
                 ir[i+1].raw = hotspotIndex;
                 hotspotIndex += counterRange[top];
             }
@@ -1547,7 +1581,7 @@ struct ThompsonMatcher(Char)
     +/
     void finish(Thread* t, Group[] matches)
     {
-        writeln(t.matches);
+        //debug writeln(t.matches);
         matches[] = t.matches[];
         //end of the whole match happens after current symbol
         matches[0].end = inputIndex;
@@ -1617,7 +1651,7 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.Eol:
                     //TODO: ditto for the end of line
-                    writeln("EOL ", s);
+                    debug writeln("EOL ", s);
                     if(s.empty || s.front == '\n')//s.front - next symbol
                     {
                         t.pc += IRL!(IR.Eol);
@@ -1911,7 +1945,7 @@ public:
 
 auto regex(S)(S pattern, S flags=[])
 {
-    auto parser = RecursiveParser!(typeof(pattern))(pattern);
+    auto parser = Parser!(typeof(pattern))(pattern);
     Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
     return r;
 }

@@ -347,9 +347,8 @@ int main(string[] argv)
             write(s);
             try
             {
-                auto p = RecursiveParser!(string)(s);
+                auto re = regex(s);
                 write(" OK \n");
-                auto re = p.program;
                 re.print(); 
             }
             catch(Exception ex)
