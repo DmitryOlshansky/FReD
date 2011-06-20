@@ -46,8 +46,8 @@ enum IR:uint {
     Backref           = 0b1_01100_00, /// backreference to a group (that has to be pinned, i.e. locally unique) (group index)
     GroupStart        = 0b1_01101_00, /// start of a group (x) (groupIndex+groupPinning(1bit))
     GroupEnd          = 0b1_01110_00, /// end of a group (x) (groupIndex+groupPinning(1bit))
-    OptionStart       = 0b1_01111_00, /// start of an option within an alternation x | y (length)
-    OptionEnd         = 0b1_10000_00, /// end of an option (length of the rest)
+    Option            = 0b1_01111_00, /// start of an option within an alternation x | y (length)
+    GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
     Nop               = 0b1_10010_00, /// no operation (padding)
 
@@ -198,7 +198,7 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     case IR.Char:
         formattedWrite(output, " %s",cast(dchar)irb[pc].data);
         break;
-    case IR.RepeatStart, IR.InfiniteStart, IR.OptionStart, IR.OptionEnd, IR.OrStart:
+    case IR.RepeatStart, IR.InfiniteStart, IR.Option, IR.GotoEndOr, IR.OrStart:
         //forward-jump instructions
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u", pc+len+1);
@@ -432,20 +432,20 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         uint fix;//fixup pointer
         void finishAlternation()
         {
-            ir[fix].code == IR.OptionStart || error("LR syntax error");
+            ir[fix].code == IR.Option || error("LR syntax error");
             ir[fix] = Bytecode(ir[fix].code, ir.length - fix - IRL!(IR.OrStart));
             fix = fixupStack.pop();
             ir[fix].code == IR.OrStart || error("LR syntax error");
             ir[fix] = Bytecode(IR.OrStart, ir.length - fix - IRL!(IR.OrStart));
             put(Bytecode(IR.OrEnd, ir.length - fix - IRL!(IR.OrStart)));
             uint pc = fix + IRL!(IR.OrStart);
-            while(ir[pc].code == IR.OptionStart)
+            while(ir[pc].code == IR.Option)
             {
                 pc = pc + ir[pc].data;
-                if(ir[pc].code != IR.OptionEnd)
+                if(ir[pc].code != IR.GotoEndOr)
                     break;
-                ir[pc] = Bytecode(IR.OptionEnd,cast(uint)(ir.length - pc - IRL!(IR.OrEnd)));
-                pc += IRL!(IR.OptionEnd);
+                ir[pc] = Bytecode(IR.GotoEndOr,cast(uint)(ir.length - pc - IRL!(IR.OrEnd)));
+                pc += IRL!(IR.GotoEndOr);
             }
             put(Bytecode.fromRaw(0));                
         }
@@ -522,7 +522,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 nesting--;
                 next();
                 fix = fixupStack.pop();
-                
                 switch(ir[fix].code)
                 {
                 case IR.GroupStart:
@@ -533,7 +532,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     ir[fix] = Bytecode(ir[fix].code, ir.length - fix - 1);
                     put(ir[fix].paired);
                     break;
-                case IR.OptionStart: // | xxx )
+                case IR.Option: // | xxx )
                     // two fixups: last option + full OR
                     finishAlternation();
                     fix = fixupStack.top;
@@ -553,23 +552,23 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 fix = fixupStack.top;
                 switch(ir[fix].code)
                 {
-                case IR.OptionStart:
+                case IR.Option:
                     ir[fix] = Bytecode(ir[fix].code, ir.length - fix);
-                    put(Bytecode(IR.OptionEnd, 0));
-                    fixupStack.top = ir.length; // replace latest fixup for OptionStart
-                    put(Bytecode(IR.OptionStart, 0));
+                    put(Bytecode(IR.GotoEndOr, 0));
+                    fixupStack.top = ir.length; // replace latest fixup for Option
+                    put(Bytecode(IR.Option, 0));
                     break;
                 default:    //start a new option
                     if(fixupStack.length == 1)//only one entry 
                         fix = -1;
                     uint len = ir.length - fix;    
-                    Bytecode[2] piece = [Bytecode(IR.OrStart, 0), Bytecode(IR.OptionStart, len)];
+                    Bytecode[2] piece = [Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len)];
                     insertInPlace(ir, fix+1, piece[]);
                     assert(ir[fix+1].code == IR.OrStart);
-                    put(Bytecode(IR.OptionEnd, 0));
+                    put(Bytecode(IR.GotoEndOr, 0));
                     fixupStack.push(fix+1); // fixup for StartOR
-                    fixupStack.push(ir.length); //for OptionStart
-                    put(Bytecode(IR.OptionStart, 0));
+                    fixupStack.push(ir.length); //for Option
+                    put(Bytecode(IR.Option, 0));
                 }
                 
                 /*uint maxSub = 0; //maximum number of captures out of each code path
@@ -586,7 +585,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         if(fixupStack.length != 1)
         {
             fix = fixupStack.pop();
-            if(ir[fix].code == IR.OptionStart)
+            if(ir[fix].code == IR.Option)
             {
                 finishAlternation();
                 fixupStack.length == 1 || error(" LR syntax error");
@@ -946,6 +945,126 @@ struct Program
     }
 }
 
+/// Simple UTF-string stream abstraction with caching
+struct Input(Char)//TODO: simillar thing with UTF normalization
+    if(is(Char == char) || is(Char == wchar))
+{
+    alias const(Char)[] String;
+    String _origin;
+    size_t _index;
+    uint _cached; 
+    enum { cachedBack = 0x1, cachedFront = 0x2, cachedNext = 0x4 };
+    dchar _back, _cur, _next;
+    /// constructs Input object out of plain string
+    this(String input)
+    {
+        _origin = input;
+        _index = 0;
+        _cached = 0;
+    }
+    /// previous codepoint
+    @property dchar back()
+    {
+        if((_cached & cachedBack))
+        {
+            _cached |= cachedBack;
+            _back = _origin[0.._index].back;
+        }
+        return _back;
+    }
+    /// peek at the next codepoint 
+    @property dchar next()
+    {
+        if((_cached & cachedNext))
+        {
+            _cached |= cachedNext;
+            _next = _origin[_index+std.utf.stride(_origin, _index)..$].front;
+        }
+        return _next;
+    } 
+    /// codepoint at current stream position
+    @property dchar front()
+    {  
+        if(!(_cached & cachedFront))
+        {
+            _cached |= cachedFront;
+            _cur = _origin[_index..$].front;
+        }
+        return _cur;
+    }
+    /// reset position to i
+    void seek(size_t i)
+    { 
+        _index = i; 
+        _cached = 0;
+    }
+    // returns position in input
+    @property size_t index(){ return _index; }
+    /// advance input to the next codepoint
+    void popFront()
+    {
+        _index += std.utf.stride(_origin, _index);
+        _cached >>= 1;
+        _back = _cur;
+        _cur = _next;
+    }
+    /// true if it's end of input
+    @property empty(){  return _index == _origin.length; }
+    /// true if it's start of input
+    @property atStart(){ return _index == 0; }
+    String opSlice(size_t start, size_t end){   return _origin[start..end]; }
+    @property size_t length(){  return _origin.length;  }
+}
+    
+///ditto
+struct Input(Char)
+    if(is(Char == dchar))
+{
+    alias const(Char)[] String;
+    String _origin;
+    size_t _index;
+    /// constructs Input object out of plain string
+    this(String input)
+    {
+        _origin = input;
+        _index = 0;
+    }
+    /// previous codepoint
+    @property dchar back()
+    {
+        return _origin[_index-1];
+    }
+    /// peek at the next codepoint 
+    @property dchar next()
+    {
+        return _origin[_index+1];
+    } 
+    /// codepoint at current stream position
+    @property dchar front()
+    {  
+        return _origin[_index];
+    }
+    /// reset position to i
+    void seek(size_t i)
+    { 
+        _index = i; 
+    }
+    // returns position in input
+    @property size_t index(){ return _index; }
+    /// advance input to the next codepoint
+    void popFront()
+    {
+        _index++;
+    }
+    /// true if it's end of input
+    @property empty(){  return _index == _origin.length; }
+    /// true if it's start of input
+    @property atStart(){ return _index == 0; }
+    String opSlice(size_t start, size_t end){   return _origin[start..end]; }
+    @property size_t length(){  return _origin.length;  }
+}
+ 
+
 /++
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions. 
@@ -1266,16 +1385,16 @@ if( is(Char : dchar) )
             case IR.OrStart:
                 pc += IRL!(IR.OrStart);
                 goto case;
-            case IR.OptionStart:
+            case IR.Option:
                 uint len = prog[pc].data;
-                if(prog[pc+len].code == IR.OptionEnd)//not a last one
+                if(prog[pc+len].code == IR.GotoEndOr)//not a last one
                 {
-                   pushState(pc + len + IRL!(IR.OptionStart), counter); //remember 2nd branch
+                   pushState(pc + len + IRL!(IR.Option), counter); //remember 2nd branch
                 }
-                pc += IRL!(IR.OptionStart);
+                pc += IRL!(IR.Option);
                 break;
-            case IR.OptionEnd:
-                pc = pc + prog[pc].data + IRL!(IR.OptionEnd);
+            case IR.GotoEndOr:
+                pc = pc + prog[pc].data + IRL!(IR.GotoEndOr);
                 break;
             case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                 uint n = prog[pc].data;
@@ -1417,22 +1536,19 @@ struct ThompsonMatcher(Char)
     ThreadList clist, nlist;
     uint[] merge;
     Program re;           //regex program
-    String origin, s;
-    dchar cur;
+    Input!Char s;
     size_t genCounter;    //merge trace counter, goes up on every dchar
     bool matched;
     
-    @property inputIndex(){ return origin.length - s.length; }
-    
-    this(Program prog, String input)
+    this(Program program, String input)
     {
-        re = prog;
-        origin = input;
+        re = program;
+        s = Input!Char(input);
         if(re.hotspotTableSize)
         {
             merge = new uint[re.hotspotTableSize];
         }
-        genCounter = 1;
+        genCounter = 0;
     }
     /++
         the usual match the input and fill matches
@@ -1445,15 +1561,13 @@ struct ThompsonMatcher(Char)
         }
         matched = false; //reset match flag
         Bytecode[] prog = re.ir;
-        debug writeln("Threaded matching started");
-        s = origin;
-        addThread(createStart(0), matches, clist);
+       
+        assert(clist == ThreadList.init);
+        assert(nlist == ThreadList.init);
         while(!s.empty)
         {
-            //fetch a codepoint
-            cur = s.front;
-            s.popFront();
-            writefln("Threaded matching %d threads at index %s", clist.length, inputIndex);
+            genCounter++;
+            writefln("Threaded matching %d threads at index %s", clist.length, s.index);
             foreach(t; clist[])
             {
                 assert(t);
@@ -1463,146 +1577,70 @@ struct ThompsonMatcher(Char)
             }
             for(Thread* t = clist.fetch(); t; t = clist.fetch())
             {
-                switch(prog[t.pc].code)
-                {
-                case IR.Char:
-                    if(cur == prog[t.pc].data)
-                    {   
-                        t.pc += IRL!(IR.Char);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Any:
-                    t.pc += IRL!(IR.Any);
-                    addThread(t, matches, nlist);
-                    break;
-                case IR.Word:
-                    if(isUniAlpha(cur))
-                    {
-                        t.pc += IRL!(IR.Word);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Notword:
-                    if(!isUniAlpha(cur))
-                    {
-                        t.pc += IRL!(IR.Notword);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Digit:
-                    if(isdigit(cur))
-                    {
-                        t.pc += IRL!(IR.Digit);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Notdigit:
-                    if(!isdigit(cur))
-                    {
-                        t.pc += IRL!(IR.Notdigit);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Space:
-                    if(isspace(cur))
-                    {
-                        t.pc += IRL!(IR.Space);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Notspace:
-                    if(!isspace(cur))
-                    {
-                        t.pc += IRL!(IR.Space);
-                        addThread(t, matches, nlist);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                case IR.Backref:
-                    uint n = prog[t.pc].data;
-                    uint idx = t.matches[n+1].begin + t.uopCounter;
-                    if(origin[idx..$].front == cur)
-                    {
-                       t.uopCounter += std.utf.stride(origin, idx);
-                       if(t.uopCounter + t.matches[n+1].begin == t.matches[n+1].end)
-                       {//last codepoint
-                            t.pc += IRL!(IR.Backref);
-                            t.uopCounter = 0;
-                            addThread(t, matches, nlist);
-                       }
-                       else
-                           nlist.insertBack(t);
-                    }
-                    else
-                        recycle(t);
-                    break;
-                default:
-                    assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
-                }
+                eval!true(t, matches);
             }
             if(!matched)//if we already have match no need to push the engine
-                addThread(createStart(inputIndex), matches, nlist);//put a new thread to nlist staring a this position 
+                eval!true(createStart(s.index), matches);// new thread staring at this position 
             else if(nlist.empty)
             {
                 debug writeln("Stopped  matching before consuming full input");
-                break;
+                break;//not a partial match for sure
             }
-            clist =  nlist;
+            clist = nlist;
             nlist = ThreadList.init;
-            genCounter++;
+            //to next codepoint
+            s.popFront();
         }
+        genCounter++; //increment also on each end
+        writefln("Threaded matching %d threads at end", clist.length);
+        //try out all zero-width posibilities 
         if(!matched)
+            eval!false(createStart(s.index), matches);// new thread starting at end of input
+        for(Thread* t = clist.fetch(); t; t = clist.fetch())
         {
-            foreach(t; clist[])
-                if(t.pc == prog.length)
-                {
-                    finish(cast(Thread*)t,matches);//hack our way in
-                    break;
-                }
+            eval!false(t, matches);
         }
-        return matched;//TODO: here happens partial match
+        //TODO: partial matching 
+        return matched;
     }
     /++
         handle succesful threads
     +/
-    void finish(Thread* t, Group[] matches)
+    void finish(const(Thread)* t, Group[] matches)
     {
         //debug writeln(t.matches);
         matches[] = t.matches[];
         //end of the whole match happens after current symbol
-        matches[0].end = inputIndex;
+        matches[0].end = s.index;
         debug writefln("FOUND pc=%s prog_len=%s: %s..%s", 
-                        t.pc, re.ir.length,matches[0].begin, matches[0].end);
+                    t.pc, re.ir.length,matches[0].begin, matches[0].end);
         matched = true;
-        recycle(clist);//cut off low priority threads
     }
+
     /++
-        add a thread to list, cutting trough all 0-width instructions 
-        and taking care of control flow
+        match thread against codepoint, cutting trough all 0-width instructions 
+        and taking care of control flow, then add it to nlist
     +/
-    void addThread(Thread* t, Group[] matches, ref ThreadList list)
+    void eval(bool withInput)(Thread* t, Group[] matches)
     {
         Bytecode[] prog = re.ir;
         ThreadList worklist;
+        debug writeln("Evaluating thread");
         do
         {
+            debug
+            {
+                writef("\tpc=%s [", t.pc); 
+                foreach(x; worklist[])
+                    writef(" %s ", x.pc);
+                writeln("]");
+            }
             if(t.pc == prog.length)
             {
                 finish(t, matches);
+                recycle(t);
+                //cut off low priority threads
+                recycle(clist);
                 recycle(worklist);
                 return;
             }
@@ -1612,11 +1650,11 @@ struct ThompsonMatcher(Char)
                 {
                 case IR.Wordboundary:
                     //at start & end of input
-                    if((s.empty && isUniAlpha(s.front))
-                       || (s.length == origin.length && isUniAlpha(cur)) )
+                    if((s.empty && isUniAlpha(s.back))
+                       || (s.atStart && isUniAlpha(s.front)) )
                         t.pc += IRL!(IR.Wordboundary);
-                    else if( (isUniAlpha(s.front) && !isUniAlpha(cur))
-                          || (!isUniAlpha(s.front) && isUniAlpha(cur)) )
+                    else if( (isUniAlpha(s.front) && !isUniAlpha(s.back))
+                          || (!isUniAlpha(s.front) && isUniAlpha(s.back)) )
                         t.pc += IRL!(IR.Wordboundary);
                     else
                     {
@@ -1625,14 +1663,14 @@ struct ThompsonMatcher(Char)
                     }
                     break;
                 case IR.Notwordboundary:
-                    if((s.empty && isUniAlpha(s.front))
-                       || (s.length == origin.length && isUniAlpha(cur)) )
+                    if((s.empty && isUniAlpha(s.back))
+                       || (s.atStart && isUniAlpha(s.front)) )
                     {
                         recycle(t);
                         t = worklist.fetch();
                     }
-                    else if( (isUniAlpha(s.front) && !isUniAlpha(cur))
-                          || (!isUniAlpha(s.front) && isUniAlpha(cur)) )
+                    else if( (isUniAlpha(s.front) && !isUniAlpha(s.back))
+                          || (!isUniAlpha(s.front) && isUniAlpha(s.back)) )
                     {
                         recycle(t);
                         t = worklist.fetch();
@@ -1642,7 +1680,7 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.Bol:
                     //TODO: multiline & attributes, unicode line terminators
-                    if(s.length == origin.length || (cur == '\n'))
+                    if(s.atStart || (s.back == '\n'))
                     {
                         t.pc += IRL!(IR.Bol);
                     }
@@ -1652,7 +1690,7 @@ struct ThompsonMatcher(Char)
                 case IR.Eol:
                     //TODO: ditto for the end of line
                     debug writeln("EOL ", s);
-                    if(s.empty || s.front == '\n')//s.front - next symbol
+                    if(s.empty || s.front == '\n')
                     {
                         t.pc += IRL!(IR.Eol);
                     }
@@ -1704,16 +1742,19 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.InfiniteEnd:
                 case IR.InfiniteQEnd:
-                    // merge point
-                    if(merge[prog[t.pc + 1].raw] < genCounter)
-                        merge[prog[t.pc + 1].raw] = genCounter;
+                    if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
+                    {
+                        debug writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
+                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                        merge[prog[t.pc + 1].raw+t.counter] = genCounter;
+                    }
                     else
                     {
-                        debug writeln("A thread(pc=%u) got merged there: ", origin[inputIndex..$]);
-                        recycle(t);
+                        debug writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
+                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
                         break;
-                    }
+                    }    
                     uint len = prog[t.pc].data;
                     if(prog[t.pc].code == IR.InfiniteEnd)
                     {
@@ -1729,46 +1770,44 @@ struct ThompsonMatcher(Char)
                     }
                     break;
                 case IR.OrEnd:
-                    // merge point
-                    if(merge[prog[t.pc + 1].raw] < genCounter)
-                        merge[prog[t.pc + 1].raw] = genCounter;
+                    if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
+                    {
+                        debug writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
+                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                        merge[prog[t.pc + 1].raw+t.counter] = genCounter;
+                        t.pc += IRL!(IR.OrEnd);
+                    }
                     else
                     {
-                        debug writeln("A thread(pc=%u) got merged there: ", origin[inputIndex..$]);
-                        recycle(t);
+                        debug writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
+                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
-                        break;
-                    }
-                    t.pc += IRL!(IR.OrEnd);
+                    }   
                     break;
                 case IR.OrStart:
-                    // add a thread for each option in turn
-                    uint pc = t.pc + IRL!(IR.OrStart);
-                    assert(prog[pc].code == IR.OptionStart);
-                    while(prog[pc].code == IR.OptionStart)
+                    t.pc += IRL!(IR.OrStart);
+                    goto case;
+                case IR.Option:
+                    uint next = t.pc + prog[t.pc].data + IRL!(IR.Option);
+                    //queue next Option
+                    if(prog[next].code == IR.Option)
                     {
-                        uint len = prog[pc].data;
-                        //debug writeln("**StartOr** ",disassemble(prog, pc, re.index, re.dict));
-                        worklist.insertFront(fork(t, pc + IRL!(IR.OptionStart), t.counter));
-                        pc += len + IRL!(IR.OptionStart);
+                        worklist.insertFront(fork(t, next, t.counter));
                     }
-                    recycle(t);//TODO: can omit this step and fork by one less
-                    t = worklist.fetch();
+                    t.pc += IRL!(IR.Option);
                     break;
-                case IR.OptionStart:
-                    assert(0, "Faulty OrStart in Thompson VM");
-                case IR.OptionEnd:
-                    t.pc = t.pc + prog[t.pc].data + IRL!(IR.OptionEnd);
+                case IR.GotoEndOr:
+                    t.pc = t.pc + prog[t.pc].data + IRL!(IR.GotoEndOr);
                     break;
                 case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].begin = inputIndex;
+                    t.matches[re.index[n]+1].begin = s.index;
                     t.pc += IRL!(IR.GroupStart);
                     //debug  writefln("IR group #%u starts at %u", n, i);
                     break;
                 case IR.GroupEnd:   //TODO: ditto
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].end = inputIndex;
+                    t.matches[re.index[n]+1].end = s.index;
                     t.pc += IRL!(IR.GroupEnd);
                     //debug writefln("IR group #%u ends at %u", n, i);
                     break;
@@ -1778,8 +1817,28 @@ struct ThompsonMatcher(Char)
                     {
                         t.pc += IRL!(IR.Backref);
                     }
+                    else static if(withInput)
+                    {
+                        uint idx = t.matches[n+1].begin + t.uopCounter;
+                        if(s[idx..s.length].front == s.front)
+                        {
+                           t.uopCounter += std.utf.stride(s[idx..s.length], 0);
+                           if(t.uopCounter + t.matches[n+1].begin == t.matches[n+1].end)
+                           {//last codepoint
+                                t.pc += IRL!(IR.Backref);
+                                t.uopCounter = 0;
+                           }
+                           nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                    }
                     else
-                        goto default;
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                    }
                     break;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart: 
@@ -1790,9 +1849,94 @@ struct ThompsonMatcher(Char)
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
                     assert(0, "No lookaround for ThompsonVM yet!");
-                default:
-                    list.insertBack(t);
-                    t = worklist.fetch();
+                static if(withInput)
+                {
+                    case IR.Char:
+                        if(s.front == prog[t.pc].data)
+                        {   
+                            // debug writefln("IR.Char %s vs %s ", s.front, cast(dchar)prog[t.pc].data);
+                            t.pc += IRL!(IR.Char);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Any:
+                        t.pc += IRL!(IR.Any);
+                        nlist.insertBack(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Word:
+                        if(isUniAlpha(s.front))
+                        {
+                            t.pc += IRL!(IR.Word);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Notword:
+                        if(!isUniAlpha(s.front))
+                        {
+                            t.pc += IRL!(IR.Notword);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Digit:
+                        if(isdigit(s.front))
+                        {
+                            t.pc += IRL!(IR.Digit);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Notdigit:
+                        if(!isdigit(s.front))
+                        {
+                            t.pc += IRL!(IR.Notdigit);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Space:
+                        if(isspace(s.front))
+                        {
+                            t.pc += IRL!(IR.Space);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    case IR.Notspace:
+                        if(!isspace(s.front))
+                        {
+                            t.pc += IRL!(IR.Space);
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
+                    default:
+                        assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
+                }
+                else
+                {
+                    default:
+                        recycle(t);
+                        t = worklist.fetch();
+                }
+                    
                 }
             }
         }while(t);
@@ -1870,28 +2014,28 @@ private:
     uint[] index;
     uint flags;
     NamedGroup[] named;
-    alias Engine!(typeof(R.init[0])) EngineType;
+    alias Engine!(Unqual!(typeof(R.init[0]))) EngineType;
     EngineType engine;
     struct Captures
     {
-        RegexMatch m;
+        R input;
         Group[] groups;
         uint[] index;
         this(RegexMatch rmatch)
         {
-            m = rmatch;
-            index = m.index;
+            input = rmatch.input;
+            index = rmatch.index;
             groups = rmatch.matches;
         }
         @property R front()
         {
             assert(!index.empty);
-            return m.input[groups[index[0]].begin .. groups[index[0]].end];  
+            return input[groups[index[0]].begin .. groups[index[0]].end];  
         }
         @property R back()
         { 
             assert(!index.empty);
-            return m.input[groups[index[$-1]].begin .. groups[index[$-1]].end];
+            return input[groups[index[$-1]].begin .. groups[index[$-1]].end];
         }
         void popFront()
         {
@@ -1904,7 +2048,7 @@ private:
         @property bool empty(){ return index.empty; }
         R opIndex(size_t i)
         { 
-            return m.input[groups[index[i]].begin..groups[index[i]].end];
+            return input[groups[index[i]].begin..groups[index[i]].end];
         }
         @property size_t length() const { return index.length; }
     }

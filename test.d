@@ -10,10 +10,10 @@ unittest
     regex("abc|edf|ighrg");
     auto r1 = regex("abc");
     auto r2 = regex("(gylba)");
-   /+ assert(match("abcdef", r1).hit == "abc");
-    assert(match("wida",r2).empty);+/
+    assert(match("abcdef", r1).hit == "abc");
+    assert(match("wida",r2).empty);
     assert(tmatch("abcdef", r1).hit == "abc");
-    assert(tmatch("wida",r2).empty);
+    assert(tmatch("wida", r2).empty);
 }
 
 
@@ -52,7 +52,7 @@ unittest
     };
 
     static TestVectors tv[] = [
-        
+         
         {  "(a)b\\1",   "abaab","y",    "&",    "aba" },
         {  "()b\\1",     "aaab", "y",    "&",    "b" },
         {  "abc",       "abc",  "y",    "&",    "abc" },
@@ -127,7 +127,7 @@ unittest
         {  "(a*)*",     "aaa",  "y",    "-",    "-" },
         {  "(a*)+",     "aaa",  "y",    "-",    "-" },
         {  "(a|)*",     "-",    "y",    "-",    "-" },
-        {  "(a*|b)*",   "aabb", "y",    "-",    "-" },
+        {  "(a*|b)*",   "aabb", "y",    "-",    "-" },  
         {  "(a|b)*",    "ab",   "y",    "&-\\1",        "ab-b" },
         {  "(a+|b)*",   "ab",   "y",    "&-\\1",        "ab-b" },
         {  "(a+|b)+",   "ab",   "y",    "&-\\1",        "ab-b" },
@@ -153,13 +153,14 @@ unittest
         {  "(abc|)ef",  "abcdef",       "y",    "&-\\1",        "ef-" },
         {  "(a|b)c*d",  "abcd", "y",    "&-\\1",        "bcd-b" },
         {  "(ab|ab*)bc",        "abc",  "y",    "&-\\1",        "abc-a" },
-    /*    {  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" },
+       /* {  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" },
         {  "a([bc]*)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
         {  "a([bc]+)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" },
         {  "a([bc]*)(c+d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-b-cd" },
         {  "a[bcd]*dcdcde",     "adcdcde",      "y",    "&",    "adcdcde" },
-        {  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" },
-    */    {  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" },
+        {  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" }, */
+     
+        {  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" },
         {  "((a)(b)c)(d)",      "abcd", "y",    "\\1-\\2-\\3-\\4",      "abc-a-b-d" },
     //    {  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "&",    "alpha" },
     //    {  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "&-\\1",        "bh-" },
@@ -227,7 +228,9 @@ unittest
         {"(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" }, +/
 //more repetitions!
         {  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" }, 
-        ];
+//reuse of matches
+        {   "(abc)|(edf)|(xyz)",     "xyz",     "y",    "\\1-\\2-\\3",  "--xyz" }, 
+        ]; 
 
     int i;
     sizediff_t a;
@@ -319,7 +322,7 @@ unittest
         }
         writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
     }
-    run_tests!match(); //backtracker
+    //run_tests!match(); //backtracker
     run_tests!tmatch(); //thompson VM
 }
 version(unittest){
