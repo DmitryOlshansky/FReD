@@ -660,7 +660,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 putRaw(1); 
                 putRaw(min);
                 putRaw(max);
-                counterDepth++;
+                counterDepth = std.algorithm.max(counterDepth, nesting+1);
             }
         }
         else if(min) // && max is infinite
@@ -673,7 +673,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 putRaw(1);
                 putRaw(min);
                 putRaw(min);
-                counterDepth++;
+                counterDepth = std.algorithm.max(counterDepth, nesting+1);
             }
             put(Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
             ir ~= ir[offset .. offset+len];
@@ -909,7 +909,6 @@ struct Program
             }
         }
         hotspotTableSize = hotspotIndex;
-        debug writeln("---\nHotspots & counters fixed, total merge table size: ", hotspotTableSize);
     }
     /// IR code validator - proper nesting, illegal instructions, etc.
     void validate()
@@ -941,7 +940,8 @@ struct Program
         {
             writefln("%d\t%s ", i, disassemble(ir, i, index, dict));
         }
-        writefln("Max counter nesting depth %u ", maxCounterDepth);
+        writeln("Total merge table size: ", hotspotTableSize);
+        writeln("Max counter nesting depth: ", maxCounterDepth);
     }
 }
 
