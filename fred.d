@@ -14,6 +14,10 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip;
 
+//uncomment to get a barrage of debug info
+debug = fred_parser;
+debug = fred_matching;
+
 /// [TODO: format for doc]
 ///  IR bit pattern: 0b1_xxxxx_yy 
 ///  where yy indicates class of instruction, xxxxx for actual operation code 
@@ -233,8 +237,8 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:    
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u", pc + len + 1);
-        break;
-    case IR.Backref:
+        break;    
+    case IR.Backref: case IR.Charset:
         uint n = irb[pc].data;
         formattedWrite(output, " %u",  n);
         break;
@@ -333,7 +337,128 @@ struct Group
         return a.data;
     }
 }
-///basic stack, just in case it gets used anywhere else then Parser
+
+/// structure representing interval: [a,b]
+struct Interval
+{
+    ///
+    uint begin, end;
+    ///
+    this(uint x)
+    {
+        begin = x;
+        end = x;
+    }
+    ///
+    this(uint x, uint y)
+    {
+        if(x < y)
+        {
+            begin = x;
+            end = y;
+        }
+        else
+        {
+            begin = y;
+            end = x;
+        }
+    }
+    ///
+    string toString()const
+    {
+        auto s = appender!string;
+        formattedWrite(s,"%s(%s)..%s(%s)", 
+                       begin, isgraph(begin) ? to!string(cast(dchar)begin) : "", 
+                       end, isgraph(end) ? to!string(cast(dchar)end) : "");
+        return s.data;
+    }
+}
+/// basic internal data structure for [...] sets
+struct Charset
+{
+    Interval[] intervals;
+    ///
+    void add(Interval inter)
+    {
+        //TODO: This all could use an improvment
+        auto beg = assumeSorted(map!"a.end"(intervals)).lowerBound(inter.begin).length;
+        auto end = assumeSorted(map!"a.begin"(intervals)).lowerBound(inter.end).length;
+        debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
+        if(beg == intervals.length)
+        {
+            intervals ~= inter;
+        }
+        else
+        {
+            if(inter.begin > intervals[beg].begin)
+                inter.begin = intervals[beg].begin;
+            if(end && inter.end < intervals[end-1].end)
+                inter.end = intervals[end-1].end;
+            replaceInPlace(intervals, beg, end, [inter]);
+        }
+        
+        if(beg > 0 && intervals[beg].begin == intervals[beg-1].end+1)
+        {
+            intervals[beg-1].end = intervals[beg].end;   
+            replaceInPlace(intervals, beg, beg+1, cast(Interval[])[]);
+        }
+        if(beg + 1 < intervals.length && intervals[beg].end+1 == intervals[beg+1].begin)
+        {
+            intervals[beg].end = intervals[beg+1].begin;
+            replaceInPlace(intervals, beg+1, beg+2, cast(Interval[])[]);
+        }
+        debug(fred_parser) writeln("Charset after add: ", intervals);
+    }
+    /// 
+    void add(dchar ch){ add(Interval(cast(uint)ch)); }
+    /// this = this || set
+    void add(Charset set)
+    {
+        foreach(inter; set.intervals)
+            add(inter);
+    }
+    /// this = this -- set
+    void sub(Charset set)
+    {
+        assert(0, "No impl!");
+    }
+    /// this = this ~~ set (i.e. (this || set) -- (this && set))
+    void symmetricSub(Charset set)
+    {
+        assert(0, "No impl!");
+    }
+    /// this = this && set
+    void intersect(Charset set)
+    {
+        assert(0, "No impl!");
+    }
+    ///
+    void negate()
+    {
+        if(intervals.empty)
+        {
+            intervals ~= Interval(0, 0x1FFFF);
+            return;
+        }
+        Interval[] negated;
+        if(intervals[0].begin != 0)
+            negated ~= Interval(0, intervals[0].begin-1);
+        for(size_t i=0; i<intervals.length-1; i++)
+            negated ~= Interval(intervals[i].end+1, intervals[i+1].begin-1);
+        if(intervals[$-1].end != 0x1FFFF)
+            negated ~= Interval(intervals[$-1].end+1, 0x1FFFF); 
+        intervals = negated;
+    }
+    /// test if ch is present in this set
+    bool contains(dchar ch)
+    {
+        writeln(intervals);
+        auto fnd = assumeSorted!"a<=b"(map!"a.begin"(intervals)).lowerBound(ch).length;
+        writeln("Test at ", fnd);
+        return fnd != 0 && intervals[fnd-1].begin <= ch && ch <= intervals[fnd-1].end;
+    }
+}
+/// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T)//TODO: redo with TmpAlloc
 {
     Appender!(T[]) stack;
@@ -377,6 +502,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0; 
+    Charset[] charsets;
     this(R pattern)
     {
         pat = origin = pattern;    
@@ -422,7 +548,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         return r;
     }
     /*
-        Parse and store IR for sub regex
+        Parse and store IR for regex pattern
     */
     void parseRegex()
     {
@@ -451,7 +577,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         while(!empty)
         {
-            debug writeln("*LR*\nSource: ", pat, "\nStack: ",fixupStack.stack.data);
+            debug(fred_parser) writeln("*LR*\nSource: ", pat, "\nStack: ",fixupStack.stack.data);
 
             switch(current)
             {
@@ -690,7 +816,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             
         }
     }
-    /*
+    /**
         Parse and store IR for atom
     */
     void parseAtom()
@@ -707,8 +833,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
             break;
         case '[':
-            //range
-            assert(0, "Codepoint set not implemented");
+            parseCharset();
             break;
         case '\\':
             next() || error("Unfinished escape sequence");
@@ -726,6 +851,186 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             put(Bytecode(IR.Char, current));
             next();
         }
+    }
+    // parse unit of charset spec, most notably escape sequences and char ranges
+    Charset parseCharTerm()
+    {
+        enum State{ Start, Char, Escape, Dash };
+        dchar last;
+        Charset set;
+        State state = State.Start;
+        for(;;)
+        {
+            final switch(state)
+            {
+            case State.Start:
+                switch(current)
+                {
+                case '[', ']':
+                    return set;
+                case '\\':
+                    state = State.Escape;
+                    break;
+                default:
+                    state = State.Char;
+                    last = current;
+                }
+                break;
+            case State.Char:
+                switch(current) 
+                {
+                case '-':
+                    state = State.Dash;
+                    break;
+                case '[', ']':
+                    set.add(last);
+                    return set;
+                default:
+                    set.add(last);
+                    last = current;
+                }
+                break;
+            case State.Escape:
+                switch(current)
+                {
+                case 'f':   
+                    set.add('\f'); 
+                    state = State.Char;
+                    break;
+                case 'n':
+                    set.add('\n'); 
+                    state = State.Char;
+                    break;
+                case 'r':
+                    set.add('\r'); 
+                    state = State.Char;
+                    break;
+                case 't':
+                    set.add('\t'); 
+                    state = State.Char;
+                    break;   
+                case 'v':
+                    set.add('\v'); 
+                    state = State.Char;
+                    break;
+                case '\\':
+                    set.add('\\');
+                    state = State.Char;
+                    break;
+                //TODO: charsets for commmon properties
+                /+
+                    case 'd':
+                    
+                    case 'D':
+                    
+                    case 's':   
+                    
+                    case 'S':   
+                    
+                    case 'w':   
+                    
+                    case 'W':   
+                +/
+                default:
+                }
+                break;
+            case State.Dash:
+                switch(current)
+                {
+                case '[', ']':
+                    error("unexpected end of charset");
+                case '-'://TODO: here comes set difference operator
+                    error("not supported yet");
+                default:
+                    set.add(Interval(last, current));
+                    state = State.Start;
+                }
+                break;
+            }  
+            next() || error("unexpected end of charset");
+        } 
+        return set; 
+    }
+    /**
+        Parse and store IR for charset
+    */
+    
+    void parseCharset()
+    {//relatively in order of priority
+        enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union };
+        Stack!Charset vstack;
+        Stack!Operator opstack;
+        static bool apply(Operator op, ref Stack!Charset stack)
+        {
+            switch(op)
+            {
+            case Operator.Negate:
+                stack.top.negate;
+                break;
+            case Operator.Union:
+                auto s = stack.pop();//2nd operand
+                stack.top.add(s);
+                break;
+            case Operator.Difference:
+                auto s = stack.pop();//2nd operand
+                stack.top.sub(s);
+                break;
+            case Operator.SymDifference:
+                auto s = stack.pop();//2nd operand
+                stack.top.symmetricSub(s);
+                break;
+            case Operator.Intersection:
+                auto s = stack.pop();//2nd operand
+                stack.top.intersect(s);
+                break;
+            default:
+                return false;
+            }
+            return true;
+        }
+        L_CharsetLoop:
+        do
+        {
+            switch(current)
+            {
+            case '[':
+                if(!vstack.empty)
+                    opstack.push(Operator.Union);
+                opstack.push(Operator.Open);
+                next() || error("unexpected end of charset");
+                if(current == '^')
+                {
+                    opstack.push(Operator.Negate);
+                    next() || error("unexpected end of charset");
+                }
+                //[] is prohibited
+                current != ']' || error("wrong charset");
+                vstack.push(parseCharTerm());
+                break;
+            case ']':
+                while(!opstack.empty && opstack.top != Operator.Open)
+                {
+                    apply(opstack.pop(), vstack) || error("charset syntax error");
+                }
+                !opstack.empty || error("unmatched ']'");
+                opstack.pop();
+                next();
+                if(opstack.empty)
+                    break L_CharsetLoop;
+                break;
+            //
+            default:
+                //implicit union
+                opstack.push(Operator.Union);  
+                vstack.push(parseCharTerm());
+                
+            }
+        }while(!empty || !opstack.empty);
+        while(!opstack.empty)
+            apply(opstack.pop(),vstack);
+        assert(vstack.length == 1);
+        put(Bytecode(IR.Charset, charsets.length));
+        charsets ~= vstack.top;
     }
 
     Bytecode escape()
@@ -857,6 +1162,7 @@ struct Program
     uint maxCounterDepth; //max depth of nested {n,m} repetitions
     uint hotspotTableSize; // number of entries in merge table
     uint flags;         //global regex flags   
+    Charset[] charsets; //
     //
     this(Parser)(Parser p)
     {
@@ -866,8 +1172,9 @@ struct Program
         ngroup = p.ngroup;
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
-        processHotspots();
-        debug
+        charsets = p.charsets;
+        lightPostprocess();
+        debug(fred_parser)
         {
             print();
             validate();
@@ -877,7 +1184,7 @@ struct Program
         lightweight post process step - no GC allocations (TODO!),
         only essentials
     +/
-    void processHotspots()
+    void lightPostprocess()
     {
         uint[] counterRange = new uint[maxCounterDepth+1];
         uint hotspotIndex = 0;
@@ -1015,7 +1322,7 @@ struct Input(Char)//TODO: simillar thing with UTF normalization
     String opSlice(size_t start, size_t end){   return _origin[start..end]; }
     @property size_t length(){  return _origin.length;  }
 }
-    
+
 ///ditto
 struct Input(Char)
     if(is(Char == dchar))
@@ -1099,7 +1406,7 @@ if( is(Char : dchar) )
     ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
     {
-        debug
+        debug(fred_parser)
         {
             writeln("------------------------------------------");
         }
@@ -1204,14 +1511,14 @@ if( is(Char : dchar) )
             }
             else
                 pragma(error,"32 & 64 bits only");
-            debug writeln("Backtracked");
+            debug(fred_matching) writeln("Backtracked");
             return true;
         }   
         auto start = origin.length - s.length;
-        debug writeln("Try match starting at ",origin[inputIndex..$]);
+        debug(fred_matching) writeln("Try match starting at ",origin[inputIndex..$]);
         while(pc<prog.length)
         {
-            debug writefln("PC: %s\tCNT: %s\t%s", pc, counter, disassemble(prog, pc, re.index, re.dict));
+            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s", pc, counter, disassemble(prog, pc, re.index, re.dict));
             switch(prog[pc].code)
             {
             case IR.Char:
@@ -1261,6 +1568,12 @@ if( is(Char : dchar) )
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Notspace);
+                break;
+            case IR.Charset:
+                if(s.empty || !re.charsets[prog[pc].data].contains(s.front))
+                    goto L_backtrack;
+                s.popFront();
+                pc += IRL!(IR.Charset);
                 break;
             case IR.Wordboundary:
                 //at start & end of input
@@ -1324,7 +1637,7 @@ if( is(Char : dchar) )
                 uint step =  prog[pc+1].raw;
                 uint min = prog[pc+2].raw;
                 uint max = prog[pc+3].raw;
-                //debug writefln("repeat pc=%u, counter=%u",pc,counter);
+                //debug(fred_matching) writefln("repeat pc=%u, counter=%u",pc,counter);
 
                 if(counter < min)
                 {
@@ -1399,13 +1712,13 @@ if( is(Char : dchar) )
             case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                 uint n = prog[pc].data;
                 matches[re.index[n]].begin = inputIndex;
-                debug  writefln("IR group #%u starts at %u", n, inputIndex);
+                debug(fred_matching)  writefln("IR group #%u starts at %u", n, inputIndex);
                 pc += IRL!(IR.GroupStart);
                 break;
             case IR.GroupEnd:   //TODO: ditto
                 uint n = prog[pc].data;
                 matches[re.index[n]].end = inputIndex;
-                debug writefln("IR group #%u ends at %u", n, inputIndex);
+                debug(fred_matching) writefln("IR group #%u ends at %u", n, inputIndex);
                 pc += IRL!(IR.GroupEnd);
                 break;
             case IR.LookaheadStart:
@@ -1555,7 +1868,7 @@ struct ThompsonMatcher(Char)
     +/
     bool match(Group[] matches)
     {
-        debug
+        debug(fred_matching)
         {
             writeln("------------------------------------------");
         }
@@ -1567,13 +1880,16 @@ struct ThompsonMatcher(Char)
         while(!s.empty)
         {
             genCounter++;
-            writefln("Threaded matching %d threads at index %s", clist.length, s.index);
-            foreach(t; clist[])
+            debug(fred_matching)
             {
-                assert(t);
-                writef("pc=%s ",t.pc);
-                write(t.matches);
-                writeln();
+                writefln("Threaded matching %d threads at index %s", clist.length, s.index);
+                foreach(t; clist[])
+                {
+                    assert(t);
+                    writef("pc=%s ",t.pc);
+                    write(t.matches);
+                    writeln();
+                }
             }
             for(Thread* t = clist.fetch(); t; t = clist.fetch())
             {
@@ -1583,7 +1899,7 @@ struct ThompsonMatcher(Char)
                 eval!true(createStart(s.index), matches);// new thread staring at this position 
             else if(nlist.empty)
             {
-                debug writeln("Stopped  matching before consuming full input");
+                debug(fred_matching) writeln("Stopped  matching before consuming full input");
                 break;//not a partial match for sure
             }
             clist = nlist;
@@ -1592,7 +1908,7 @@ struct ThompsonMatcher(Char)
             s.popFront();
         }
         genCounter++; //increment also on each end
-        writefln("Threaded matching %d threads at end", clist.length);
+        debug(fred_matching) writefln("Threaded matching %d threads at end", clist.length);
         //try out all zero-width posibilities 
         if(!matched)
             eval!false(createStart(s.index), matches);// new thread starting at end of input
@@ -1608,11 +1924,11 @@ struct ThompsonMatcher(Char)
     +/
     void finish(const(Thread)* t, Group[] matches)
     {
-        //debug writeln(t.matches);
+        //debug(fred_matching) writeln(t.matches);
         matches[] = t.matches[];
         //end of the whole match happens after current symbol
         matches[0].end = s.index;
-        debug writefln("FOUND pc=%s prog_len=%s: %s..%s", 
+        debug(fred_matching) writefln("FOUND pc=%s prog_len=%s: %s..%s", 
                     t.pc, re.ir.length,matches[0].begin, matches[0].end);
         matched = true;
     }
@@ -1625,10 +1941,10 @@ struct ThompsonMatcher(Char)
     {
         Bytecode[] prog = re.ir;
         ThreadList worklist;
-        debug writeln("Evaluating thread");
+        debug(fred_matching) writeln("Evaluating thread");
         do
         {
-            debug
+            debug(fred_matching)
             {
                 writef("\tpc=%s [", t.pc); 
                 foreach(x; worklist[])
@@ -1689,7 +2005,7 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.Eol:
                     //TODO: ditto for the end of line
-                    debug writeln("EOL ", s);
+                    debug(fred_matching) writeln("EOL ", s);
                     if(s.empty || s.front == '\n')
                     {
                         t.pc += IRL!(IR.Eol);
@@ -1744,13 +2060,13 @@ struct ThompsonMatcher(Char)
                 case IR.InfiniteQEnd:
                     if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
                     {
-                        debug writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
+                        debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
                                         t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         merge[prog[t.pc + 1].raw+t.counter] = genCounter;
                     }
                     else
                     {
-                        debug writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
+                        debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
                                         t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
                         break;
@@ -1772,14 +2088,14 @@ struct ThompsonMatcher(Char)
                 case IR.OrEnd:
                     if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
                     {
-                        debug writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
+                        debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s", 
                                         t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         merge[prog[t.pc + 1].raw+t.counter] = genCounter;
                         t.pc += IRL!(IR.OrEnd);
                     }
                     else
                     {
-                        debug writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
+                        debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s", 
                                         t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
                     }   
@@ -1803,13 +2119,13 @@ struct ThompsonMatcher(Char)
                     uint n = prog[t.pc].data;
                     t.matches[re.index[n]+1].begin = s.index;
                     t.pc += IRL!(IR.GroupStart);
-                    //debug  writefln("IR group #%u starts at %u", n, i);
+                    //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                     break;
                 case IR.GroupEnd:   //TODO: ditto
                     uint n = prog[t.pc].data;
                     t.matches[re.index[n]+1].end = s.index;
                     t.pc += IRL!(IR.GroupEnd);
-                    //debug writefln("IR group #%u ends at %u", n, i);
+                    //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                     break;
                 case IR.Backref:
                     uint n = prog[t.pc].data;
@@ -1854,7 +2170,7 @@ struct ThompsonMatcher(Char)
                     case IR.Char:
                         if(s.front == prog[t.pc].data)
                         {   
-                            // debug writefln("IR.Char %s vs %s ", s.front, cast(dchar)prog[t.pc].data);
+                            // debug(fred_matching) writefln("IR.Char %s vs %s ", s.front, cast(dchar)prog[t.pc].data);
                             t.pc += IRL!(IR.Char);
                             nlist.insertBack(t);
                         }
@@ -1927,6 +2243,20 @@ struct ThompsonMatcher(Char)
                             recycle(t);
                         t = worklist.fetch();
                         break;
+                    case IR.Charset:
+                        if(re.charsets[prog[t.pc].data].contains(s.front))
+                        {
+                            debug(fred_matching) writeln("Charset passed");
+                            t.pc += IRL!(IR.Charset);
+                            nlist.insertBack(t);
+                        }
+                        else
+                        {
+                            debug(fred_matching) writeln("Charset notpassed");
+                            recycle(t);
+                        }
+                        t = worklist.fetch();
+                        break;
                     default:
                         assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
                 }
@@ -1958,7 +2288,7 @@ struct ThompsonMatcher(Char)
             for(size_t i=1; i<block.length; i++)
                 block[i-1].next = &block[i];
             block[$-1].next = null;
-            debug writefln("Allocated space for another %d threads", threadAllocSize);
+            debug(fred_matching) writefln("Allocated space for another %d threads", threadAllocSize);
             return allocate();
         }
     }
