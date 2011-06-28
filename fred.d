@@ -352,16 +352,9 @@ struct Interval
     ///
     this(uint x, uint y)
     {
-        if(x < y)
-        {
-            begin = x;
-            end = y;
-        }
-        else
-        {
-            begin = y;
-            end = x;
-        }
+        assert(x <= y);
+        begin = x;
+        end = y;
     }
     ///
     string toString()const
@@ -383,7 +376,7 @@ struct Charset
         //TODO: This all could use an improvment
         auto beg = assumeSorted(map!"a.end"(intervals)).lowerBound(inter.begin).length;
         auto end = assumeSorted(map!"a.begin"(intervals)).lowerBound(inter.end).length;
-        debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
+        //debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
         if(beg == intervals.length)
         {
             intervals ~= inter;
@@ -407,32 +400,142 @@ struct Charset
             intervals[beg].end = intervals[beg+1].begin;
             replaceInPlace(intervals, beg+1, beg+2, cast(Interval[])[]);
         }
-        debug(fred_parser) writeln("Charset after add: ", intervals);
+        //debug(fred_parser) writeln("Charset after add: ", intervals);
     }
     ///
     void add(dchar ch){ add(Interval(cast(uint)ch)); }
     /// this = this || set
     void add(Charset set)
     {
+        debug(fred_charset) writef ("%s || %s --> ", intervals, set.intervals);
         foreach(inter; set.intervals)
             add(inter);
+        debug(fred_charset) writeln(intervals);
     }
-    /// this = this -- set
+    /// this = this || set
     void sub(Charset set)
     {
-        assert(0, "No impl!");
+        Interval[] result;
+        auto a = intervals, b=set.intervals;
+        for(;;)
+        {
+            if(a.front.end < b.front.begin)
+            {
+                result ~= a.front;
+                a.popFront();
+                if(a.empty)
+                    break;
+            }
+            else if(a.front.begin > b.front.end)
+            {
+                b.popFront();
+                if(b.empty)
+                    break;
+            }
+            else //there is an intersection
+            {
+                if(a.front.begin < b.front.begin)
+                {
+                    result ~= Interval(a.front.begin, b.front.begin-1);
+                    if(a.front.end < b.front.end)
+                    {
+                        a.popFront();
+                        if(a.empty)
+                            break;
+                    }
+                    else if(a.front.end > b.front.end)
+                    {
+                        //adjust a in place
+                        a.front.begin = b.front.end+1;
+                        b.popFront();
+                        if(b.empty)
+                            break;
+                    }
+                    else //==
+                    {
+                        a.popFront();
+                        b.popFront();
+                        if(a.empty || b.empty)
+                            break;
+                    }
+                }
+                else //a.front.begin > b.front.begin
+                {//adjust in place 
+                    if(a.front.end < b.front.end)
+                    {
+                        a.popFront();
+                        if(a.empty)
+                            break;
+                    }
+                    else
+                    {
+                        a.front.begin = b.front.end+1;
+                        b.popFront();
+                        if(b.empty)
+                            break;
+                    }
+                }
+                
+            }
+        }
+        intervals = result ~ a;//+ leftover of original (if any)
     }
     /// this = this ~~ set (i.e. (this || set) -- (this && set))
     void symmetricSub(Charset set)
     {
-        assert(0, "No impl!");
+        auto a = Charset(intervals.dup);
+        a.intersect(set);
+        this.add(set);
+        this.sub(a);
     }
     /// this = this && set
     void intersect(Charset set)
     {
-        assert(0, "No impl!");
+        Interval[] intersection;
+        auto a = intervals, b=set.intervals;
+        for(;;)
+        {
+            if(a.front.end < b.front.begin)
+            {
+                a.popFront();
+                if(a.empty)
+                    break;
+            }
+            else if(a.front.begin > b.front.end)
+            {
+                b.popFront();
+                if(b.empty)
+                    break;
+            }
+            else //there is an intersection
+            {
+                if(a.front.end < b.front.end)
+                {
+                    intersection ~= Interval(max(a.front.begin, b.front.begin), a.front.end);
+                    a.popFront();
+                    if(a.empty)
+                        break;
+                }
+                else if(a.front.end > b.front.end)
+                {
+                    intersection ~= Interval(max(a.front.begin, b.front.begin), b.front.end);
+                    b.popFront();
+                    if(b.empty)
+                        break;
+                }
+                else //==
+                {
+                    intersection ~= Interval(max(a.front.begin, b.front.begin), a.front.end);
+                    a.popFront();
+                    b.popFront();
+                    if(a.empty || b.empty)
+                        break;
+                }
+            }
+        }
+        intervals = intersection;
     }
-    ///
+    /// this = !this (i.e. [^...] in regex syntax)
     void negate()
     {
         if(intervals.empty)
@@ -452,12 +555,12 @@ struct Charset
     /// test if ch is present in this set
     bool contains(dchar ch) const
     {
-        debug(fred_charset) writeln(intervals);
+        //debug(fred_charset) writeln(intervals);
         auto fnd = assumeSorted!"a<=b"(map!"a.begin"(intervals)).lowerBound(ch).length;
-        debug(fred_charset) writeln("Test at ", fnd);
+        //debug(fred_charset) writeln("Test at ", fnd);
         return fnd != 0 && intervals[fnd-1].begin <= ch && ch <= intervals[fnd-1].end;
     }
-    
+    /// true if set is empty
     @property bool empty() const {   return intervals.empty; }
 }
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -875,10 +978,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
         }
     }
+    //Charset operations relatively in order of priority
+    enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union, None };
     // parse unit of charset spec, most notably escape sequences and char ranges
-    Charset parseCharTerm()
+    // also fetches next set operation
+    Tuple!(Charset,Operator) parseCharTerm()
     {
         enum State{ Start, Char, Escape, Dash };
+        Operator op = Operator.None;;
         dchar last;
         Charset set;
         State state = State.Start;
@@ -890,8 +997,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             case State.Start:
                 switch(current)
                 {
-                case '[', ']':
-                    return set;
+                case '[':
+                    op = Operator.Union;
+                    goto case;
+                case ']':
+                    break L_CharTermLoop;
                 case '\\':
                     state = State.Escape;
                     break;
@@ -904,9 +1014,34 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 switch(current)
                 {
                 case '-':
+                    if(last == '-')
+                    {
+                        op = Operator.Difference;
+                        next();
+                        break L_CharTermLoop;
+                    }
                     state = State.Dash;
                     break;
-                case '[', ']':
+                case '~':
+                    if(last == '~')
+                    {
+                        op = Operator.SymDifference;
+                        next();
+                        break L_CharTermLoop;
+                    }
+                    goto default;
+                case '&':
+                    if(last == '&')
+                    {
+                        op = Operator.Intersection;
+                        next();
+                        break L_CharTermLoop;
+                    }
+                    goto default;
+                case '[':
+                    op = Operator.Union;
+                    goto case;
+                case ']':
                     set.add(last);
                     break L_CharTermLoop;
                 default:
@@ -961,14 +1096,20 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             case State.Dash:
                 switch(current)
                 {
-                case '[', ']':
+                case '[':
+                    op = Operator.Union;
+                    goto case;
+                case ']':
                     //error("unexpected end of charset");
                     //means dash is a single char not an interval specifier
                     set.add(last);
                     set.add('-');
                     break L_CharTermLoop;
-                case '-'://TODO: here comes set difference operator
-                    assert(0, "not supported yet");
+                 case '-'://set Difference again
+                    set.add(last);
+                    op = Operator.Difference;
+                    next();//skip '-'
+                    break L_CharTermLoop;
                 default:
                     last <= current || error("reversed order in interval");
                     set.add(Interval(last, current));
@@ -979,17 +1120,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next() || error("unexpected end of charset");
         }
         !set.empty || error("empty charset?");
-        return set;
+        return tuple(set, op);
     }
     /**
         Parse and store IR for charset
     */
 
     void parseCharset()
-    {//relatively in order of priority
-        enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union };
+    {
         Stack!Charset vstack;
         Stack!Operator opstack;
+        //
         static bool apply(Operator op, ref Stack!Charset stack)
         {
             switch(op)
@@ -1018,14 +1159,24 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             return true;
         }
+        static bool unrollWhile(alias cond)(ref Stack!Charset vstack, ref Stack!Operator opstack)
+        {
+            while(cond(opstack.top))
+            {
+                if(!apply(opstack.pop(),vstack))
+                    return false;//syntax error
+                opstack.pop();
+            }
+            return true;
+        }
+       
+        
         L_CharsetLoop:
         do
         {
             switch(current)
             {
             case '[':
-                if(!vstack.empty)
-                    opstack.push(Operator.Union);
                 opstack.push(Operator.Open);
                 next() || error("unexpected end of charset");
                 if(current == '^')
@@ -1035,11 +1186,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 }
                 //[] is prohibited
                 current != ']' || error("wrong charset");
-                vstack.push(parseCharTerm());
-                break;
+                goto default;
             case ']':
                 while(!opstack.empty && opstack.top != Operator.Open)
                 {
+                    //writeln(opstack.stack.data);
                     apply(opstack.pop(), vstack) || error("charset syntax error");
                 }
                 !opstack.empty || error("unmatched ']'");
@@ -1049,12 +1200,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     break L_CharsetLoop;
                 break;
             //
-            default:
-                //implicit union
-                opstack.push(Operator.Union);
-                vstack.push(parseCharTerm());
-
+            default://yet another pair of term(op)?
+                auto pair = parseCharTerm();
+                if(pair[1] != Operator.None)
+                {
+                    if(opstack.top == Operator.Union)
+                        unrollWhile!(function (Operator a){ return a == Operator.Union; })(vstack, opstack);
+                    opstack.push(pair[1]);
+                }
+                vstack.push(pair[0]);
             }
+            
         }while(!empty || !opstack.empty);
         while(!opstack.empty)
             apply(opstack.pop(),vstack);

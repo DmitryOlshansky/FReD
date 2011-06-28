@@ -7,13 +7,13 @@ import core.memory;
 
 unittest
 {//sanity checks
-  /+  regex("abc|edf|ighrg");
+    regex("abc|edf|ighrg");
     auto r1 = regex("abc");
     auto r2 = regex("(gylba)");
     assert(match("abcdef", r1).hit == "abc");
     assert(match("wida",r2).empty);
     assert(tmatch("abcdef", r1).hit == "abc");
-    assert(tmatch("wida", r2).empty);+/
+    assert(tmatch("wida", r2).empty);
 }
 
 
@@ -95,7 +95,7 @@ unittest
         TestVectors(  "a[]b",      "-",    "c",    "-",    "-" ),
         TestVectors(  "a[",        "-",    "c",    "-",    "-" ),
         TestVectors(  "a]",        "a]",   "y",    "&",    "a]" ),
-//This one won't every be supported, it's incompatible with our nested [] syntax
+//This one won't ever be supported, it's incompatible with our nested [] syntax
 //TestVectors(  "a[]]b",     "a]b",  "y",    "&",    "a]b" ),
         TestVectors(  "a[^bc]d",   "aed",  "y",    "&",    "aed" ),
         TestVectors(  "a[^bc]d",   "abd",  "n",    "-",    "-" ),
@@ -230,7 +230,10 @@ unittest
 //more repetitions!
         TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" ), 
 //reuse of matches
-        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",     "y",    "\\1-\\2-\\3",  "--xyz" ),           
+        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",           "y",    "\\1-\\2-\\3",  "--xyz" ),        
+//set operations:
+        TestVectors(  "[a-z--d-f]",     "dfa",                  "y",   "&",     "a"),
+        TestVectors(  "[abc[pq--acq]]{2}",     "bqacpa",        "y",        "&",    "ac"),
         ]; 
 
     int i;
