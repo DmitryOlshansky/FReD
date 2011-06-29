@@ -12,7 +12,7 @@ module fred;
 
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
-       std.uni, std.utf, std.format, std.typecons, std.bitmanip;
+       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional;
 
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
@@ -1119,7 +1119,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             next() || error("unexpected end of charset");
         }
-        !set.empty || error("empty charset?");
         return tuple(set, op);
     }
     /**
@@ -1163,9 +1162,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             while(cond(opstack.top))
             {
+                writeln(opstack.stack.data);
+                writeln(map!"a.intervals"(vstack.stack.data));
                 if(!apply(opstack.pop(),vstack))
                     return false;//syntax error
-                opstack.pop();
+                if(opstack.empty)
+                    return false;
             }
             return true;
         }
@@ -1188,16 +1190,27 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 current != ']' || error("wrong charset");
                 goto default;
             case ']':
-                while(!opstack.empty && opstack.top != Operator.Open)
-                {
-                    //writeln(opstack.stack.data);
-                    apply(opstack.pop(), vstack) || error("charset syntax error");
-                }
+                unrollWhile!(unaryFun!"a != a.Open")(vstack, opstack) || error("charset syntax error");
                 !opstack.empty || error("unmatched ']'");
                 opstack.pop();
                 next();
+                writeln("After ] ", current, pat);
+                writeln(opstack.stack.data);
+                writeln(map!"a.intervals"(vstack.stack.data));
+                writeln("---");
                 if(opstack.empty)
                     break L_CharsetLoop;
+                auto pair  = parseCharTerm();
+                if(!pair[0].empty)//not only operator e.g. -- or ~~
+                {
+                    vstack.top.add(pair[0]);//apply union
+                }
+                if(pair[1] != Operator.None)
+                {
+                    if(opstack.top == Operator.Union)
+                        unrollWhile!(unaryFun!"a == a.Union")(vstack, opstack);
+                    opstack.push(pair[1]);
+                }         
                 break;
             //
             default://yet another pair of term(op)?
@@ -1205,7 +1218,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 if(pair[1] != Operator.None)
                 {
                     if(opstack.top == Operator.Union)
-                        unrollWhile!(function (Operator a){ return a == Operator.Union; })(vstack, opstack);
+                        unrollWhile!(unaryFun!"a == a.Union")(vstack, opstack);
                     opstack.push(pair[1]);
                 }
                 vstack.push(pair[0]);
@@ -1568,21 +1581,14 @@ if( is(Char : dchar) )
 {
     alias const(Char)[] String;
     Program re;           //regex program
-    enum initialStack = 2048;
+    enum initialStack = 2^^16;
     String origin, s;
     bool exhausted;
-    uint[] mainStack;
     this(Program program, String input)
     {
         re = program;
         origin = s = input;
-        exhausted = false;
-        mainStack = (cast(uint*)enforce(malloc(initialStack*uint.sizeof)))
-                [0..initialStack];
-    }
-    ~this()
-    {
-        free(mainStack.ptr);
+        exhausted = false;   
     }
     @property dchar previous()
     {
@@ -1601,6 +1607,9 @@ if( is(Char : dchar) )
         for(;;)
         {
             size_t start = origin.length - s.length;
+            auto mainStack = (cast(uint*)enforce(malloc(initialStack*uint.sizeof)))
+                [0..initialStack];
+            scope(exit) free(mainStack.ptr); 
             if(matchImpl(re.ir, matches[1..$], mainStack))
             {//s updated
                 matches[0].begin = start;
@@ -2545,7 +2554,7 @@ private:
         R input;
         Group[] groups;
         uint[] index;
-        this(RegexMatch rmatch)
+        this(ref RegexMatch rmatch)
         {
             input = rmatch.input;
             index = rmatch.index;

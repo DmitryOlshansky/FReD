@@ -52,7 +52,7 @@ unittest
         string flags;
     };
 
-    static TestVectors tv[] = [         
+    static TestVectors tv[] = [
         TestVectors(  "(a)b\\1",   "abaab","y",    "&",    "aba" ),
         TestVectors(  "()b\\1",     "aaab", "y",    "&",    "b" ),
         TestVectors(  "abc",       "abc",  "y",    "&",    "abc" ),
@@ -232,8 +232,12 @@ unittest
 //reuse of matches
         TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",           "y",    "\\1-\\2-\\3",  "--xyz" ),        
 //set operations:
-        TestVectors(  "[a-z--d-f]",     "dfa",                  "y",   "&",     "a"),
-        TestVectors(  "[abc[pq--acq]]{2}",     "bqacpa",        "y",        "&",    "ac"),
+        TestVectors(  "[a-z--d-f]",                      " dfa",  "y",   "&",     "a"),
+        TestVectors(  "[abc[pq--acq]]{2}",             "bqpaca",  "y",   "&",     "pa"),
+        TestVectors(  "[a-z9&&abc0-9]{3}",           "z90a0abc",  "y",   "&",     "abc"),
+        TestVectors(  "[0-9a-f~~0-5a-z]{2}",           "g0a58x",  "y",   "&",     "8x"),
+        TestVectors(  "[abc[pq]xyz[rs]]{4}",            "cqxr",   "y",   "&",     "cqxr"),
+        TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "&",     "f"),
         ]; 
 
     int i;
@@ -299,7 +303,7 @@ unittest
                 if (c != 'c')
                 {
                 
-                    auto m = matchFn(to!(String)(tvd.input), r);   
+                    auto m = matchFn(to!(String)(tvd.input), r); 
                     i = !m.empty;
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern: ", tvd.pattern));
                     if (c == 'y')
@@ -307,8 +311,7 @@ unittest
                         auto result = produceExpected(m, to!(String)(tvd.format));
                         //make stderr collect all mismatches
                         if(result != to!String(tvd.replace))
-                            stderr.writeln(
-                                text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected:",
+                            assert(text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected:",
                                     tvd.replace, " vs ", result));
                     }
                 }
