@@ -10,9 +10,11 @@
 //TODO: kill GC allocations when possible (everywhere)
 module fred;
 
+//unicode property tables
+import fred_uni;
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
-       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional;
+       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception;
 
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
@@ -549,7 +551,7 @@ struct Charset
         for(size_t i=0; i<intervals.length-1; i++)
             negated ~= Interval(intervals[i].end+1, intervals[i+1].begin-1);
         if(intervals[$-1].end != 0x1FFFF)
-            negated ~= Interval(intervals[$-1].end+1, 0x1FFFF);
+            negated ~= Interval(intervals[$-1].end+1, 0x10FFFF);
         intervals = negated;
     }
     /// test if ch is present in this set
@@ -563,6 +565,7 @@ struct Charset
     /// true if set is empty
     @property bool empty() const {   return intervals.empty; }
 }
+
 /// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T)//TODO: redo with TmpAlloc
 {
@@ -606,7 +609,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0;
-    Charset[] charsets;
+    immutable(Charset)[] charsets;
     this(R pattern, R flags)
     {
         pat = origin = pattern;
@@ -1162,8 +1165,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             while(cond(opstack.top))
             {
-                writeln(opstack.stack.data);
-                writeln(map!"a.intervals"(vstack.stack.data));
+                debug(fred_charset)
+                {
+                    writeln(opstack.stack.data);
+                    writeln(map!"a.intervals"(vstack.stack.data));
+                }
                 if(!apply(opstack.pop(),vstack))
                     return false;//syntax error
                 if(opstack.empty)
@@ -1194,10 +1200,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 !opstack.empty || error("unmatched ']'");
                 opstack.pop();
                 next();
-                writeln("After ] ", current, pat);
+              /*  writeln("After ] ", current, pat);
                 writeln(opstack.stack.data);
                 writeln(map!"a.intervals"(vstack.stack.data));
-                writeln("---");
+                writeln("---");*/
                 if(opstack.empty)
                     break L_CharsetLoop;
                 auto pair  = parseCharTerm();
@@ -1229,11 +1235,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             apply(opstack.pop(),vstack);
         assert(vstack.length == 1);
         put(Bytecode(IR.Charset, charsets.length));
-        charsets ~= vstack.top;
+        charsets ~= cast(immutable(Charset))(vstack.top);//unique
     }
-
+    ///parse and return IR
     Bytecode escape()
     {
+		
         switch(current)
         {
         case 'f':   next(); return Bytecode(IR.Char,'\f');
@@ -1250,6 +1257,33 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case 'S':   next(); return Bytecode(IR.Notspace, 0);
         case 'w':   next(); return Bytecode(IR.Word, 0);
         case 'W':   next(); return Bytecode(IR.Notword, 0);
+        
+        case 'p': case 'P':
+			bool negated = current == 'P';
+			next() && current == '{' || error("{ expected ");
+			static bool sep(dchar x){ return x ==':' || x== '}'; }
+			auto end = find!(sep)(pat);
+			string name = to!string(pat[0..$-end.length]);
+			pat = end;
+			if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
+			{//unicode block
+				name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
+				auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
+				fnd < unicodeBlocks.length || error("unrecognized unicode block name");
+				comparePropertyName(unicodeBlocks[fnd].name, name) == 0 || error("unrecognized unicode block name");
+				debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
+				auto s = Charset([unicodeBlocks[fnd].extent]);
+				if(negated)
+					s.negate();
+				charsets ~= cast(immutable Charset)(s);
+			}
+			else
+			{//unicode property 
+				assert(0);
+			}
+			next() && current == '}' || error("} expected ");
+			next();
+            return Bytecode(IR.Charset, charsets.length-1);
         case 'x':
             auto save = pat;
             uint code = 0;
@@ -1298,6 +1332,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             next();
             return Bytecode(IR.Char, code);
+        case 'U':
+            assert(0, "8 hexdigit unicode!");
         case 'c': //control codes
             next() || error("Unfinished escape sequence");
             ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
@@ -1361,24 +1397,7 @@ struct Program
     uint maxCounterDepth; //max depth of nested {n,m} repetitions
     uint hotspotTableSize; // number of entries in merge table
     uint flags;         //global regex flags
-    Charset[] charsets; //
-    //
-    this(Parser)(Parser p)
-    {
-        ir = p.ir;
-        index = p.index;
-        dict = p.dict;
-        ngroup = p.ngroup;
-        maxCounterDepth = p.counterDepth;
-        flags = p.re_flags;
-        charsets = p.charsets;
-        lightPostprocess();
-        debug(fred_parser)
-        {
-            print();
-            validate();
-        }
-    }
+    immutable(Charset)[] charsets; //
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
@@ -1448,6 +1467,23 @@ struct Program
         }
         writeln("Total merge table size: ", hotspotTableSize);
         writeln("Max counter nesting depth: ", maxCounterDepth);
+    }
+	///
+    this(Parser)(Parser p)
+    {
+        ir = p.ir;
+        index = p.index;
+        dict = p.dict;
+        ngroup = p.ngroup;
+        maxCounterDepth = p.counterDepth;
+        flags = p.re_flags;
+        charsets = p.charsets;
+        lightPostprocess();
+        debug(fred_parser)
+        {
+            print();
+            validate();
+        }
     }
 }
 

@@ -227,9 +227,9 @@ unittest
         //no lookaround for Thompson VM
      /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" ),
         TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" ), +/
-//more repetitions!
+//more repetitions:
         TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" ), 
-//reuse of matches
+//reuse of matches:
         TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",           "y",    "\\1-\\2-\\3",  "--xyz" ),        
 //set operations:
         TestVectors(  "[a-z--d-f]",                      " dfa",  "y",   "&",     "a"),
@@ -238,6 +238,8 @@ unittest
         TestVectors(  "[0-9a-f~~0-5a-z]{2}",           "g0a58x",  "y",   "&",     "8x"),
         TestVectors(  "[abc[pq]xyz[rs]]{4}",            "cqxr",   "y",   "&",     "cqxr"),
         TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "&",     "f"),
+//escapes:
+		TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2213.", "y", "&", "\u2213\u00c5."),
         ]; 
 
     int i;
@@ -363,7 +365,6 @@ unittest
                == "<packet>text</packet><packet>text</packet>");
         //issue 4574
         //empty successful match still advances the input
-
         string[] pres, posts, hits;
         foreach(m; match("abcabc", regex("","g"))) {
             pres ~= m.pre;

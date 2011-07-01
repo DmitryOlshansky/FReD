@@ -16,3 +16,4 @@ x{4}
 (?:abc){3}
 \b\d\D\s\S\w\W\B
 ^$
+\p{InLatin-1}\P{InArrows}
