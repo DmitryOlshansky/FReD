@@ -53,60 +53,60 @@ unittest
     };
 
     static TestVectors tv[] = [
-        TestVectors(  "(a)b\\1",   "abaab","y",    "&",    "aba" ),
-        TestVectors(  "()b\\1",     "aaab", "y",    "&",    "b" ),
-        TestVectors(  "abc",       "abc",  "y",    "&",    "abc" ),
+        TestVectors(  "(a)b\\1",   "abaab","y",    "$&",    "aba" ),
+        TestVectors(  "()b\\1",     "aaab", "y",    "$&",    "b" ),
+        TestVectors(  "abc",       "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "abc",       "xbc",  "n",    "-",    "-" ),
         TestVectors(  "abc",       "axc",  "n",    "-",    "-" ),
         TestVectors(  "abc",       "abx",  "n",    "-",    "-" ),
-        TestVectors(  "abc",       "xabcy","y",    "&",    "abc" ),
-        TestVectors(  "abc",       "ababc","y",    "&",    "abc" ),
-        TestVectors(  "ab*c",      "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "ab*bc",     "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "ab*bc",     "abbc", "y",    "&",    "abbc" ),
-        TestVectors(  "ab*bc",     "abbbbc","y",   "&",    "abbbbc" ),
-        TestVectors(  "ab+bc",     "abbc", "y",    "&",    "abbc" ),
+        TestVectors(  "abc",       "xabcy","y",    "$&",    "abc" ),
+        TestVectors(  "abc",       "ababc","y",    "$&",    "abc" ),
+        TestVectors(  "ab*c",      "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "ab*bc",     "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "ab*bc",     "abbc", "y",    "$&",    "abbc" ),
+        TestVectors(  "ab*bc",     "abbbbc","y",   "$&",    "abbbbc" ),
+        TestVectors(  "ab+bc",     "abbc", "y",    "$&",    "abbc" ),
         TestVectors(  "ab+bc",     "abc",  "n",    "-",    "-" ),
         TestVectors(  "ab+bc",     "abq",  "n",    "-",    "-" ),
-        TestVectors(  "ab+bc",     "abbbbc","y",   "&",    "abbbbc" ),
-        TestVectors(  "ab?bc",     "abbc", "y",    "&",    "abbc" ),
-        TestVectors(  "ab?bc",     "abc",  "y",    "&",    "abc" ),
+        TestVectors(  "ab+bc",     "abbbbc","y",   "$&",    "abbbbc" ),
+        TestVectors(  "ab?bc",     "abbc", "y",    "$&",    "abbc" ),
+        TestVectors(  "ab?bc",     "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "ab?bc",     "abbbbc","n",   "-",    "-" ),
-        TestVectors(  "ab?c",      "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "^abc$",     "abc",  "y",    "&",    "abc" ),
+        TestVectors(  "ab?c",      "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "^abc$",     "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "^abc$",     "abcc", "n",    "-",    "-" ),
-        TestVectors(  "^abc",      "abcc", "y",    "&",    "abc" ),
+        TestVectors(  "^abc",      "abcc", "y",    "$&",    "abc" ),
         TestVectors(  "^abc$",     "aabc", "n",    "-",    "-" ),
-        TestVectors(  "abc$",      "aabc", "y",    "&",    "abc" ),
-        TestVectors(  "^",         "abc",  "y",    "&",    "" ),
-        TestVectors(  "$",         "abc",  "y",    "&",    "" ),
-        TestVectors(  "a.c",       "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "a.c",       "axc",  "y",    "&",    "axc" ),
-        TestVectors(  "a.*c",      "axyzc","y",    "&",    "axyzc" ),
+        TestVectors(  "abc$",      "aabc", "y",    "$&",    "abc" ),
+        TestVectors(  "^",         "abc",  "y",    "$&",    "" ),
+        TestVectors(  "$",         "abc",  "y",    "$&",    "" ),
+        TestVectors(  "a.c",       "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "a.c",       "axc",  "y",    "$&",    "axc" ),
+        TestVectors(  "a.*c",      "axyzc","y",    "$&",    "axyzc" ),
         TestVectors(  "a.*c",      "axyzd","n",    "-",    "-" ),
         TestVectors(  "a[bc]d",    "abc",  "n",    "-",    "-" ),
-        TestVectors(  "a[bc]d",    "abd",  "y",    "&",    "abd" ),
+        TestVectors(  "a[bc]d",    "abd",  "y",    "$&",    "abd" ),
         TestVectors(  "a[b-d]e",   "abd",  "n",    "-",    "-" ),
-        TestVectors(  "a[b-d]e",   "ace",  "y",    "&",    "ace" ),
-        TestVectors(  "a[b-d]",    "aac",  "y",    "&",    "ac" ),
-        TestVectors(  "a[-b]",     "a-",   "y",    "&",    "a-" ),
-        TestVectors(  "a[b-]",     "a-",   "y",    "&",    "a-" ),
+        TestVectors(  "a[b-d]e",   "ace",  "y",    "$&",    "ace" ),
+        TestVectors(  "a[b-d]",    "aac",  "y",    "$&",    "ac" ),
+        TestVectors(  "a[-b]",     "a-",   "y",    "$&",    "a-" ),
+        TestVectors(  "a[b-]",     "a-",   "y",    "$&",    "a-" ),
         TestVectors(  "a[b-a]",    "-",    "c",    "-",    "-" ),
         TestVectors(  "a[]b",      "-",    "c",    "-",    "-" ),
         TestVectors(  "a[",        "-",    "c",    "-",    "-" ),
-        TestVectors(  "a]",        "a]",   "y",    "&",    "a]" ),
+        TestVectors(  "a]",        "a]",   "y",    "$&",    "a]" ),
 //This one won't ever be supported, it's incompatible with our nested [] syntax
 //TestVectors(  "a[]]b",     "a]b",  "y",    "&",    "a]b" ),
-        TestVectors(  "a[^bc]d",   "aed",  "y",    "&",    "aed" ),
+        TestVectors(  "a[^bc]d",   "aed",  "y",    "$&",    "aed" ),
         TestVectors(  "a[^bc]d",   "abd",  "n",    "-",    "-" ),
-        TestVectors(  "a[^-b]c",   "adc",  "y",    "&",    "adc" ),
+        TestVectors(  "a[^-b]c",   "adc",  "y",    "$&",    "adc" ),
         TestVectors(  "a[^-b]c",   "a-c",  "n",    "-",    "-" ),
 //same here:
 //TestVectors(  "a[^]b]c",   "a]c",  "n",    "-",    "-" ),
 //TestVectors(  "a[^]b]c",   "adc",  "y",    "&",    "adc" ), 
-        TestVectors(  "ab|cd",     "abc",  "y",    "&",    "ab" ),
-        TestVectors(  "ab|cd",     "abcd", "y",    "&",    "ab" ),
-        TestVectors(  "()ef",      "def",  "y",    "&-\\1",        "ef-" ),
+        TestVectors(  "ab|cd",     "abc",  "y",    "$&",    "ab" ),
+        TestVectors(  "ab|cd",     "abcd", "y",    "$&",    "ab" ),
+        TestVectors(  "()ef",      "def",  "y",    "$&-$1",        "ef-" ),
         TestVectors(  "()*",       "-",    "y",    "-",    "-" ),
         TestVectors(  "*a",        "-",    "c",    "-",    "-" ),
         TestVectors(  "^*",        "-",    "y",    "-",    "-" ),
@@ -114,132 +114,135 @@ unittest
         TestVectors(  "(*)b",      "-",    "c",    "-",    "-" ),
         TestVectors(  "$b",        "b",    "n",    "-",    "-" ),
         TestVectors(  "a\\",       "-",    "c",    "-",    "-" ), 
-        TestVectors(  "a\\(b",     "a(b",  "y",    "&-\\1",        "a(b-" ),
-        TestVectors(  "a\\(*b",    "ab",   "y",    "&",    "ab" ),
-        TestVectors(  "a\\(*b",    "a((b", "y",    "&",    "a((b" ),
-        TestVectors(  "a\\\\b",    "a\\b", "y",    "&",    "a\\b" ),
+        TestVectors(  "a\\(b",     "a(b",  "y",    "$&-$1",        "a(b-" ),
+        TestVectors(  "a\\(*b",    "ab",   "y",    "$&",    "ab" ),
+        TestVectors(  "a\\(*b",    "a((b", "y",    "$&",    "a((b" ),
+        TestVectors(  "a\\\\b",    "a\\b", "y",    "$&",    "a\\b" ),
         TestVectors(  "abc)",      "-",    "c",    "-",    "-" ),
         TestVectors(  "(abc",      "-",    "c",    "-",    "-" ),
-        TestVectors(  "((a))",     "abc",  "y",    "&-\\1-\\2",    "a-a-a" ),
-        TestVectors(  "(a)b(c)",   "abc",  "y",    "&-\\1-\\2",    "abc-a-c" ),
-        TestVectors(  "a+b+c",     "aabbabc","y",  "&",    "abc" ),
+        TestVectors(  "((a))",     "abc",  "y",    "$&-$1-$2",    "a-a-a" ),
+        TestVectors(  "(a)b(c)",   "abc",  "y",    "$&-$1-$2",    "abc-a-c" ),
+        TestVectors(  "a+b+c",     "aabbabc","y",  "$&",    "abc" ),
         TestVectors(  "a**",       "-",    "c",    "-",    "-" ),
-        TestVectors(  "a*?a",      "aa",   "y",    "&",    "a" ),
+        TestVectors(  "a*?a",      "aa",   "y",    "$&",    "a" ),
         TestVectors(  "(a*)*",     "aaa",  "y",    "-",    "-" ),
         TestVectors(  "(a*)+",     "aaa",  "y",    "-",    "-" ),
         TestVectors(  "(a|)*",     "-",    "y",    "-",    "-" ),
         TestVectors(  "(a*|b)*",   "aabb", "y",    "-",    "-" ),  
-        TestVectors(  "(a|b)*",    "ab",   "y",    "&-\\1",        "ab-b" ),
-        TestVectors(  "(a+|b)*",   "ab",   "y",    "&-\\1",        "ab-b" ),
-        TestVectors(  "(a+|b)+",   "ab",   "y",    "&-\\1",        "ab-b" ),
-        TestVectors(  "(a+|b)?",   "ab",   "y",    "&-\\1",        "a-a" ),
-        TestVectors(  "[^ab]*",    "cde",  "y",    "&",    "cde" ),
+        TestVectors(  "(a|b)*",    "ab",   "y",    "$&-$1",        "ab-b" ),
+        TestVectors(  "(a+|b)*",   "ab",   "y",    "$&-$1",        "ab-b" ),
+        TestVectors(  "(a+|b)+",   "ab",   "y",    "$&-$1",        "ab-b" ),
+        TestVectors(  "(a+|b)?",   "ab",   "y",    "$&-$1",        "a-a" ),
+        TestVectors(  "[^ab]*",    "cde",  "y",    "$&",    "cde" ),
         TestVectors(  "(^)*",      "-",    "y",    "-",    "-" ),
         TestVectors(  "(ab|)*",    "-",    "y",    "-",    "-" ),
         TestVectors(  ")(",        "-",    "c",    "-",    "-" ),
-        TestVectors(  "",  "abc",  "y",    "&",    "" ),
+        TestVectors(  "",  "abc",  "y",    "$&",    "" ),
         TestVectors(  "abc",       "",     "n",    "-",    "-" ),
-        TestVectors(  "a*",        "",     "y",    "&",    "" ),
-        TestVectors(  "([abc])*d", "abbbcd",       "y",    "&-\\1",        "abbbcd-c" ),
-        TestVectors(  "([abc])*bcd", "abcd",       "y",    "&-\\1",        "abcd-a" ),
-        TestVectors(  "a|b|c|d|e", "e",    "y",    "&",    "e" ),
-        TestVectors(  "(a|b|c|d|e)f", "ef",        "y",    "&-\\1",        "ef-e" ),
+        TestVectors(  "a*",        "",     "y",    "$&",    "" ),
+        TestVectors(  "([abc])*d", "abbbcd",       "y",    "$&-$1",        "abbbcd-c" ),
+        TestVectors(  "([abc])*bcd", "abcd",       "y",    "$&-$1",        "abcd-a" ),
+        TestVectors(  "a|b|c|d|e", "e",    "y",    "$&",    "e" ),
+        TestVectors(  "(a|b|c|d|e)f", "ef",        "y",    "$&-$1",        "ef-e" ),
         TestVectors(  "((a*|b))*", "aabb", "y",    "-",    "-" ),
-        TestVectors(  "abcd*efg",  "abcdefg",      "y",    "&",    "abcdefg" ),
-        TestVectors(  "ab*",       "xabyabbbz",    "y",    "&",    "ab" ),
-        TestVectors(  "ab*",       "xayabbbz",     "y",    "&",    "a" ),
-        TestVectors(  "(ab|cd)e",  "abcde",        "y",    "&-\\1",        "cde-cd" ),
-        TestVectors(  "[abhgefdc]ij",      "hij",  "y",    "&",    "hij" ),
-        TestVectors(  "^(ab|cd)e", "abcde",        "n",    "x\\1y",        "xy" ),
-        TestVectors(  "(abc|)ef",  "abcdef",       "y",    "&-\\1",        "ef-" ),
-        TestVectors(  "(a|b)c*d",  "abcd", "y",    "&-\\1",        "bcd-b" ),
-        TestVectors(  "(ab|ab*)bc",        "abc",  "y",    "&-\\1",        "abc-a" ),
-        TestVectors(  "a([bc]*)c*",        "abc",  "y",    "&-\\1",        "abc-bc" ),
-        TestVectors(  "a([bc]*)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" ),
-        TestVectors(  "a([bc]+)(c*d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-bc-d" ),
-        TestVectors(  "a([bc]*)(c+d)",     "abcd", "y",    "&-\\1-\\2",    "abcd-b-cd" ),
-        TestVectors(  "a[bcd]*dcdcde",     "adcdcde",      "y",    "&",    "adcdcde" ),
+        TestVectors(  "abcd*efg",  "abcdefg",      "y",    "$&",    "abcdefg" ),
+        TestVectors(  "ab*",       "xabyabbbz",    "y",    "$&",    "ab" ),
+        TestVectors(  "ab*",       "xayabbbz",     "y",    "$&",    "a" ),
+        TestVectors(  "(ab|cd)e",  "abcde",        "y",    "$&-$1",        "cde-cd" ),
+        TestVectors(  "[abhgefdc]ij",      "hij",  "y",    "$&",    "hij" ),
+        TestVectors(  "^(ab|cd)e", "abcde",        "n",    "x$1y",        "xy" ),
+        TestVectors(  "(abc|)ef",  "abcdef",       "y",    "$&-$1",        "ef-" ),
+        TestVectors(  "(a|b)c*d",  "abcd",         "y",    "$&-$1",        "bcd-b" ),
+        TestVectors(  "(ab|ab*)bc",        "abc",  "y",    "$&-$1",        "abc-a" ),
+        TestVectors(  "a([bc]*)c*",        "abc",  "y",    "$&-$1",        "abc-bc" ),
+        TestVectors(  "a([bc]*)(c*d)",     "abcd", "y",    "$&-$1-$2",    "abcd-bc-d" ),
+        TestVectors(  "a([bc]+)(c*d)",     "abcd", "y",    "$&-$1-$2",    "abcd-bc-d" ),
+        TestVectors(  "a([bc]*)(c+d)",     "abcd", "y",    "$&-$1-$2",    "abcd-b-cd" ),
+        TestVectors(  "a[bcd]*dcdcde",     "adcdcde",      "y",    "$&",    "adcdcde" ),
         TestVectors(  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" ), 
      
-        TestVectors(  "(ab|a)b*c", "abc",  "y",    "&-\\1",        "abc-ab" ),
-        TestVectors(  "((a)(b)c)(d)",      "abcd", "y",    "\\1-\\2-\\3-\\4",      "abc-a-b-d" ),
-        TestVectors(  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "&",    "alpha" ),
-        TestVectors(  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "&-\\1",        "bh-" ),
-        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "effgz",        "y",    "&-\\1-\\2",    "effgz-effgz-" ),
-        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "ij",   "y",    "&-\\1-\\2",    "ij-ij-j" ),
+        TestVectors(  "(ab|a)b*c", "abc",           "y",    "$&-$1",        "abc-ab" ),
+        TestVectors(  "((a)(b)c)(d)",      "abcd",  "y",    "$1-$2-$3-$4",      "abc-a-b-d" ),
+        TestVectors(  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "$&",    "alpha" ),
+        TestVectors(  "^a(bc+|b[eh])g|.h$",        "abh",  "y",    "$&-$1",        "bh-" ),
+        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "effgz",        "y",    "$&-$1-$2",    "effgz-effgz-" ),
+        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "ij",   "y",    "$&-$1-$2",    "ij-ij-j" ),
         TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "effg", "n",    "-",    "-" ),
         TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "bcdd", "n",    "-",    "-" ),
-        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "reffgz",       "y",    "&-\\1-\\2",    "effgz-effgz-" ),
-        TestVectors(  "(((((((((a)))))))))",       "a",    "y",    "&",    "a" ),
+        TestVectors(  "(bc+d$|ef*g.|h?i(j|k))",    "reffgz",       "y",    "$&-$1-$2",    "effgz-effgz-" ),
+        TestVectors(  "(((((((((a)))))))))",       "a",    "y",    "$&",    "a" ),
         TestVectors(  "multiple words of text",    "uh-uh",        "n",    "-",    "-" ),
-        TestVectors(  "multiple words",    "multiple words, yeah", "y",    "&",    "multiple words" ),
-        TestVectors(  "(.*)c(.*)", "abcde",        "y",    "&-\\1-\\2",    "abcde-ab-de" ),
-        TestVectors(  "\\((.*), (.*)\\)",  "(a, b)",       "y",    "(\\2, \\1)",   "(b, a)" ),
-        TestVectors(  "abcd",      "abcd", "y",    "&-\\&-\\\\&",  "abcd-&-\\abcd" ),
-        TestVectors(  "a(bc)d",    "abcd", "y",    "\\1-\\\\1-\\\\\\1",    "bc-\\1-\\bc" ), 
+        TestVectors(  "multiple words",    "multiple words, yeah", "y",    "$&",    "multiple words" ),
+        TestVectors(  "(.*)c(.*)", "abcde",                "y",    "$&-$1-$2",    "abcde-ab-de" ),
+        TestVectors(  "\\((.*), (.*)\\)",  "(a, b)",       "y",    "($2, $1)",   "(b, a)" ),
+        TestVectors(  "abcd",      "abcd",				   "y",    "$&-&-$$$&",  "abcd-&-$abcd" ),
+        TestVectors(  "a(bc)d",    "abcd",                 "y",    "$1-$$1-$$$1",    "bc-$1-$bc" ), 
         TestVectors(  "[k]",                       "ab",   "n",    "-",    "-" ), 
-        TestVectors(  "[ -~]*",                    "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~]*",         "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~ -~]*",              "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~ -~ -~]*",           "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~ -~ -~ -~]*",        "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~ -~ -~ -~ -~]*",     "abc",  "y",    "&",    "abc" ),
-        TestVectors(  "[ -~ -~ -~ -~ -~ -~ -~]*",  "abc",  "y",    "&",    "abc" ),
+        TestVectors(  "[ -~]*",                    "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~]*",                 "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~ -~]*",              "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~ -~ -~]*",           "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~ -~ -~ -~]*",        "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~ -~ -~ -~ -~]*",     "abc",  "y",    "$&",    "abc" ),
+        TestVectors(  "[ -~ -~ -~ -~ -~ -~ -~]*",  "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "a{2}",      "candy",                "n",    "",     "" ),
-        TestVectors(  "a{2}",      "caandy",               "y",    "&",    "aa" ),
-        TestVectors(  "a{2}",      "caaandy",              "y",    "&",    "aa" ),
+        TestVectors(  "a{2}",      "caandy",               "y",    "$&",    "aa" ),
+        TestVectors(  "a{2}",      "caaandy",              "y",    "$&",    "aa" ),
         TestVectors(  "a{2,}",     "candy",                "n",    "",     "" ),
-        TestVectors(  "a{2,}",     "caandy",               "y",    "&",    "aa" ),
-        TestVectors(  "a{2,}",     "caaaaaandy",           "y",    "&",    "aaaaaa" ),
+        TestVectors(  "a{2,}",     "caandy",               "y",    "$&",    "aa" ),
+        TestVectors(  "a{2,}",     "caaaaaandy",           "y",    "$&",    "aaaaaa" ),
         TestVectors(  "a{1,3}",    "cndy",                 "n",    "",     "" ),
-        TestVectors(  "a{1,3}",    "candy",                "y",    "&",    "a" ),
-        TestVectors(  "a{1,3}",    "caandy",               "y",    "&",    "aa" ),
-        TestVectors(  "a{1,3}",    "caaaaaandy",           "y",    "&",    "aaa" ),
-        TestVectors(  "e?le?",     "angel",                "y",    "&",    "el" ),
-        TestVectors(  "e?le?",     "angle",                "y",    "&",    "le" ),
-        TestVectors(  "\\bn\\w",   "noonday",              "y",    "&",    "no" ),
-        TestVectors(  "\\wy\\b",   "possibly yesterday",   "y",    "&",    "ly" ),
-        TestVectors(  "\\w\\Bn",   "noonday",              "y",    "&",    "on" ),
-        TestVectors(  "y\\B\\w",   "possibly yesterday",   "y",    "&",    "ye" ),
-        TestVectors(  "\\cJ",      "abc\ndef",             "y",    "&",    "\n" ),
-        TestVectors(  "\\d",       "B2 is",                "y",    "&",    "2" ),
-        TestVectors(  "\\D",       "B2 is",                "y",    "&",    "B" ),
-        TestVectors(  "\\s\\w*",   "foo bar",              "y",    "&",    " bar" ),
-        TestVectors(  "\\S\\w*",   "foo bar",              "y",    "&",    "foo" ),
-        TestVectors(  "abc",       "ababc",                "y",    "&",    "abc" ),
-        TestVectors(  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "&", "apple, orange," ),
-        TestVectors(  "(\\w+)\\s(\\w+)",           "John Smith", "y", "\\2, \\1", "Smith, John" ),
-        TestVectors(  "\\n\\f\\r\\t\\v",           "abc\n\f\r\t\vdef", "y", "&", "\n\f\r\t\v" ),
-        TestVectors(  ".*c",       "abcde",                "y",    "&",    "abc" ),
-        TestVectors(  "^\\w+((;|=)\\w+)+$", "some=host=tld", "y", "&-\\1-\\2", "some=host=tld-=tld-=" ),
-        TestVectors(  "^\\w+((\\.|-)\\w+)+$", "some.host.tld", "y", "&-\\1-\\2", "some.host.tld-.tld-." ),
-        TestVectors(  "q(a|b)*q",  "xxqababqyy",           "y",    "&-\\1",        "qababq-b" ),
-        TestVectors(  "^(a)(b){0,1}(c*)",   "abcc", "y", "\\1 \\2 \\3", "a b cc" ),
-        TestVectors(  "^(a)((b){0,1})(c*)", "abcc", "y", "\\1 \\2 \\3", "a b b" ),
-        TestVectors(  "^(a)(b)?(c*)",       "abcc", "y", "\\1 \\2 \\3", "a b cc" ),
-        TestVectors(  "^(a)((b)?)(c*)",     "abcc", "y", "\\1 \\2 \\3", "a b b" ),
-        TestVectors(  "^(a)(b){0,1}(c*)",   "acc",  "y", "\\1 \\2 \\3", "a  cc" ),
-        TestVectors(  "^(a)((b){0,1})(c*)", "acc",  "y", "\\1 \\2 \\3", "a  " ),
-        TestVectors(  "^(a)(b)?(c*)",       "acc",  "y", "\\1 \\2 \\3", "a  cc" ),
-        TestVectors(  "^(a)((b)?)(c*)",     "acc",  "y", "\\1 \\2 \\3", "a  " ),
-        TestVectors(  "(?:ab){3}",       "_abababc",  "y","&-\\1","ababab-" ), 
-        TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",     "y","&-\\1-\\2","aaxax--" ),
+        TestVectors(  "a{1,3}",    "candy",                "y",    "$&",    "a" ),
+        TestVectors(  "a{1,3}",    "caandy",               "y",    "$&",    "aa" ),
+        TestVectors(  "a{1,3}",    "caaaaaandy",           "y",    "$&",    "aaa" ),
+        TestVectors(  "e?le?",     "angel",                "y",    "$&",    "el" ),
+        TestVectors(  "e?le?",     "angle",                "y",    "$&",    "le" ),
+        TestVectors(  "\\bn\\w",   "noonday",              "y",    "$&",    "no" ),
+        TestVectors(  "\\wy\\b",   "possibly yesterday",   "y",    "$&",    "ly" ),
+        TestVectors(  "\\w\\Bn",   "noonday",              "y",    "$&",    "on" ),
+        TestVectors(  "y\\B\\w",   "possibly yesterday",   "y",    "$&",    "ye" ),
+        TestVectors(  "\\cJ",      "abc\ndef",             "y",    "$&",    "\n" ),
+        TestVectors(  "\\d",       "B2 is",                "y",    "$&",    "2" ),
+        TestVectors(  "\\D",       "B2 is",                "y",    "$&",    "B" ),
+        TestVectors(  "\\s\\w*",   "foo bar",              "y",    "$&",    " bar" ),
+        TestVectors(  "\\S\\w*",   "foo bar",              "y",    "$&",    "foo" ),
+        TestVectors(  "abc",       "ababc",                "y",    "$&",    "abc" ),
+        TestVectors(  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "$&", "apple, orange," ),
+        TestVectors(  "(\\w+)\\s(\\w+)",           "John Smith", "y", "$2, $1", "Smith, John" ),
+        TestVectors(  "\\n\\f\\r\\t\\v",           "abc\n\f\r\t\vdef", "y", "$&", "\n\f\r\t\v" ),
+        TestVectors(  ".*c",       "abcde",						"y",    "$&",    "abc" ),
+        TestVectors(  "^\\w+((;|=)\\w+)+$", "some=host=tld",	"y", "$&-$1-$2", "some=host=tld-=tld-=" ),
+        TestVectors(  "^\\w+((\\.|-)\\w+)+$", "some.host.tld",	"y", "$&-$1-$2", "some.host.tld-.tld-." ),
+        TestVectors(  "q(a|b)*q",  "xxqababqyy",				"y",    "$&-$1",        "qababq-b" ),
+        TestVectors(  "^(a)(b){0,1}(c*)",   "abcc", "y", "$1 $2 $3", "a b cc" ),
+        TestVectors(  "^(a)((b){0,1})(c*)", "abcc", "y", "$1 $2 $3", "a b b" ),
+        TestVectors(  "^(a)(b)?(c*)",       "abcc", "y", "$1 $2 $3", "a b cc" ),
+        TestVectors(  "^(a)((b)?)(c*)",     "abcc", "y", "$1 $2 $3", "a b b" ),
+        TestVectors(  "^(a)(b){0,1}(c*)",   "acc",  "y", "$1 $2 $3", "a  cc" ),
+        TestVectors(  "^(a)((b){0,1})(c*)", "acc",  "y", "$1 $2 $3", "a  " ),
+        TestVectors(  "^(a)(b)?(c*)",       "acc",  "y", "$1 $2 $3", "a  cc" ),
+        TestVectors(  "^(a)((b)?)(c*)",     "acc",  "y", "$1 $2 $3", "a  " ),
+        TestVectors(  "(?:ab){3}",       "_abababc",  "y","$&-$1","ababab-" ), 
+        TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",     "y","$&-$1-$2","aaxax--" ),
         //no lookaround for Thompson VM
-     /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","&-\\1", "food-" ),
-        TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "&-\\1", "12345678-8" ), +/
+     /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
+        TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
 //more repetitions:
-        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "&", "aaabaaaabbb" ), 
-//reuse of matches:
-        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",           "y",    "\\1-\\2-\\3",  "--xyz" ),        
+        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "$&", "aaabaaaabbb" ), 
+//groups:
+        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",             "y",   "$1-$2-$3","--xyz"), 
+		TestVectors(  "(?P<q>\\d+)/(?P<d>\\d+)",	 "2/3",       "y",	 "${d}/${q}",	"3/2"),
 //set operations:
-        TestVectors(  "[a-z--d-f]",                      " dfa",  "y",   "&",     "a"),
-        TestVectors(  "[abc[pq--acq]]{2}",             "bqpaca",  "y",   "&",     "pa"),
-        TestVectors(  "[a-z9&&abc0-9]{3}",           "z90a0abc",  "y",   "&",     "abc"),
-        TestVectors(  "[0-9a-f~~0-5a-z]{2}",           "g0a58x",  "y",   "&",     "8x"),
-        TestVectors(  "[abc[pq]xyz[rs]]{4}",            "cqxr",   "y",   "&",     "cqxr"),
-        TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "&",     "f"),
-//escapes:
-		TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2213.", "y", "&", "\u2213\u00c5."),
+        TestVectors(  "[a-z--d-f]",                  " dfa",      "y",   "$&",     "a"),
+        TestVectors(  "[abc[pq--acq]]{2}",           "bqpaca",    "y",   "$&",     "pa"),
+        TestVectors(  "[a-z9&&abc0-9]{3}",           "z90a0abc",  "y",   "$&",     "abc"),
+        TestVectors(  "[0-9a-f~~0-5a-z]{2}",         "g0a58x",    "y",   "$&",     "8x"),
+        TestVectors(  "[abc[pq]xyz[rs]]{4}",         "cqxr",      "y",   "$&",     "cqxr"),
+        TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "$&",     "f"),
+		
+//unicode blocks & properties:
+		TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2203.", "y", "$&", "\u00c3\u2203."),
+		TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,	"a+\u2212",	"y",	"$&",	"+\u2212"),
         ]; 
 
     int i;
@@ -259,22 +262,44 @@ unittest
                 while (!fmt.empty)
                     switch (fmt.front)
                     {
-                        case '\\':
-                            fmt.popFront();
-                            if (!isdigit(fmt.front) )
-                            {
-                                result ~= fmt.front;
-                                fmt.popFront();
-                                break;
-                            }
-                            auto nmatch = parse!uint(fmt);
-                            if (nmatch < m.captures.length)
-                                result ~= m.captures[nmatch];
-                        break;
-                        case '&':
-                            result ~= m.hit;
-                            fmt.popFront();
-                        break;
+						case '$':
+							fmt.popFront();
+							if(fmt.empty)
+								throw new Exception("wrong format in produceExpected");
+							if(isdigit(fmt.front))
+							{
+								auto nmatch = parse!uint(fmt);
+								if(nmatch < m.captures.length)
+	                                result ~= m.captures[nmatch];
+							}
+							else if(fmt.front == '&')
+							{
+								result ~= m.captures[0];
+								fmt.popFront();
+							}
+							else if(fmt.front == '$')
+							{
+								result ~= '$';
+								fmt.popFront();
+							}
+							else if(fmt.front == '{')
+							{
+								fmt.popFront();
+								string s;
+								while(!fmt.empty && fmt.front != '}')
+								{
+									s ~= fmt.front;
+									fmt.popFront();
+								}
+								result ~= m.captures[s];
+								if(fmt.front != '}')
+									throw new Exception("wrong format in produceExpected");
+								fmt.popFront();
+							}
+							else
+								throw new Exception("wrong format in produceExpected");
+							
+							break;
                         default:
                             result ~= fmt.front;
                             fmt.popFront();
@@ -312,8 +337,7 @@ unittest
                     {
                         auto result = produceExpected(m, to!(String)(tvd.format));
                         //make stderr collect all mismatches
-                        if(result != to!String(tvd.replace))
-                            assert(text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected:",
+                        assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
                                     tvd.replace, " vs ", result));
                     }
                 }

@@ -407,7 +407,7 @@ struct Charset
     ///
     void add(dchar ch){ add(Interval(cast(uint)ch)); }
     /// this = this || set
-    void add(Charset set)
+    void add(in Charset set)
     {
         debug(fred_charset) writef ("%s || %s --> ", intervals, set.intervals);
         foreach(inter; set.intervals)
@@ -415,10 +415,11 @@ struct Charset
         debug(fred_charset) writeln(intervals);
     }
     /// this = this || set
-    void sub(Charset set)
+    void sub(in Charset set)
     {
         Interval[] result;
-        auto a = intervals, b=set.intervals;
+        auto a = intervals;
+		const(Interval)[] b = set.intervals;
         for(;;)
         {
             if(a.front.end < b.front.begin)
@@ -483,7 +484,7 @@ struct Charset
         intervals = result ~ a;//+ leftover of original (if any)
     }
     /// this = this ~~ set (i.e. (this || set) -- (this && set))
-    void symmetricSub(Charset set)
+    void symmetricSub(in Charset set)
     {
         auto a = Charset(intervals.dup);
         a.intersect(set);
@@ -491,10 +492,11 @@ struct Charset
         this.sub(a);
     }
     /// this = this && set
-    void intersect(Charset set)
+    void intersect(in Charset set)
     {
         Interval[] intersection;
-        auto a = intervals, b=set.intervals;
+        auto a = intervals;
+		const(Interval)[] b = set.intervals;
         for(;;)
         {
             if(a.front.end < b.front.begin)
@@ -745,7 +747,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         next();
                         nglob = cast(uint)index.length-1;//not counting whole match
                         index ~= ngroup++;
-                        auto t = NamedGroup(name,nglob);
+                        auto t = NamedGroup(name,nglob+1);
                         auto d = assumeSorted!"a.name < b.name"(dict);
                         auto ind = d.lowerBound(t).length;
                         insertInPlace(dict, ind, t);
@@ -1041,6 +1043,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         break L_CharTermLoop;
                     }
                     goto default;
+				case '\\':
+					set.add(last);
+					state = State.Escape;
+					break;
                 case '[':
                     op = Operator.Union;
                     goto case;
@@ -1079,6 +1085,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add('\\');
                     state = State.Char;
                     break;
+				case 'p':
+					set.add(parseUnicodePropertySpec(false));
+					state = State.Start;
+					continue L_CharTermLoop; //next char already fetched
+				case 'P':
+					set.add(parseUnicodePropertySpec(true));
+					state = State.Start;
+					continue L_CharTermLoop; //next char already fetched
                 //TODO: charsets for commmon properties
                 /+
                     case 'd':
@@ -1127,7 +1141,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     /**
         Parse and store IR for charset
     */
-
     void parseCharset()
     {
         Stack!Charset vstack;
@@ -1259,30 +1272,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case 'W':   next(); return Bytecode(IR.Notword, 0);
         
         case 'p': case 'P':
-			bool negated = current == 'P';
-			next() && current == '{' || error("{ expected ");
-			static bool sep(dchar x){ return x ==':' || x== '}'; }
-			auto end = find!(sep)(pat);
-			string name = to!string(pat[0..$-end.length]);
-			pat = end;
-			if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
-			{//unicode block
-				name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
-				auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
-				fnd < unicodeBlocks.length || error("unrecognized unicode block name");
-				comparePropertyName(unicodeBlocks[fnd].name, name) == 0 || error("unrecognized unicode block name");
-				debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
-				auto s = Charset([unicodeBlocks[fnd].extent]);
-				if(negated)
-					s.negate();
-				charsets ~= cast(immutable Charset)(s);
-			}
-			else
-			{//unicode property 
-				assert(0);
-			}
-			next() && current == '}' || error("} expected ");
-			next();
+			charsets ~= parseUnicodePropertySpec(current == 'P');
             return Bytecode(IR.Charset, charsets.length-1);
         case 'x':
             auto save = pat;
@@ -1344,7 +1334,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case '0':
             next();
             return Bytecode(IR.Char, 0);//NUL character
-        case '1': .. case '9':
+        case '1': .. case '9': //TODO: use $ instead of \ for backreference
             uint nref = cast(uint)current - '0';
             nref <  index.length || error("Backref to unseen group");
             //perl's disambiguation rule i.e.
@@ -1363,6 +1353,35 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return op;
         }
     }
+	/// parse and return a Charset for \p{...Property...} and \P{...Property..},
+	// \ - assumed to be processed, p - is current
+	immutable(Charset) parseUnicodePropertySpec(bool negated)
+	{
+		next() && current == '{' || error("{ expected ");
+		static bool sep(dchar x){ return x ==':' || x== '}'; }
+		auto end = find!(sep)(pat);
+		string name = to!string(pat[0..$-end.length]);
+		pat = end;
+		Charset s;
+		if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
+		{//unicode block
+			name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
+			auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
+			fnd < unicodeBlocks.length || error("unrecognized unicode block name");
+			comparePropertyName(unicodeBlocks[fnd].name, name) == 0 || error("unrecognized unicode block name");
+			debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
+			s = Charset([unicodeBlocks[fnd].extent]);
+			if(negated)
+				s.negate();
+		}
+		else
+		{//unicode property 
+			assert(0);
+		}
+		next() && current == '}' || error("} expected ");
+		next();
+		return cast(immutable Charset)(s);
+	}
     //
     void error(string msg)
     {
@@ -1378,15 +1397,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         return Program(this);
     }
 }
-///std.regex-like Regex object wrapper, provided for backwards compatibility
-struct Regex(Char)
-    if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
-{
-    Program storage;
-    this(Program rs){ storage = rs; }
-    alias storage this;
 
-}
 ///Object that holds all persistent data about compiled regex
 struct Program
 {
@@ -1468,6 +1479,14 @@ struct Program
         writeln("Total merge table size: ", hotspotTableSize);
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
+	//
+	uint lookupNamedGroup(string name)
+	{
+		auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
+		if(dict[fnd].name != name)
+			throw new Exception("out of range");
+		return dict[fnd].group;
+	}
 	///
     this(Parser)(Parser p)
     {
@@ -1485,6 +1504,16 @@ struct Program
             validate();
         }
     }
+}
+
+///std.regex-like Regex object wrapper, provided for backwards compatibility
+struct Regex(Char)
+    if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
+{
+    Program storage;
+    this(Program rs){ storage = rs; }
+    alias storage this;
+
 }
 
 /// Simple UTF-string stream abstraction with caching
@@ -2590,11 +2619,13 @@ private:
         R input;
         Group[] groups;
         uint[] index;
+		Program re;
         this(ref RegexMatch rmatch)
         {
             input = rmatch.input;
             index = rmatch.index;
             groups = rmatch.matches;
+			re = rmatch.engine.re;
         }
         @property R front()
         {
@@ -2619,11 +2650,16 @@ private:
         {
             return input[groups[index[i]].begin..groups[index[i]].end];
         }
+		R opIndex(string i)
+        {
+			size_t index = re.lookupNamedGroup(i);
+			return opIndex(index);
+        }
         @property size_t length() const { return index.length; }
     }
 
 public:
-    //
+    ///
     this(Program prog, R _input)
     {
         input = _input;
@@ -2632,32 +2668,39 @@ public:
         engine = EngineType(prog, input);
         popFront();
     }
+	///
     @property R pre()
     {
         assert(!empty);
         return input[0 .. matches[0].begin];
     }
+	///
     @property R post()
     {
         assert(!empty);
         return input[matches[0].end..$];
     }
+	///
     @property R hit()
     {
         assert(!empty);
         return input[matches[0].begin .. matches[0].end];
     }
+	///
     @property auto front()
     {
         return this;
     }
+	///
     void popFront()
     { //previous one can have escaped references from Capture object
         matches = new Group[matches.length];
         _empty = !engine.match(matches);
     }
+	///
     @property bool empty(){ return _empty; }
-    @property captures(){ return Captures(this); }
+	///
+    @property auto captures(){ return Captures(this); }
 }
 
 auto regex(S)(S pattern, S flags=[])
