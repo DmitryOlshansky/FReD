@@ -1,6 +1,241 @@
+//Written in the D programming language
+/**
+ * Fast Regular expressions for D
+ *
+ * License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
+ *
+ * Authors: Dmitry Olshansky
+ *
+ */
 import fred;
 //TODO: fill any remaining empty charsets and don't forget aliases
 import std.algorithm, std.range, std.ctype, std.stdio;
+
+//any codepoint in these intervals is trivally uppercased/lowercased (lowest bit set -> lower)
+immutable evenUpper = Charset([
+Interval(0x00100,0x0012f),
+Interval(0x00132,0x00137),
+Interval(0x00139,0x00148),
+Interval(0x0014a,0x00177),
+Interval(0x00179,0x0017e),
+Interval(0x00182,0x00185),
+Interval(0x00187,0x00188),
+Interval(0x0018b,0x0018c),
+Interval(0x00191,0x00192),
+Interval(0x00198,0x00199),
+Interval(0x001a0,0x001a5),
+Interval(0x001a7,0x001a8),
+Interval(0x001ac,0x001ad),
+Interval(0x001af,0x001b0),
+Interval(0x001b3,0x001b6),
+Interval(0x001b8,0x001b9),
+Interval(0x001bc,0x001bd),
+Interval(0x001c5,0x001c6),
+Interval(0x001c8,0x001c9),
+Interval(0x001cb,0x001dc),
+Interval(0x001de,0x001ef),
+Interval(0x001f2,0x001f5),
+Interval(0x001f8,0x0021f),
+Interval(0x00222,0x00233),
+Interval(0x0023b,0x0023c),
+Interval(0x00241,0x00242),
+Interval(0x00246,0x0024f),
+Interval(0x00370,0x00373),
+Interval(0x00376,0x00377),
+Interval(0x003c2,0x003c3),
+Interval(0x003d8,0x003ef),
+Interval(0x003f7,0x003f8),
+Interval(0x003fa,0x003fb),
+Interval(0x00460,0x00481),
+Interval(0x0048a,0x004bf),
+Interval(0x004c1,0x004ce),
+Interval(0x004d0,0x00527),
+Interval(0x01e00,0x01e95),
+Interval(0x01ea0,0x01eff),
+Interval(0x02183,0x02184),
+Interval(0x02c60,0x02c61),
+Interval(0x02c67,0x02c6c),
+Interval(0x02c72,0x02c73),
+Interval(0x02c75,0x02c76),
+Interval(0x02c80,0x02ce3),
+Interval(0x02ceb,0x02cee),
+Interval(0x0a640,0x0a66d),
+Interval(0x0a680,0x0a697),
+Interval(0x0a722,0x0a72f),
+Interval(0x0a732,0x0a76f),
+Interval(0x0a779,0x0a77c),
+Interval(0x0a77e,0x0a787),
+Interval(0x0a78b,0x0a78c),
+Interval(0x0a790,0x0a791),
+Interval(0x0a7a0,0x0a7a9),
+]);
+
+struct CommonCaseEntry
+{
+    int delta;
+    Charset set;
+}
+//these are a bit harder to lowercase/uppercase lower: +- delta
+immutable commonCaseTable = [
+CommonCaseEntry(8, Charset([Interval(0x01f00, 0x01f07),Interval(0x01f10, 0x01f15),Interval(0x01f20, 0x01f27),Interval(0x01f30, 0x01f37),Interval(0x01f40, 0x01f45),Interval(0x01f60, 0x01f67),Interval(0x01fb0, 0x01fb1),Interval(0x01fd0, 0x01fd1),])),
+CommonCaseEntry(-8, Charset([Interval(0x01f08, 0x01f0f),Interval(0x01f18, 0x01f1d),Interval(0x01f28, 0x01f2f),Interval(0x01f38, 0x01f3f),Interval(0x01f48, 0x01f4d),Interval(0x01f68, 0x01f6f),Interval(0x01fb8, 0x01fb9),Interval(0x01fd8, 0x01fd9),])),
+CommonCaseEntry(16, Charset([Interval(0x02160, 0x0216e),])),
+CommonCaseEntry(-16, Charset([Interval(0x02170, 0x0217e),])),
+CommonCaseEntry(26, Charset([Interval(0x024b6, 0x024cf),])),
+CommonCaseEntry(-26, Charset([Interval(0x024d0, 0x024e9),])),
+CommonCaseEntry(32, Charset([Interval(0x00041, 0x0005a),Interval(0x000c0, 0x000d6),Interval(0x000d8, 0x000de),Interval(0x00391, 0x003a1),Interval(0x003a3, 0x003ab),Interval(0x00410, 0x0042f),Interval(0x0ff21, 0x0ff3a),])),
+CommonCaseEntry(-32, Charset([Interval(0x00061, 0x0007a),Interval(0x000e0, 0x000f6),Interval(0x000f8, 0x000fe),Interval(0x003b1, 0x003c1),Interval(0x003c3, 0x003cb),Interval(0x00430, 0x0044f),Interval(0x0ff41, 0x0ff5a),])),
+CommonCaseEntry(37, Charset([Interval(0x00388, 0x0038a),])),
+CommonCaseEntry(-37, Charset([Interval(0x003ad, 0x003af),])),
+CommonCaseEntry(40, Charset([Interval(0x10400, 0x10427),])),
+CommonCaseEntry(-40, Charset([Interval(0x10428, 0x1044f),])),
+CommonCaseEntry(48, Charset([Interval(0x00531, 0x00556),Interval(0x02c00, 0x02c11),])),
+CommonCaseEntry(-48, Charset([Interval(0x00561, 0x00586),Interval(0x02c30, 0x02c41),])),
+CommonCaseEntry(63, Charset([Interval(0x0038e, 0x0038f),])),
+CommonCaseEntry(-63, Charset([Interval(0x003cd, 0x003ce),])),
+CommonCaseEntry(74, Charset([Interval(0x01f70, 0x01f71),])),
+CommonCaseEntry(-74, Charset([Interval(0x01fba, 0x01fbb),])),
+CommonCaseEntry(80, Charset([Interval(0x00400, 0x0040f),])),
+CommonCaseEntry(-80, Charset([Interval(0x00450, 0x0045f),])),
+CommonCaseEntry(86, Charset([Interval(0x01f72, 0x01f75),])),
+CommonCaseEntry(-86, Charset([Interval(0x01fc8, 0x01fcb),])),
+CommonCaseEntry(100, Charset([Interval(0x01f76, 0x01f77),])),
+CommonCaseEntry(-100, Charset([Interval(0x01fda, 0x01fdb),])),
+CommonCaseEntry(112, Charset([Interval(0x01f7a, 0x01f7b),])),
+CommonCaseEntry(-112, Charset([Interval(0x01fea, 0x01feb),])),
+CommonCaseEntry(126, Charset([Interval(0x01f7c, 0x01f7d),])),
+CommonCaseEntry(-126, Charset([Interval(0x01ffa, 0x01ffb),])),
+CommonCaseEntry(128, Charset([Interval(0x01f78, 0x01f79),])),
+CommonCaseEntry(-128, Charset([Interval(0x01ff8, 0x01ff9),])),
+CommonCaseEntry(130, Charset([Interval(0x0037b, 0x0037d),])),
+CommonCaseEntry(-130, Charset([Interval(0x003fd, 0x003ff),])),
+CommonCaseEntry(205, Charset([Interval(0x00189, 0x0018a),])),
+CommonCaseEntry(-205, Charset([Interval(0x00256, 0x00257),])),
+CommonCaseEntry(217, Charset([Interval(0x001b1, 0x001b2),])),
+CommonCaseEntry(-217, Charset([Interval(0x0028a, 0x0028b),])),
+CommonCaseEntry(7264, Charset([Interval(0x010a0, 0x010b7),])),
+CommonCaseEntry(-7264, Charset([Interval(0x02d00, 0x02d17),])),
+CommonCaseEntry(10815, Charset([Interval(0x0023f, 0x00240),])),
+CommonCaseEntry(-10815, Charset([Interval(0x02c7e, 0x02c7f),])),
+];
+
+//horrible irregularities are stockpiled here as lower/upper pairs  (note  it's not a 1:1 mapping, more like n:m)
+immutable(uint)[] casePairs = [
+0x0006b, 0x0212a,
+0x00073, 0x0017f,
+0x000b5, 0x003bc,
+0x000e5, 0x0212b,
+0x000ff, 0x00178,
+0x00180, 0x00243,
+0x00181, 0x00253,
+0x00186, 0x00254,
+0x0018e, 0x001dd,
+0x0018f, 0x00259,
+0x00190, 0x0025b,
+0x00193, 0x00260,
+0x00194, 0x00263,
+0x00195, 0x001f6,
+0x00196, 0x00269,
+0x00197, 0x00268,
+0x0019a, 0x0023d,
+0x0019c, 0x0026f,
+0x0019d, 0x00272,
+0x0019e, 0x00220,
+0x0019f, 0x00275,
+0x001a6, 0x00280,
+0x001a9, 0x00283,
+0x001ae, 0x00288,
+0x001b7, 0x00292,
+0x001bf, 0x001f7,
+0x001c4, 0x001c6,
+0x001c7, 0x001c9,
+0x001ca, 0x001cc,
+0x001f1, 0x001f3,
+0x0023a, 0x02c65,
+0x0023e, 0x02c66,
+0x00244, 0x00289,
+0x00245, 0x0028c,
+0x00250, 0x02c6f,
+0x00251, 0x02c6d,
+0x00252, 0x02c70,
+0x00265, 0x0a78d,
+0x0026b, 0x02c62,
+0x00271, 0x02c6e,
+0x0027d, 0x02c64,
+0x00345, 0x003b9,
+0x00386, 0x003ac,
+0x0038c, 0x003cc,
+0x003b2, 0x003d0,
+0x003b5, 0x003f5,
+0x003b8, 0x003d1,
+0x003b8, 0x003f4,
+0x003b9, 0x01fbe,
+0x003ba, 0x003f0,
+0x003c0, 0x003d6,
+0x003c1, 0x003f1,
+0x003c6, 0x003d5,
+0x003c9, 0x02126,
+0x003cf, 0x003d7,
+0x003f2, 0x003f9,
+0x004c0, 0x004cf,
+0x01d79, 0x0a77d,
+0x01d7d, 0x02c63,
+0x01e61, 0x01e9b,
+0x01f51, 0x01f59,
+0x01f53, 0x01f5b,
+0x01f55, 0x01f5d,
+0x01f57, 0x01f5f,
+0x01fe0, 0x01fe8,
+0x01fe1, 0x01fe9,
+0x01fe5, 0x01fec,
+0x02132, 0x0214e,
+];
+
+///Gets array of all of common case eqivalents of given codepoint (fills provided array & returns a slice of it)
+dchar[] getCommonCasing(dchar ch, dchar[] range)
+{
+    assert(range.length >= 5);
+    range[0] = ch;
+    if(evenUpper.contains(ch))//simple version
+    {
+        range[1] = ch ^ 1;
+        return range[0..2];
+    }
+    uint s = 0, n = 1;
+    for(s=0;s < n; s++)
+    {
+        foreach(i, v; commonCaseTable)
+            if(v.set.contains(range[s]) && !canFind(range[0..n], range[s]+v.delta))
+            {
+
+                range[n++] = range[s]+v.delta;
+            }
+        auto f = countUntil(casePairs, range[s]);
+        if(f >=0)
+            while(1)
+            {
+                if(!canFind(range[0..n], casePairs[f^1]))
+                {
+                   range[n++] = casePairs[f^1];
+                }
+                f++;
+                auto next =  countUntil(casePairs[f..$], range[s]);
+                if(next < 0)
+                    break;
+                f += next;
+            }
+    }
+    return range[0..n];
+}
+
+unittest
+{
+    dchar[6] data;
+    //these values give 100% code coverage for getCommonCasing
+    assert(getCommonCasing(0x01BC, data) == [0x01bc, 0x01bd]);
+    assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
+    assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
+}
 
 struct UnicodeBlock
 {
@@ -10,40 +245,40 @@ struct UnicodeBlock
 
 int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
-	for(;;)
-	{
-		while(!a.empty && (isspace(a.front) || a.front == '-'))
-		{
-			a.popFront();
-		}
-		while(!b.empty && (isspace(b.front) || b.front == '-'))
-		{
-			b.popFront();
-		}
-		if(a.empty)
-			return b.empty ? 0 : -1;
-		if(b.empty)
-			return 1;
-		auto ca = tolower(a.front), cb = tolower(b.front);
-		if(ca > cb)
-			return 1;
-		else if( ca < cb)
-			return -1;
-		a.popFront();
-		b.popFront();
-	}
+    for(;;)
+    {
+        while(!a.empty && (isspace(a.front) || a.front == '-'))
+        {
+            a.popFront();
+        }
+        while(!b.empty && (isspace(b.front) || b.front == '-'))
+        {
+            b.popFront();
+        }
+        if(a.empty)
+            return b.empty ? 0 : -1;
+        if(b.empty)
+            return 1;
+        auto ca = tolower(a.front), cb = tolower(b.front);
+        if(ca > cb)
+            return 1;
+        else if( ca < cb)
+            return -1;
+        a.popFront();
+        b.popFront();
+    }
 }
 
 bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
 {
-	return comparePropertyName(a, b) < 0;	
+	return comparePropertyName(a, b) < 0;
 }
 
 unittest
 {
-	assert(comparePropertyName("test","test") == 0);
-	assert(comparePropertyName("Al chemical Symbols", "Alphabetic Presentation Forms") == -1);
-	assert(comparePropertyName("Basic Latin","basic-LaTin") == 0);
+    assert(comparePropertyName("test","test") == 0);
+    assert(comparePropertyName("Al chemical Symbols", "Alphabetic Presentation Forms") == -1);
+    assert(comparePropertyName("Basic Latin","basic-LaTin") == 0);
 }
 
 

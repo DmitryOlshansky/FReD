@@ -103,7 +103,7 @@ unittest
         TestVectors(  "a[^-b]c",   "a-c",  "n",    "-",    "-" ),
 //same here:
 //TestVectors(  "a[^]b]c",   "a]c",  "n",    "-",    "-" ),
-//TestVectors(  "a[^]b]c",   "adc",  "y",    "&",    "adc" ), 
+//TestVectors(  "a[^]b]c",   "adc",  "y",    "&",    "adc" ),
         TestVectors(  "ab|cd",     "abc",  "y",    "$&",    "ab" ),
         TestVectors(  "ab|cd",     "abcd", "y",    "$&",    "ab" ),
         TestVectors(  "()ef",      "def",  "y",    "$&-$1",        "ef-" ),
@@ -113,7 +113,7 @@ unittest
         TestVectors(  "$*",        "-",    "y",    "-",    "-" ),
         TestVectors(  "(*)b",      "-",    "c",    "-",    "-" ),
         TestVectors(  "$b",        "b",    "n",    "-",    "-" ),
-        TestVectors(  "a\\",       "-",    "c",    "-",    "-" ), 
+        TestVectors(  "a\\",       "-",    "c",    "-",    "-" ),
         TestVectors(  "a\\(b",     "a(b",  "y",    "$&-$1",        "a(b-" ),
         TestVectors(  "a\\(*b",    "ab",   "y",    "$&",    "ab" ),
         TestVectors(  "a\\(*b",    "a((b", "y",    "$&",    "a((b" ),
@@ -128,7 +128,7 @@ unittest
         TestVectors(  "(a*)*",     "aaa",  "y",    "-",    "-" ),
         TestVectors(  "(a*)+",     "aaa",  "y",    "-",    "-" ),
         TestVectors(  "(a|)*",     "-",    "y",    "-",    "-" ),
-        TestVectors(  "(a*|b)*",   "aabb", "y",    "-",    "-" ),  
+        TestVectors(  "(a*|b)*",   "aabb", "y",    "-",    "-" ),
         TestVectors(  "(a|b)*",    "ab",   "y",    "$&-$1",        "ab-b" ),
         TestVectors(  "(a+|b)*",   "ab",   "y",    "$&-$1",        "ab-b" ),
         TestVectors(  "(a+|b)+",   "ab",   "y",    "$&-$1",        "ab-b" ),
@@ -159,8 +159,7 @@ unittest
         TestVectors(  "a([bc]+)(c*d)",     "abcd", "y",    "$&-$1-$2",    "abcd-bc-d" ),
         TestVectors(  "a([bc]*)(c+d)",     "abcd", "y",    "$&-$1-$2",    "abcd-b-cd" ),
         TestVectors(  "a[bcd]*dcdcde",     "adcdcde",      "y",    "$&",    "adcdcde" ),
-        TestVectors(  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" ), 
-     
+        TestVectors(  "a[bcd]+dcdcde",     "adcdcde",      "n",    "-",    "-" ),
         TestVectors(  "(ab|a)b*c", "abc",           "y",    "$&-$1",        "abc-ab" ),
         TestVectors(  "((a)(b)c)(d)",      "abcd",  "y",    "$1-$2-$3-$4",      "abc-a-b-d" ),
         TestVectors(  "[a-zA-Z_][a-zA-Z0-9_]*",    "alpha",        "y",    "$&",    "alpha" ),
@@ -175,9 +174,9 @@ unittest
         TestVectors(  "multiple words",    "multiple words, yeah", "y",    "$&",    "multiple words" ),
         TestVectors(  "(.*)c(.*)", "abcde",                "y",    "$&-$1-$2",    "abcde-ab-de" ),
         TestVectors(  "\\((.*), (.*)\\)",  "(a, b)",       "y",    "($2, $1)",   "(b, a)" ),
-        TestVectors(  "abcd",      "abcd",				   "y",    "$&-&-$$$&",  "abcd-&-$abcd" ),
-        TestVectors(  "a(bc)d",    "abcd",                 "y",    "$1-$$1-$$$1",    "bc-$1-$bc" ), 
-        TestVectors(  "[k]",                       "ab",   "n",    "-",    "-" ), 
+        TestVectors(  "abcd",      "abcd",                   "y",    "$&-&-$$$&",  "abcd-&-$abcd" ),
+        TestVectors(  "a(bc)d",    "abcd",                 "y",    "$1-$$1-$$$1",    "bc-$1-$bc" ),
+        TestVectors(  "[k]",                       "ab",   "n",    "-",    "-" ),
         TestVectors(  "[ -~]*",                    "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "[ -~ -~]*",                 "abc",  "y",    "$&",    "abc" ),
         TestVectors(  "[ -~ -~ -~]*",              "abc",  "y",    "$&",    "abc" ),
@@ -210,10 +209,10 @@ unittest
         TestVectors(  "apple(,)\\sorange\\1",      "apple, orange, cherry, peach", "y", "$&", "apple, orange," ),
         TestVectors(  "(\\w+)\\s(\\w+)",           "John Smith", "y", "$2, $1", "Smith, John" ),
         TestVectors(  "\\n\\f\\r\\t\\v",           "abc\n\f\r\t\vdef", "y", "$&", "\n\f\r\t\v" ),
-        TestVectors(  ".*c",       "abcde",						"y",    "$&",    "abc" ),
-        TestVectors(  "^\\w+((;|=)\\w+)+$", "some=host=tld",	"y", "$&-$1-$2", "some=host=tld-=tld-=" ),
-        TestVectors(  "^\\w+((\\.|-)\\w+)+$", "some.host.tld",	"y", "$&-$1-$2", "some.host.tld-.tld-." ),
-        TestVectors(  "q(a|b)*q",  "xxqababqyy",				"y",    "$&-$1",        "qababq-b" ),
+        TestVectors(  ".*c",       "abcde",                        "y",    "$&",    "abc" ),
+        TestVectors(  "^\\w+((;|=)\\w+)+$", "some=host=tld",    "y", "$&-$1-$2", "some=host=tld-=tld-=" ),
+        TestVectors(  "^\\w+((\\.|-)\\w+)+$", "some.host.tld",    "y", "$&-$1-$2", "some.host.tld-.tld-." ),
+        TestVectors(  "q(a|b)*q",  "xxqababqyy",                "y",    "$&-$1",        "qababq-b" ),
         TestVectors(  "^(a)(b){0,1}(c*)",   "abcc", "y", "$1 $2 $3", "a b cc" ),
         TestVectors(  "^(a)((b){0,1})(c*)", "abcc", "y", "$1 $2 $3", "a b b" ),
         TestVectors(  "^(a)(b)?(c*)",       "abcc", "y", "$1 $2 $3", "a b cc" ),
@@ -222,16 +221,16 @@ unittest
         TestVectors(  "^(a)((b){0,1})(c*)", "acc",  "y", "$1 $2 $3", "a  " ),
         TestVectors(  "^(a)(b)?(c*)",       "acc",  "y", "$1 $2 $3", "a  cc" ),
         TestVectors(  "^(a)((b)?)(c*)",     "acc",  "y", "$1 $2 $3", "a  " ),
-        TestVectors(  "(?:ab){3}",       "_abababc",  "y","$&-$1","ababab-" ), 
+        TestVectors(  "(?:ab){3}",       "_abababc",  "y","$&-$1","ababab-" ),
         TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",     "y","$&-$1-$2","aaxax--" ),
         //no lookaround for Thompson VM
      /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
         TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
 //more repetitions:
-        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "$&", "aaabaaaabbb" ), 
+        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "$&", "aaabaaaabbb" ),
 //groups:
-        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",             "y",   "$1-$2-$3","--xyz"), 
-		TestVectors(  "(?P<q>\\d+)/(?P<d>\\d+)",	 "2/3",       "y",	 "${d}/${q}",	"3/2"),
+        TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",             "y",   "$1-$2-$3","--xyz"),
+        TestVectors(  "(?P<q>\\d+)/(?P<d>\\d+)",     "2/3",       "y",     "${d}/${q}",    "3/2"),
 //set operations:
         TestVectors(  "[a-z--d-f]",                  " dfa",      "y",   "$&",     "a"),
         TestVectors(  "[abc[pq--acq]]{2}",           "bqpaca",    "y",   "$&",     "pa"),
@@ -239,11 +238,17 @@ unittest
         TestVectors(  "[0-9a-f~~0-5a-z]{2}",         "g0a58x",    "y",   "$&",     "8x"),
         TestVectors(  "[abc[pq]xyz[rs]]{4}",         "cqxr",      "y",   "$&",     "cqxr"),
         TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "$&",     "f"),
-		
 //unicode blocks & properties:
-		TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2203.", "y", "$&", "\u00c3\u2203."),
-		TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,	"a+\u2212",	"y",	"$&",	"+\u2212"),
-        ]; 
+        TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2203.", "y", "$&", "\u00c3\u2203."),
+        TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,    "a+\u2212",    "y",    "$&",    "+\u2212"),
+
+//case insensitive:
+        TestVectors(   `^abc$`,               "AbC",                       "y",   "$&", "AbC",      "i"),
+        TestVectors(   `Русский язык`,   "рУсскИй ЯзЫк",                   "y",    "$&", "рУсскИй ЯзЫк",     "i"),
+        TestVectors(    `ⒶⒷⓒ` ,           "ⓐⓑⒸ",                           "y",    "$&", "ⓐⓑⒸ",      "i"),
+        TestVectors(    "\U00010400{2}",       "\U00010428\U00010400 ",    "y",    "$&", "\U00010428\U00010400", "i"),
+        TestVectors(    `[adzУ-Я]{4}`,      "DzюА"                                            "y",   "$&",  "DzЮа", "i"),
+        ];
 
     int i;
     sizediff_t a;
@@ -298,7 +303,7 @@ unittest
 							}
 							else
 								throw new Exception("wrong format in produceExpected");
-							
+
 							break;
                         default:
                             result ~= fmt.front;
@@ -317,7 +322,7 @@ unittest
                 try
                 {
                     i = 1;
-                    r = regex(to!(String)(tvd.pattern));
+                    r = regex(to!(String)(tvd.pattern), to!String(tvd.flags));
                 }
                 catch (RegexException e)
                 {
@@ -329,8 +334,8 @@ unittest
 
                 if (c != 'c')
                 {
-                
-                    auto m = matchFn(to!(String)(tvd.input), r); 
+
+                    auto m = matchFn(to!(String)(tvd.input), r);
                     i = !m.empty;
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern: ", tvd.pattern));
                     if (c == 'y')
@@ -351,7 +356,7 @@ unittest
 
 unittest
 {
-//global matching 
+//global matching
     void test_body(alias matchFn)()
     {
         string s = "a quick brown fox jumps over a lazy dog";
@@ -431,9 +436,9 @@ version(unittest){
 void main(){}
 }
 else{
-    
+
 int main(string[] argv)
-{    
+{
     if(argv.length < 2)
     {
         writefln("regex test\nUsage %s <compile | exec> \n"
@@ -454,7 +459,7 @@ int main(string[] argv)
             {
                 auto re = regex(s);
                 write(" OK \n");
-                re.print(); 
+                re.print();
             }
             catch(Exception ex)
             {

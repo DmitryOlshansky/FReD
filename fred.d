@@ -10,8 +10,8 @@
 //TODO: kill GC allocations when possible (everywhere)
 module fred;
 
-//unicode property tables
-import fred_uni;
+
+import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.ctype, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception;
@@ -56,6 +56,8 @@ enum IR:uint {
     GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
     Nop               = 0b1_10010_00, /// no operation (padding)
+    OrChar            = 0b1_10011_00, /// match with any of a consecutive OrChar's inthis sequence (used for case insensitive match)
+    //OrChar holds in upper two bits of data total number of OrChars in this _sequence_
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
@@ -143,6 +145,12 @@ struct Bytecode
         assert(data < (1<<24) && code < 256);
         raw = code<<24 | data;
     }
+    this(IR code, uint data, uint seq)
+    {
+        assert(data < (1<<22) && code < 256 );
+        assert(seq < 4 && seq >= 1);
+        raw = code<<24 | ((seq-1)<<22) | data;
+    }
     static Bytecode fromRaw(uint data)
     {
         Bytecode t;
@@ -150,7 +158,9 @@ struct Bytecode
         return t;
     }
     ///bit twiddling helpers
-    @property uint data(){ return raw & 0x00ff_ffff; }
+    @property uint data(){ return raw & 0x003f_ffff; }
+    ///ditto
+    @property uint sequence(){ return 1 + (raw >>22) & 0x3; }
     ///ditto
     @property IR code(){ return cast(IR)(raw>>24); }
     ///ditto
@@ -311,8 +321,12 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
         put(sink,"\n");
     }
 }
-
-enum RegexOption: uint { global = 0x1, fussy = 0x2, freeform = 0x4, nonunicode = 0x8 };
+//do not reorder this list
+///Regular expression engine/parser options:
+/// global - search  nonoverlapping matches in input
+/// casefold - case insensitive matching, do casefolding on match in unicode mode
+/// freeform - ignore whitespace in pattern, to match space use [ ] or \s
+enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8,  };
 
 //multiply-add, throws exception on overflow
 uint checkedMulAdd(uint f1, uint f2, uint add)
@@ -376,8 +390,17 @@ struct Charset
     void add(Interval inter)
     {
         //TODO: This all could use an improvment
+        /*
         auto beg = assumeSorted(map!"a.end"(intervals)).lowerBound(inter.begin).length;
         auto end = assumeSorted(map!"a.begin"(intervals)).lowerBound(inter.end).length;
+        */
+        uint beg, end;
+        for(beg=0; beg<intervals.length;beg++)
+            if(intervals[beg].end >= inter.begin)
+                break;
+        for(end=0; end<intervals.length;end++)
+            if(intervals[end].begin >= inter.end)
+                break;
         //debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
         if(beg == intervals.length)
         {
@@ -397,10 +420,10 @@ struct Charset
             intervals[beg-1].end = intervals[beg].end;
             replaceInPlace(intervals, beg, beg+1, cast(Interval[])[]);
         }
-        if(beg + 1 < intervals.length && intervals[beg].end+1 == intervals[beg+1].begin)
+        if(end > 0 && end < intervals.length && intervals[end-1].end+1 == intervals[end].begin)
         {
-            intervals[beg].end = intervals[beg+1].begin;
-            replaceInPlace(intervals, beg+1, beg+2, cast(Interval[])[]);
+            intervals[end-1].end = intervals[end].begin;
+            replaceInPlace(intervals, end, end+1, cast(Interval[])[]);
         }
         //debug(fred_parser) writeln("Charset after add: ", intervals);
     }
@@ -419,7 +442,7 @@ struct Charset
     {
         Interval[] result;
         auto a = intervals;
-		const(Interval)[] b = set.intervals;
+        const(Interval)[] b = set.intervals;
         for(;;)
         {
             if(a.front.end < b.front.begin)
@@ -463,7 +486,7 @@ struct Charset
                     }
                 }
                 else //a.front.begin > b.front.begin
-                {//adjust in place 
+                {//adjust in place
                     if(a.front.end < b.front.end)
                     {
                         a.popFront();
@@ -478,7 +501,7 @@ struct Charset
                             break;
                     }
                 }
-                
+
             }
         }
         intervals = result ~ a;//+ leftover of original (if any)
@@ -496,7 +519,7 @@ struct Charset
     {
         Interval[] intersection;
         auto a = intervals;
-		const(Interval)[] b = set.intervals;
+        const(Interval)[] b = set.intervals;
         for(;;)
         {
             if(a.front.end < b.front.begin)
@@ -544,7 +567,7 @@ struct Charset
     {
         if(intervals.empty)
         {
-            intervals ~= Interval(0, 0x1FFFF);
+            intervals ~= Interval(0, 0x10FFFF);
             return;
         }
         Interval[] negated;
@@ -552,7 +575,7 @@ struct Charset
             negated ~= Interval(0, intervals[0].begin-1);
         for(size_t i=0; i<intervals.length-1; i++)
             negated ~= Interval(intervals[i].end+1, intervals[i+1].begin-1);
-        if(intervals[$-1].end != 0x1FFFF)
+        if(intervals[$-1].end != 0x10FFFF)
             negated ~= Interval(intervals[$-1].end+1, 0x10FFFF);
         intervals = negated;
     }
@@ -560,9 +583,11 @@ struct Charset
     bool contains(dchar ch) const
     {
         //debug(fred_charset) writeln(intervals);
-        auto fnd = assumeSorted!"a<=b"(map!"a.begin"(intervals)).lowerBound(ch).length;
+        for(uint i=0; i<intervals.length; i++)
+            if(ch >= intervals[i].begin && ch <= intervals[i].end)
+                return true;
+        return false;
         //debug(fred_charset) writeln("Test at ", fnd);
-        return fnd != 0 && intervals[fnd-1].begin <= ch && ch <= intervals[fnd-1].end;
     }
     /// true if set is empty
     @property bool empty() const {   return intervals.empty; }
@@ -658,7 +683,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         return r;
     }
     /**
-        
+
     */
     void parseFlags(R flags)
     {
@@ -673,7 +698,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                                 throw new RegexException(text("redundant flag specified: ",ch));
                             re_flags |= mixin("RegexOption."~op);
                             break;
-                }       
+                }
                 default:
                     new RegexException(text("unknown regex flag '",ch,"'"));
             }
@@ -979,7 +1004,15 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
             break;
         default:
-            put(Bytecode(IR.Char, current));
+            if(re_flags & RegexOption.casefold)
+            {
+                dchar[5] data;
+                auto range = getCommonCasing(current, data);
+                foreach(v; range)
+                        put(Bytecode(IR.OrChar, v, range.length));
+            }
+            else
+                put(Bytecode(IR.Char, current));
             next();
         }
     }
@@ -994,6 +1027,18 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         dchar last;
         Charset set;
         State state = State.Start;
+        static void addWithFlags(ref Charset set, uint ch, uint re_flags)
+        {
+            if(re_flags & RegexOption.casefold)
+            {
+                dchar[5] chars;
+                auto range = getCommonCasing(ch, chars);
+                foreach(v; range)
+                    set.add(v);
+            }
+            else
+                set.add(ch);
+        }
         L_CharTermLoop:
         for(;;)
         {
@@ -1043,10 +1088,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         break L_CharTermLoop;
                     }
                     goto default;
-				case '\\':
-					set.add(last);
-					state = State.Escape;
-					break;
+                case '\\':
+                    set.add(last);
+                    state = State.Escape;
+                    break;
                 case '[':
                     op = Operator.Union;
                     goto case;
@@ -1054,7 +1099,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add(last);
                     break L_CharTermLoop;
                 default:
-                    set.add(last);
+                    addWithFlags(set, last, re_flags);
                     last = current;
                 }
                 break;
@@ -1085,14 +1130,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add('\\');
                     state = State.Char;
                     break;
-				case 'p':
-					set.add(parseUnicodePropertySpec(false));
-					state = State.Start;
-					continue L_CharTermLoop; //next char already fetched
-				case 'P':
-					set.add(parseUnicodePropertySpec(true));
-					state = State.Start;
-					continue L_CharTermLoop; //next char already fetched
+                case 'p':
+                    set.add(parseUnicodePropertySpec(false));
+                    state = State.Start;
+                    continue L_CharTermLoop; //next char already fetched
+                case 'P':
+                    set.add(parseUnicodePropertySpec(true));
+                    state = State.Start;
+                    continue L_CharTermLoop; //next char already fetched
                 //TODO: charsets for commmon properties
                 /+
                     case 'd':
@@ -1108,6 +1153,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     case 'W':
                 +/
                 default:
+					assert(0);
                 }
                 break;
             case State.Dash:
@@ -1119,17 +1165,23 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 case ']':
                     //error("unexpected end of charset");
                     //means dash is a single char not an interval specifier
-                    set.add(last);
+                    addWithFlags(set, last, re_flags);
                     set.add('-');
                     break L_CharTermLoop;
                  case '-'://set Difference again
-                    set.add(last);
+                    addWithFlags(set, last, re_flags);
                     op = Operator.Difference;
                     next();//skip '-'
                     break L_CharTermLoop;
                 default:
                     last <= current || error("reversed order in interval");
-                    set.add(Interval(last, current));
+                    if(re_flags & RegexOption.casefold)
+                    {
+                        for(uint ch = last; ch < current; ch++)
+                            addWithFlags(set, ch, re_flags);
+                    }
+                    else
+                        set.add(Interval(last, current));
                     state = State.Start;
                 }
                 break;
@@ -1190,8 +1242,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             return true;
         }
-       
-        
+
+
         L_CharsetLoop:
         do
         {
@@ -1229,7 +1281,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     if(opstack.top == Operator.Union)
                         unrollWhile!(unaryFun!"a == a.Union")(vstack, opstack);
                     opstack.push(pair[1]);
-                }         
+                }
                 break;
             //
             default://yet another pair of term(op)?
@@ -1242,7 +1294,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 }
                 vstack.push(pair[0]);
             }
-            
+
         }while(!empty || !opstack.empty);
         while(!opstack.empty)
             apply(opstack.pop(),vstack);
@@ -1253,7 +1305,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     ///parse and return IR
     Bytecode escape()
     {
-		
+
         switch(current)
         {
         case 'f':   next(); return Bytecode(IR.Char,'\f');
@@ -1270,9 +1322,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         case 'S':   next(); return Bytecode(IR.Notspace, 0);
         case 'w':   next(); return Bytecode(IR.Word, 0);
         case 'W':   next(); return Bytecode(IR.Notword, 0);
-        
+
         case 'p': case 'P':
-			charsets ~= parseUnicodePropertySpec(current == 'P');
+            charsets ~= parseUnicodePropertySpec(current == 'P');
             return Bytecode(IR.Charset, charsets.length-1);
         case 'x':
             auto save = pat;
@@ -1366,16 +1418,19 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 		if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
 		{//unicode block
 			name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
-			auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
+			//auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
+            uint fnd;
+            for(fnd=0;fnd<unicodeBlocks.length;fnd++)
+                if(comparePropertyName(unicodeBlocks[fnd].name,name) == 0)
+                    break;
 			fnd < unicodeBlocks.length || error("unrecognized unicode block name");
-			comparePropertyName(unicodeBlocks[fnd].name, name) == 0 || error("unrecognized unicode block name");
 			debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
 			s = Charset([unicodeBlocks[fnd].extent]);
 			if(negated)
 				s.negate();
 		}
 		else
-		{//unicode property 
+		{//unicode property
 			assert(0);
 		}
 		next() && current == '}' || error("} expected ");
@@ -1479,12 +1534,18 @@ struct Program
         writeln("Total merge table size: ", hotspotTableSize);
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
-	//
+	///
 	uint lookupNamedGroup(string name)
 	{
-		auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
-		if(dict[fnd].name != name)
-			throw new Exception("out of range");
+		//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
+        uint fnd;
+        for(fnd = 0; fnd<dict.length; fnd++)
+            if(dict[fnd].name == name)
+                break;
+        if(fnd == dict.length)
+               throw new Exception("out of range");
+		/*if(dict[fnd].name != name)
+			throw new Exception("out of range");*/
 		return dict[fnd].group;
 	}
 	///
@@ -1653,7 +1714,7 @@ if( is(Char : dchar) )
     {
         re = program;
         origin = s = input;
-        exhausted = false;   
+        exhausted = false;
     }
     @property dchar previous()
     {
@@ -1674,7 +1735,7 @@ if( is(Char : dchar) )
             size_t start = origin.length - s.length;
             auto mainStack = (cast(uint*)enforce(malloc(initialStack*uint.sizeof)))
                 [0..initialStack];
-            scope(exit) free(mainStack.ptr); 
+            scope(exit) free(mainStack.ptr);
             if(matchImpl(re.ir, matches[1..$], mainStack))
             {//s updated
                 matches[0].begin = start;
@@ -1784,6 +1845,19 @@ if( is(Char : dchar) )
             debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s", pc, counter, disassemble(prog, pc, re.index, re.dict));
             switch(prog[pc].code)
             {
+            case IR.OrChar://assumes IRL!(OrChar) == 1
+                if(s.empty)
+                    goto L_backtrack;
+                uint len = prog[pc].sequence;
+                uint end = pc + len;
+                for(; pc<end; pc++)
+                    if(prog[pc].data == s.front)
+                        break;
+                if(pc == end)
+                    goto L_backtrack;
+                pc = end;
+                s.popFront();
+                break;
             case IR.Char:
                 if(s.empty || s.front != prog[pc].data)
                    goto L_backtrack;
@@ -1935,7 +2009,7 @@ if( is(Char : dchar) )
                 uint len = prog[pc].data;
                 debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
                 assert(infiniteNesting < trackers.length);
-                
+
                 if(trackers[infiniteNesting] == inputIndex)
                 {//source not consumed
                     pc += IRL!(IR.InfiniteEnd);
@@ -2435,6 +2509,21 @@ struct ThompsonMatcher(Char)
                     assert(0, "No lookaround for ThompsonVM yet!");
                 static if(withInput)
                 {
+                    case IR.OrChar://assumes IRL!(OrChar) == 1
+                        uint len = prog[t.pc].sequence;
+                        uint end = t.pc + len;
+                        for(; t.pc<end; t.pc++)
+                            if(prog[t.pc].data == s.front)
+                                break;
+                        if(t.pc != end)
+                        {
+                            t.pc = end;
+                            nlist.insertBack(t);
+                        }
+                        else
+                            recycle(t);
+                        t = worklist.fetch();
+                        break;
                     case IR.Char:
                         if(s.front == prog[t.pc].data)
                         {
@@ -2619,13 +2708,13 @@ private:
         R input;
         Group[] groups;
         uint[] index;
-		Program re;
+        Program re;
         this(ref RegexMatch rmatch)
         {
             input = rmatch.input;
             index = rmatch.index;
             groups = rmatch.matches;
-			re = rmatch.engine.re;
+            re = rmatch.engine.re;
         }
         @property R front()
         {
@@ -2650,10 +2739,10 @@ private:
         {
             return input[groups[index[i]].begin..groups[index[i]].end];
         }
-		R opIndex(string i)
+        R opIndex(string i)
         {
-			size_t index = re.lookupNamedGroup(i);
-			return opIndex(index);
+            size_t index = re.lookupNamedGroup(i);
+            return opIndex(index);
         }
         @property size_t length() const { return index.length; }
     }
@@ -2668,38 +2757,38 @@ public:
         engine = EngineType(prog, input);
         popFront();
     }
-	///
+    ///
     @property R pre()
     {
         assert(!empty);
         return input[0 .. matches[0].begin];
     }
-	///
+    ///
     @property R post()
     {
         assert(!empty);
         return input[matches[0].end..$];
     }
-	///
+    ///
     @property R hit()
     {
         assert(!empty);
         return input[matches[0].begin .. matches[0].end];
     }
-	///
+    ///
     @property auto front()
     {
         return this;
     }
-	///
+    ///
     void popFront()
     { //previous one can have escaped references from Capture object
         matches = new Group[matches.length];
         _empty = !engine.match(matches);
     }
-	///
+    ///
     @property bool empty(){ return _empty; }
-	///
+    ///
     @property auto captures(){ return Captures(this); }
 }
 
