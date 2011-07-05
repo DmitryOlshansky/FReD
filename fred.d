@@ -1425,7 +1425,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     break;
 			fnd < unicodeBlocks.length || error("unrecognized unicode block name");
 			debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
-			s = Charset([unicodeBlocks[fnd].extent]);
+            //no need to check casefolding
+		    s = Charset([unicodeBlocks[fnd].extent]);
 			if(negated)
 				s.negate();
 		}

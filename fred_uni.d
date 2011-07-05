@@ -247,11 +247,11 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
     for(;;)
     {
-        while(!a.empty && (isspace(a.front) || a.front == '-'))
+        while(!a.empty && (isspace(a.front) || a.front == '-' || a.front =='_'))
         {
             a.popFront();
         }
-        while(!b.empty && (isspace(b.front) || b.front == '-'))
+        while(!b.empty && (isspace(b.front) || b.front == '-' || b.front =='_'))
         {
             b.popFront();
         }

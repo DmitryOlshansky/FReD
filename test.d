@@ -243,11 +243,12 @@ unittest
         TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,    "a+\u2212",    "y",    "$&",    "+\u2212"),
 
 //case insensitive:
-        TestVectors(   `^abc$`,               "AbC",                       "y",   "$&", "AbC",      "i"),
-        TestVectors(   `Русский язык`,   "рУсскИй ЯзЫк",                   "y",    "$&", "рУсскИй ЯзЫк",     "i"),
-        TestVectors(    `ⒶⒷⓒ` ,           "ⓐⓑⒸ",                           "y",    "$&", "ⓐⓑⒸ",      "i"),
-        TestVectors(    "\U00010400{2}",       "\U00010428\U00010400 ",    "y",    "$&", "\U00010428\U00010400", "i"),
-        TestVectors(    `[adzУ-Я]{4}`,      "DzюА"                                            "y",   "$&",  "DzЮа", "i"),
+        TestVectors(   `^abc$`,           "AbC",                      "y",   "$&", "AbC",      "i"),
+        TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",             "y",   "$&", "рУсскИй ЯзЫк",     "i"),
+        TestVectors(    `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
+        TestVectors(    "\U00010400{2}",  "\U00010428\U00010400 ",    "y",   "$&", "\U00010428\U00010400", "i"),
+        TestVectors(    `[adzУ-Я]{4}`,    "DzюА"                      "y",   "$&", "DzЮа", "i"),
+        TestVectors(    `\p{In_Cyrillic}{11}`, "абвгдеЖЗИКЛ",              "y",   "$&", "абвгдеЖЗИКЛ", "i"),
         ];
 
     int i;
