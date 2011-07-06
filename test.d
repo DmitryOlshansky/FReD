@@ -241,14 +241,16 @@ unittest
 //unicode blocks & properties:
         TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2203.", "y", "$&", "\u00c3\u2203."),
         TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,    "a+\u2212",    "y",    "$&",    "+\u2212"),
-
+        TestVectors(  `\p{Ll}+`,                      "XabcD",    "y",  "$&",      "abc"),
+        TestVectors(  `\p{Lu}+`,                      "абвГДЕ",   "y",  "$&",      "ГДЕ"),
+        TestVectors(  `^\p{Currency}\p{Ck}`            "$₤",      "y",  "$&",      "$₤"),  
 //case insensitive:
-        TestVectors(   `^abc$`,           "AbC",                      "y",   "$&", "AbC",      "i"),
+        TestVectors(   `^abcdEf$`,           "AbCdEF"                 "y",   "$&", "AbCdEF",      "i"),
         TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",             "y",   "$&", "рУсскИй ЯзЫк",     "i"),
         TestVectors(    `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
         TestVectors(    "\U00010400{2}",  "\U00010428\U00010400 ",    "y",   "$&", "\U00010428\U00010400", "i"),
         TestVectors(    `[adzУ-Я]{4}`,    "DzюА"                      "y",   "$&", "DzЮа", "i"),
-        TestVectors(    `\p{In_Cyrillic}{11}`, "абвгдеЖЗИКЛ",              "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(    `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",              "y",   "$&", "абвгдеЖЗИКЛ", "i"),
         ];
 
     int i;

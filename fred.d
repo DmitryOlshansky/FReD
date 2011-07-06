@@ -148,8 +148,8 @@ struct Bytecode
     this(IR code, uint data, uint seq)
     {
         assert(data < (1<<22) && code < 256 );
-        assert(seq < 4 && seq >= 1);
-        raw = code<<24 | ((seq-1)<<22) | data;
+        assert(seq >= 2 && seq < 2+4);
+        raw = code<<24 | ((seq-2)<<22) | data;
     }
     static Bytecode fromRaw(uint data)
     {
@@ -160,7 +160,7 @@ struct Bytecode
     ///bit twiddling helpers
     @property uint data(){ return raw & 0x003f_ffff; }
     ///ditto
-    @property uint sequence(){ return 1 + (raw >>22) & 0x3; }
+    @property uint sequence(){ return 2+(raw >>22) & 0x3; }
     ///ditto
     @property IR code(){ return cast(IR)(raw>>24); }
     ///ditto
@@ -387,7 +387,7 @@ struct Charset
 {
     Interval[] intervals;
     ///
-    void add(Interval inter)
+    ref add(Interval inter)
     {
         //TODO: This all could use an improvment
         /*
@@ -426,16 +426,18 @@ struct Charset
             replaceInPlace(intervals, end, end+1, cast(Interval[])[]);
         }
         //debug(fred_parser) writeln("Charset after add: ", intervals);
+        return this;
     }
     ///
-    void add(dchar ch){ add(Interval(cast(uint)ch)); }
+    ref add(dchar ch){ add(Interval(cast(uint)ch)); return this; }
     /// this = this || set
-    void add(in Charset set)
+    ref add(in Charset set)
     {
         debug(fred_charset) writef ("%s || %s --> ", intervals, set.intervals);
         foreach(inter; set.intervals)
             add(inter);
         debug(fred_charset) writeln(intervals);
+        return this;
     }
     /// this = this || set
     void sub(in Charset set)
@@ -591,6 +593,14 @@ struct Charset
     }
     /// true if set is empty
     @property bool empty() const {   return intervals.empty; }
+    /// print out in [\uxxxx-\uyyyy...] style
+    void printUnicodeSet(void delegate(const(char)[])sink) const
+    {
+        sink("[");
+        foreach(i; intervals)
+            formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
+        sink("]");
+    }
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -1008,7 +1018,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             {
                 dchar[5] data;
                 auto range = getCommonCasing(current, data);
-                foreach(v; range)
+                if(range.length == 1)
+                    put(Bytecode(IR.Char, range[0]));
+                else
+                    foreach(v; range)
                         put(Bytecode(IR.OrChar, v, range.length));
             }
             else
@@ -1409,6 +1422,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 	// \ - assumed to be processed, p - is current
 	immutable(Charset) parseUnicodePropertySpec(bool negated)
 	{
+        alias comparePropertyName ucmp;
 		next() && current == '{' || error("{ expected ");
 		static bool sep(dchar x){ return x ==':' || x== '}'; }
 		auto end = find!(sep)(pat);
@@ -1421,7 +1435,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 			//auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
             uint fnd;
             for(fnd=0;fnd<unicodeBlocks.length;fnd++)
-                if(comparePropertyName(unicodeBlocks[fnd].name,name) == 0)
+                if(ucmp(unicodeBlocks[fnd].name,name) == 0)
                     break;
 			fnd < unicodeBlocks.length || error("unrecognized unicode block name");
 			debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
@@ -1432,7 +1446,124 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 		}
 		else
 		{//unicode property
-			assert(0);
+            //helper: direct access with a sanity check
+            static void addTest(ref Charset set, int delta, uint index)
+            {
+                assert(commonCaseTable[index].delta == delta, text(commonCaseTable[index].delta," vs ", delta));
+                set.add(commonCaseTable[index].set);
+            }  
+			if(ucmp(name,"LC") == 0 || ucmp(name,"Cased Letter")==0)
+            {
+                s.add(evenUpper);
+                foreach(v; commonCaseTable)
+                    s.add(v.set);
+                foreach(v; casePairs)
+                    s.add(v);
+                s.add(unicodeLt);//Title case
+            }
+            else if(ucmp(name,"Ll") == 0 || ucmp(name,"Lowercase Letter")==0)
+            {
+                foreach(ival; evenUpper.intervals)
+                    for(uint ch=ival.begin; ch<=ival.end; ch++)
+                        if(ch & 1)
+                            s.add(ch);   
+                addTest(s,   8, 0);
+                addTest(s, -32, 7);
+                addTest(s, -37, 9);
+                addTest(s, -40, 11);
+                addTest(s, -48, 13);
+                addTest(s, -63, 15);
+                addTest(s,  74, 16);
+                addTest(s, -80, 19);
+                addTest(s,  86, 20);
+                addTest(s, 100, 22);
+                addTest(s, 112, 24);
+                addTest(s, 126, 26);
+                addTest(s, 128, 28);
+                addTest(s, 130, 30);
+                addTest(s,-205, 33);
+                addTest(s,-217, 35);
+                addTest(s,-7264, 37);
+                addTest(s,10815, 38);
+                dstring irrLow = //some of these were already included
+    "\u00E5\u2C65\u0250\u0251\u0252\u0180\u0253\u01F3\u01C6\u01DD\u0259\u025B\u214E\u1D79"
+    "\u0260\u0263\u0195\u0268\u0269k\u01C9\u019A\u026B\u0271\u01CC\u0272\u019E\u0254\u0275"
+    "\u1D7D\u0280\u027Ds\u1E61\u017F\u1E9B\u0283\u2C66\u0288\u0289\u0265\u026F\u028C\u00FF"
+    "\u0292\u01BF\u03AC\u03B2\u03D0\u03B5\u03F5\u03B8\u03D1\u03B9\u1FBE\u03BA\u03F0\u03D7"
+    "\u03BC\u00B5\u03CC\u03C0\u03D6\u03C1\u03F1\u1FE5\u03F2\u1F51\u1F55\u1F53\u1F57\u1FE0"
+    "\u1FE1\u03C6\u03D5\u03C9\u04CF";
+                foreach(ch; irrLow)
+                    s.add(ch);
+                    
+            }
+            else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
+            {
+                foreach(ival; evenUpper.intervals)
+                    for(uint ch=ival.begin; ch<=ival.end; ch++)
+                        if(!(ch & 1))
+                            s.add(ch);
+                addTest(s,  -8, 1);
+                addTest(s,  32, 6);
+                addTest(s,  37, 8);
+                addTest(s,  40, 10);
+                addTest(s,  48, 12);
+                addTest(s,  63, 14);
+                addTest(s, -74, 17);
+                addTest(s,  80, 18);
+                addTest(s, -86, 21);
+                addTest(s,-100, 23);
+                addTest(s,-112, 25);
+                addTest(s,-126, 27);
+                addTest(s,-128, 29);
+                addTest(s,-130, 31);
+                addTest(s, 205, 32);
+                addTest(s, 217, 34);
+                addTest(s, 7264, 36);
+                addTest(s,-10815, 39); 
+                dstring irrHigh= //some of these were already included
+    "\u212B\u023A\u2C6F\u2C6D\u2C70\u0243\u0181\u01F1\u01C4\u018E\u018F\u0190"
+    "\u2132\uA77D\u0193\u0194\u01F6\u0197\u0196\u212A\u01C7\u023D\u2C62\u2C6E"
+    "\u01CA\u019D\u0220\u0186\u019F\u2C63\u01A6\u2C64\u01A9\u023E\u01AE\u0244"
+    "\uA78D\u019C\u0245\u0178\u01B7\u01F7\u0386\u03F4\u03CF\u038C\u1FEC\u03F9"
+    "\u1F59\u1F5D\u1F5B\u1F5F\u1FE8\u1FE9\u2126\u04C0";
+                foreach(ch; irrHigh)
+                    s.add(ch);
+            }
+            else if(ucmp(name, "M") == 0 || ucmp(name, "Mark") == 0)
+            {
+                s.add(unicodeMn).add(unicodeMc).add(unicodeMe);
+            }
+            else if(ucmp(name, "P") == 0 || ucmp(name, "Punctuation") == 0)
+            {
+                s.add(unicodePc).add(unicodePd).add(unicodePs).add(unicodePe)
+                    .add(unicodePi).add(unicodePf).add(unicodePo);
+            }
+            else if(ucmp(name, "S") == 0 || ucmp(name, "Symbol") == 0)
+            {
+                s.add(unicodeSm).add(unicodeSc).add(unicodeSk).add(unicodeSo);
+            }
+            else if(ucmp(name, "Z") == 0 || ucmp(name, "Separator") == 0)
+            {
+                s.add(unicodeZs).add(unicodeZl).add(unicodeZp);
+            }
+            else if(ucmp(name, "C") == 0 || ucmp(name, "Other") == 0)
+            {
+                s.add(unicodeCo).add(unicodeLo).add(unicodeNo)
+                    .add(unicodeSo).add(unicodePo);
+            }
+            else if(ucmp(name, "any") == 0)
+                s.add(Interval(0,0x10FFFF));
+            else //if(ucmp(name,"Lt") == 0 || ucmp(name,"Titlecase Letter"))
+            {
+                foreach(t; generalCategory)
+                {
+                    if(ucmp(name, t.abbr) == 0 || ucmp(name, t.full) == 0)
+                    {
+                        s.add(t.set);
+                        break;
+                    }
+                }
+            }
 		}
 		next() && current == '}' || error("} expected ");
 		next();
@@ -1849,13 +1980,17 @@ if( is(Char : dchar) )
             case IR.OrChar://assumes IRL!(OrChar) == 1
                 if(s.empty)
                     goto L_backtrack;
+                dchar c = s.front;
                 uint len = prog[pc].sequence;
                 uint end = pc + len;
-                for(; pc<end; pc++)
-                    if(prog[pc].data == s.front)
-                        break;
-                if(pc == end)
-                    goto L_backtrack;
+                if(prog[pc].data != c && prog[pc+1].data != c)
+                {
+                    for(pc = pc+2; pc<end; pc++)
+                        if(prog[pc].data == c)
+                            break;
+                    if(pc == end)
+                        goto L_backtrack;
+                }
                 pc = end;
                 s.popFront();
                 break;
