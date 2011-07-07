@@ -440,8 +440,15 @@ struct Charset
         return this;
     }
     /// this = this || set
-    void sub(in Charset set)
+    ref sub(in Charset set)
     {
+        if(empty)
+        {
+            intervals = [];
+            return this;
+        }
+        if(set.empty)
+            return this;
         Interval[] result;
         auto a = intervals;
         const(Interval)[] b = set.intervals;
@@ -507,6 +514,7 @@ struct Charset
             }
         }
         intervals = result ~ a;//+ leftover of original (if any)
+        return this;
     }
     /// this = this ~~ set (i.e. (this || set) -- (this && set))
     void symmetricSub(in Charset set)
@@ -517,8 +525,13 @@ struct Charset
         this.sub(a);
     }
     /// this = this && set
-    void intersect(in Charset set)
+    ref intersect(in Charset set)
     {
+        if(empty || set.empty)
+        {
+            intervals = [];
+            return this;
+        }
         Interval[] intersection;
         auto a = intervals;
         const(Interval)[] b = set.intervals;
@@ -563,6 +576,7 @@ struct Charset
             }
         }
         intervals = intersection;
+        return this;
     }
     /// this = !this (i.e. [^...] in regex syntax)
     void negate()
@@ -601,6 +615,135 @@ struct Charset
             formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
         sink("]");
     }
+    
+    /// deep copy this Charset
+    @property Charset dup()const
+    {
+        return Charset(intervals.dup);
+    }
+    
+}
+
+struct GeneralCategory
+{
+    string abbr;
+    string full;
+    immutable Charset set;
+}
+///table of aliases for Unicode General_Category property charsets
+immutable generalCategory = [
+    GeneralCategory("L",  "Letter", unicodeL),
+    GeneralCategory("Lt", "Titlecase Letter", unicodeLt),
+    GeneralCategory("Lm", "Modifier Letter", unicodeLm),
+    GeneralCategory("Mn", "Non-Spacing Mark", unicodeMn),
+    GeneralCategory("Mc", "Spacing Combining Mark", unicodeMc),    
+    GeneralCategory("Me", "Enclosing Mark", unicodeMe),
+    GeneralCategory("Nd", "Decimal Digit Number", unicodeNd),
+    GeneralCategory("Nl", "Letter Number", unicodeNl),
+    GeneralCategory("No", "Other Number", unicodeNo),
+    GeneralCategory("Sm", "Math Symbol", unicodeSm),
+    GeneralCategory("Sc", "Currency Symbol", unicodeSc),
+    GeneralCategory("Sk", "Modifier Symbol", unicodeSk),
+    GeneralCategory("So", "Other Symbol", unicodeSo),   
+    GeneralCategory("Pc", "Connector Punctuation", unicodePc),
+    GeneralCategory("Pd", "Dash Punctuation", unicodePd),
+    GeneralCategory("Ps", "Open Punctuation", unicodePs),
+    GeneralCategory("Pe", "End Punctuation", unicodePe),
+    GeneralCategory("Pi", "Initial Punctuation", unicodePi),
+    GeneralCategory("Pf", "Final Punctuation", unicodePf),
+    GeneralCategory("Po", "Other Punctuation", unicodePo),
+    GeneralCategory("Zs", "Space Separator", unicodeZs),
+    GeneralCategory("Zl", "Line Punctuation", unicodeZl),
+    GeneralCategory("Zp", "Paragraph Punctuation", unicodeZp),
+    GeneralCategory("Cc", "Control", unicodeCc),
+    GeneralCategory("Cf", "Format", unicodeCf),
+    GeneralCategory("Cs", "Surrogate", unicodeCs),
+    GeneralCategory("Co", "Private Use", unicodeCo),
+    
+];
+
+int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
+{
+    for(;;)
+    {
+        while(!a.empty && (isspace(a.front) || a.front == '-' || a.front =='_'))
+        {
+            a.popFront();
+        }
+        while(!b.empty && (isspace(b.front) || b.front == '-' || b.front =='_'))
+        {
+            b.popFront();
+        }
+        if(a.empty)
+            return b.empty ? 0 : -1;
+        if(b.empty)
+            return 1;
+        auto ca = tolower(a.front), cb = tolower(b.front);
+        if(ca > cb)
+            return 1;
+        else if( ca < cb)
+            return -1;
+        a.popFront();
+        b.popFront();
+    }
+}
+
+bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
+{
+	return comparePropertyName(a, b) < 0;
+}
+
+unittest
+{
+    assert(comparePropertyName("test","test") == 0);
+    assert(comparePropertyName("Al chemical Symbols", "Alphabetic Presentation Forms") == -1);
+    assert(comparePropertyName("Basic Latin","basic-LaTin") == 0);
+}
+
+///Gets array of all of common case eqivalents of given codepoint (fills provided array & returns a slice of it)
+dchar[] getCommonCasing(dchar ch, dchar[] range)
+{
+    assert(range.length >= 5);
+    range[0] = ch;
+    if(evenUpper.contains(ch))//simple version
+    {
+        range[1] = ch ^ 1;
+        return range[0..2];
+    }
+    uint s = 0, n = 1;
+    for(s=0;s < n; s++)
+    {
+        foreach(i, v; commonCaseTable)
+            if(v.set.contains(range[s]) && !canFind(range[0..n], range[s]+cast(int)v.delta))
+            {
+
+                range[n++] = range[s]+v.delta;
+            }
+        auto f = countUntil(casePairs, range[s]);
+        if(f >=0)
+            while(1)
+            {
+                if(!canFind(range[0..n], casePairs[f^1]))
+                {
+                   range[n++] = casePairs[f^1];
+                }
+                f++;
+                auto next =  countUntil(casePairs[f..$], range[s]);
+                if(next < 0)
+                    break;
+                f += next;
+            }
+    }
+    return range[0..n];
+}
+
+unittest
+{
+    dchar[6] data;
+    //these values give 100% code coverage for getCommonCasing
+    assert(getCommonCasing(0x01BC, data) == [0x01bc, 0x01bd]);
+    assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
+    assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -1484,17 +1627,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 addTest(s,-205, 33);
                 addTest(s,-217, 35);
                 addTest(s,-7264, 37);
-                addTest(s,10815, 38);
-                dstring irrLow = //some of these were already included
-    "\u00E5\u2C65\u0250\u0251\u0252\u0180\u0253\u01F3\u01C6\u01DD\u0259\u025B\u214E\u1D79"
-    "\u0260\u0263\u0195\u0268\u0269k\u01C9\u019A\u026B\u0271\u01CC\u0272\u019E\u0254\u0275"
-    "\u1D7D\u0280\u027Ds\u1E61\u017F\u1E9B\u0283\u2C66\u0288\u0289\u0265\u026F\u028C\u00FF"
-    "\u0292\u01BF\u03AC\u03B2\u03D0\u03B5\u03F5\u03B8\u03D1\u03B9\u1FBE\u03BA\u03F0\u03D7"
-    "\u03BC\u00B5\u03CC\u03C0\u03D6\u03C1\u03F1\u1FE5\u03F2\u1F51\u1F55\u1F53\u1F57\u1FE0"
-    "\u1FE1\u03C6\u03D5\u03C9\u04CF";
-                foreach(ch; irrLow)
-                    s.add(ch);
-                    
+                addTest(s,10815, 38);   
             }
             else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
             {
@@ -1520,14 +1653,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 addTest(s, 217, 34);
                 addTest(s, 7264, 36);
                 addTest(s,-10815, 39); 
-                dstring irrHigh= //some of these were already included
-    "\u212B\u023A\u2C6F\u2C6D\u2C70\u0243\u0181\u01F1\u01C4\u018E\u018F\u0190"
-    "\u2132\uA77D\u0193\u0194\u01F6\u0197\u0196\u212A\u01C7\u023D\u2C62\u2C6E"
-    "\u01CA\u019D\u0220\u0186\u019F\u2C63\u01A6\u2C64\u01A9\u023E\u01AE\u0244"
-    "\uA78D\u019C\u0245\u0178\u01B7\u01F7\u0386\u03F4\u03CF\u038C\u1FEC\u03F9"
-    "\u1F59\u1F5D\u1F5B\u1F5F\u1FE8\u1FE9\u2126\u04C0";
-                foreach(ch; irrHigh)
-                    s.add(ch);
             }
             else if(ucmp(name, "M") == 0 || ucmp(name, "Mark") == 0)
             {
