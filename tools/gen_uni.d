@@ -2,7 +2,7 @@
 /**
     gen_uni is a quick & dirty source code generator for unicode datastructures
 */
-import fred, std.stdio, std.conv, std.algorithm, std.array, std.format;
+import fred, std.stdio, std.conv, std.algorithm, std.array, std.format, std.string;
 
 
 struct UniBlock
@@ -42,7 +42,7 @@ uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
 uint[] highIrreg; //so we check that ;)
 Charset[] gcSets;//General category
 Charset[string] scripts;
-
+uint[] globalIndex;
 static this()
 {
     gcSets = new Charset[gcNames.length];
@@ -54,6 +54,8 @@ void main(string[] argv)
     File scriptf = File("Scripts.txt");
     File blockf  = File("Blocks.txt");
     File propf= File("UnicodeData.txt");
+    File indexf = File("Global.txt");
+    
     writeln("//Written in the D programming language
 /**
  * Fast Regular expressions for D
@@ -65,15 +67,14 @@ void main(string[] argv)
  */
 //Automatically generated from Unicode Character Database files
 import fred;");
+    loadGlobalIndex(indexf);
     loadCaseFolding(casef);
     loadBlocks(blockf);
     loadProperties(propf);
     loadScripts(scriptf);
     testCasingIrregular();
     writeCaseFolding();
-    writeBlocks();
     writeProperties();
-    writeScripts();
 }
 
 void testCasingIrregular()
@@ -105,6 +106,14 @@ void testCasingIrregular()
             array ~= ch;
     }
     assert(equal(sort(array),sort(highIrreg.dup)));
+}
+void loadGlobalIndex(File f)
+{
+    foreach(line; f.byLine)
+	{
+        if(!line.empty)
+            globalIndex ~= to!uint(strip(line));
+    }
 }
 
 void loadCaseFolding(File f)
@@ -225,19 +234,21 @@ void loadScripts(File inp)
     }
 }
 
-void writeCharset(in Charset set, string sep=";\n")
+string charsetString(in Charset set, string sep=";\n")
 {
-	writeln("Charset([");
+    auto app = appender!(char[])();
+	formattedWrite(app,"Charset([\n");
 	foreach(i; set.intervals)
-		writef("Interval(0x%05x,0x%05x),\n", i.begin, i.end);
-	write("])",sep);
+		formattedWrite(app, "Interval(0x%05x,0x%05x),\n", i.begin, i.end);
+	formattedWrite(app, "])%s\n",sep);
+    return cast(string)app.data;
 }
 
 void writeCaseFolding()
 {
     write("//any codepoint in these intervals is trivally uppercased/lowercased"
 " (lowest bit set -> lower)\nimmutable evenUpper = ");
-	writeCharset(casefold[1]);
+	write(charsetString(casefold[1]));
 	writeln("struct CommonCaseEntry
 {
     short delta;
@@ -300,27 +311,6 @@ immutable commonCaseTable = [");
 	writeln("];");
 }
 
-void writeBlocks()
-{
-    write("struct UnicodeBlock
-{
-     string name;
-     Interval extent;
-}
-immutable unicodeBlocks = [");
-    static bool less(UniBlock a,UniBlock b)
-    {
-        return propertyNameLess(a.name, b.name);
-    }
-    sort!(less)(blocks);
-    foreach(b; blocks)
-    {
-        writefln(`UnicodeBlock("%s", Interval(0x%05X, 0x%05X)),`,
-                 b.name, b.ival.begin, b.ival.end);
-    }
-    writeln("];");
-}
-
 void writeProperties()
 {
     foreach(i, cs; gcSets)
@@ -328,36 +318,55 @@ void writeProperties()
         if(canFind(directGcNames,gcNames[i]))
         {
 		    writef("immutable Charset unicode%s = ", gcNames[i]);
-		    writeCharset(cs);
+		    write(charsetString(cs));
         }
 	}
+    static bool less(UniBlock a,UniBlock b)
+    {
+        return propertyNameLess(a.name, b.name);
+    }
     write("struct UnicodeProperty
 {
     string name;
     immutable Charset set;
 }
-immutable(UnicodeProperty)[] unicodeGeneral = [\n");
+immutable(UnicodeProperty)[] unicodeProperties = [\n");
+    string[] lines;
+    auto app = appender!(char[])();
+    sort!(less)(blocks);
+    foreach(b; blocks)
+    {
+        formattedWrite(app,"UnicodeProperty(\"In%s\", Charset([Interval(0x%05X, 0x%05X)])),\n",
+                 b.name, b.ival.begin, b.ival.end);
+        lines ~= app.data.idup;
+        app.shrinkTo(0);
+    }
     foreach(i, abbr; gcNames)
     {
         if(canFind(directGcNames,abbr))
         {
-            writef("UnicodeProperty(\"%s\", unicode%s),",abbr, abbr);
-            writefln("UnicodeProperty(\"%s\", unicode%s),",gcAliases[i], abbr);
+            formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),",abbr, abbr);
+            lines ~= app.data.idup;
+            app.shrinkTo(0);
+            formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),\n",gcAliases[i], abbr);
+            lines ~= app.data.idup;
+            app.shrinkTo(0);
         }
     }
-    writeln("];");
-}
-
-void writeScripts()
-{
     auto keys = scripts.keys;
     sort!(propertyNameLess)(keys);
-    writef("immutable(UnicodeProperty)[] unicodeScripts = [\n");
     foreach(k; keys)
     {
-        writef("UnicodeProperty(\"%s\", ",k);
-        writeCharset(scripts[k],"");
-        writeln("),");
+        formattedWrite(app, "UnicodeProperty(\"%s\", ",k);
+        formattedWrite(app, "%s,",charsetString(scripts[k],""));
+        formattedWrite(app, "),\n");
+        lines ~= app.data.idup;
+        app.shrinkTo(0);
+    }
+    foreach(i, k; lines)
+    {
+        auto j = countUntil(globalIndex, i);
+        write(lines[j]);
     }
     writeln("];");
 }

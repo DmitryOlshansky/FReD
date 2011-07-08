@@ -67,6 +67,7 @@ Interval(0x0a78b,0x0a78c),
 Interval(0x0a790,0x0a791),
 Interval(0x0a7a0,0x0a7a9),
 ]);
+
 struct CommonCaseEntry
 {
     short delta;
@@ -191,226 +192,11 @@ immutable(uint)[] casePairs = [
 0x01ff3, 0x01ffc,
 0x02132, 0x0214e,
 ];
-struct UnicodeBlock
-{
-     string name;
-     Interval extent;
-}
-immutable unicodeBlocks = [UnicodeBlock("Aegean Numbers", Interval(0x10100, 0x1013F)),
-UnicodeBlock("Alchemical Symbols", Interval(0x1F700, 0x1F77F)),
-UnicodeBlock("Alphabetic Presentation Forms", Interval(0x0FB00, 0x0FB4F)),
-UnicodeBlock("Ancient Greek Musical Notation", Interval(0x1D200, 0x1D24F)),
-UnicodeBlock("Ancient Greek Numbers", Interval(0x10140, 0x1018F)),
-UnicodeBlock("Ancient Symbols", Interval(0x10190, 0x101CF)),
-UnicodeBlock("Arabic", Interval(0x00600, 0x006FF)),
-UnicodeBlock("Arabic Presentation Forms-A", Interval(0x0FB50, 0x0FDFF)),
-UnicodeBlock("Arabic Presentation Forms-B", Interval(0x0FE70, 0x0FEFF)),
-UnicodeBlock("Arabic Supplement", Interval(0x00750, 0x0077F)),
-UnicodeBlock("Armenian", Interval(0x00530, 0x0058F)),
-UnicodeBlock("Arrows", Interval(0x02190, 0x021FF)),
-UnicodeBlock("Avestan", Interval(0x10B00, 0x10B3F)),
-UnicodeBlock("Balinese", Interval(0x01B00, 0x01B7F)),
-UnicodeBlock("Bamum", Interval(0x0A6A0, 0x0A6FF)),
-UnicodeBlock("Bamum Supplement", Interval(0x16800, 0x16A3F)),
-UnicodeBlock("Basic Latin", Interval(0x00000, 0x0007F)),
-UnicodeBlock("Batak", Interval(0x01BC0, 0x01BFF)),
-UnicodeBlock("Bengali", Interval(0x00980, 0x009FF)),
-UnicodeBlock("Block Elements", Interval(0x02580, 0x0259F)),
-UnicodeBlock("Bopomofo", Interval(0x03100, 0x0312F)),
-UnicodeBlock("Bopomofo Extended", Interval(0x031A0, 0x031BF)),
-UnicodeBlock("Box Drawing", Interval(0x02500, 0x0257F)),
-UnicodeBlock("Brahmi", Interval(0x11000, 0x1107F)),
-UnicodeBlock("Braille Patterns", Interval(0x02800, 0x028FF)),
-UnicodeBlock("Buginese", Interval(0x01A00, 0x01A1F)),
-UnicodeBlock("Buhid", Interval(0x01740, 0x0175F)),
-UnicodeBlock("Byzantine Musical Symbols", Interval(0x1D000, 0x1D0FF)),
-UnicodeBlock("Carian", Interval(0x102A0, 0x102DF)),
-UnicodeBlock("Cham", Interval(0x0AA00, 0x0AA5F)),
-UnicodeBlock("Cherokee", Interval(0x013A0, 0x013FF)),
-UnicodeBlock("CJK Compatibility", Interval(0x03300, 0x033FF)),
-UnicodeBlock("CJK Compatibility Forms", Interval(0x0FE30, 0x0FE4F)),
-UnicodeBlock("CJK Compatibility Ideographs", Interval(0x0F900, 0x0FAFF)),
-UnicodeBlock("CJK Compatibility Ideographs Supplement", Interval(0x2F800, 0x2FA1F)),
-UnicodeBlock("CJK Radicals Supplement", Interval(0x02E80, 0x02EFF)),
-UnicodeBlock("CJK Strokes", Interval(0x031C0, 0x031EF)),
-UnicodeBlock("CJK Symbols and Punctuation", Interval(0x03000, 0x0303F)),
-UnicodeBlock("CJK Unified Ideographs", Interval(0x04E00, 0x09FFF)),
-UnicodeBlock("CJK Unified Ideographs Extension A", Interval(0x03400, 0x04DBF)),
-UnicodeBlock("CJK Unified Ideographs Extension B", Interval(0x20000, 0x2A6DF)),
-UnicodeBlock("CJK Unified Ideographs Extension C", Interval(0x2A700, 0x2B73F)),
-UnicodeBlock("CJK Unified Ideographs Extension D", Interval(0x2B740, 0x2B81F)),
-UnicodeBlock("Combining Diacritical Marks", Interval(0x00300, 0x0036F)),
-UnicodeBlock("Combining Diacritical Marks for Symbols", Interval(0x020D0, 0x020FF)),
-UnicodeBlock("Combining Diacritical Marks Supplement", Interval(0x01DC0, 0x01DFF)),
-UnicodeBlock("Combining Half Marks", Interval(0x0FE20, 0x0FE2F)),
-UnicodeBlock("Common Indic Number Forms", Interval(0x0A830, 0x0A83F)),
-UnicodeBlock("Control Pictures", Interval(0x02400, 0x0243F)),
-UnicodeBlock("Coptic", Interval(0x02C80, 0x02CFF)),
-UnicodeBlock("Counting Rod Numerals", Interval(0x1D360, 0x1D37F)),
-UnicodeBlock("Cuneiform", Interval(0x12000, 0x123FF)),
-UnicodeBlock("Cuneiform Numbers and Punctuation", Interval(0x12400, 0x1247F)),
-UnicodeBlock("Currency Symbols", Interval(0x020A0, 0x020CF)),
-UnicodeBlock("Cypriot Syllabary", Interval(0x10800, 0x1083F)),
-UnicodeBlock("Cyrillic", Interval(0x00400, 0x004FF)),
-UnicodeBlock("Cyrillic Extended-A", Interval(0x02DE0, 0x02DFF)),
-UnicodeBlock("Cyrillic Extended-B", Interval(0x0A640, 0x0A69F)),
-UnicodeBlock("Cyrillic Supplement", Interval(0x00500, 0x0052F)),
-UnicodeBlock("Deseret", Interval(0x10400, 0x1044F)),
-UnicodeBlock("Devanagari", Interval(0x00900, 0x0097F)),
-UnicodeBlock("Devanagari Extended", Interval(0x0A8E0, 0x0A8FF)),
-UnicodeBlock("Dingbats", Interval(0x02700, 0x027BF)),
-UnicodeBlock("Domino Tiles", Interval(0x1F030, 0x1F09F)),
-UnicodeBlock("Egyptian Hieroglyphs", Interval(0x13000, 0x1342F)),
-UnicodeBlock("Emoticons", Interval(0x1F600, 0x1F64F)),
-UnicodeBlock("Enclosed Alphanumerics", Interval(0x02460, 0x024FF)),
-UnicodeBlock("Enclosed Alphanumeric Supplement", Interval(0x1F100, 0x1F1FF)),
-UnicodeBlock("Enclosed CJK Letters and Months", Interval(0x03200, 0x032FF)),
-UnicodeBlock("Enclosed Ideographic Supplement", Interval(0x1F200, 0x1F2FF)),
-UnicodeBlock("Ethiopic", Interval(0x01200, 0x0137F)),
-UnicodeBlock("Ethiopic Extended", Interval(0x02D80, 0x02DDF)),
-UnicodeBlock("Ethiopic Extended-A", Interval(0x0AB00, 0x0AB2F)),
-UnicodeBlock("Ethiopic Supplement", Interval(0x01380, 0x0139F)),
-UnicodeBlock("General Punctuation", Interval(0x02000, 0x0206F)),
-UnicodeBlock("Geometric Shapes", Interval(0x025A0, 0x025FF)),
-UnicodeBlock("Georgian", Interval(0x010A0, 0x010FF)),
-UnicodeBlock("Georgian Supplement", Interval(0x02D00, 0x02D2F)),
-UnicodeBlock("Glagolitic", Interval(0x02C00, 0x02C5F)),
-UnicodeBlock("Gothic", Interval(0x10330, 0x1034F)),
-UnicodeBlock("Greek and Coptic", Interval(0x00370, 0x003FF)),
-UnicodeBlock("Greek Extended", Interval(0x01F00, 0x01FFF)),
-UnicodeBlock("Gujarati", Interval(0x00A80, 0x00AFF)),
-UnicodeBlock("Gurmukhi", Interval(0x00A00, 0x00A7F)),
-UnicodeBlock("Halfwidth and Fullwidth Forms", Interval(0x0FF00, 0x0FFEF)),
-UnicodeBlock("Hangul Compatibility Jamo", Interval(0x03130, 0x0318F)),
-UnicodeBlock("Hangul Jamo", Interval(0x01100, 0x011FF)),
-UnicodeBlock("Hangul Jamo Extended-A", Interval(0x0A960, 0x0A97F)),
-UnicodeBlock("Hangul Jamo Extended-B", Interval(0x0D7B0, 0x0D7FF)),
-UnicodeBlock("Hangul Syllables", Interval(0x0AC00, 0x0D7AF)),
-UnicodeBlock("Hanunoo", Interval(0x01720, 0x0173F)),
-UnicodeBlock("Hebrew", Interval(0x00590, 0x005FF)),
-UnicodeBlock("High Private Use Surrogates", Interval(0x0DB80, 0x0DBFF)),
-UnicodeBlock("High Surrogates", Interval(0x0D800, 0x0DB7F)),
-UnicodeBlock("Hiragana", Interval(0x03040, 0x0309F)),
-UnicodeBlock("Ideographic Description Characters", Interval(0x02FF0, 0x02FFF)),
-UnicodeBlock("Imperial Aramaic", Interval(0x10840, 0x1085F)),
-UnicodeBlock("Inscriptional Pahlavi", Interval(0x10B60, 0x10B7F)),
-UnicodeBlock("Inscriptional Parthian", Interval(0x10B40, 0x10B5F)),
-UnicodeBlock("IPA Extensions", Interval(0x00250, 0x002AF)),
-UnicodeBlock("Javanese", Interval(0x0A980, 0x0A9DF)),
-UnicodeBlock("Kaithi", Interval(0x11080, 0x110CF)),
-UnicodeBlock("Kana Supplement", Interval(0x1B000, 0x1B0FF)),
-UnicodeBlock("Kanbun", Interval(0x03190, 0x0319F)),
-UnicodeBlock("Kangxi Radicals", Interval(0x02F00, 0x02FDF)),
-UnicodeBlock("Kannada", Interval(0x00C80, 0x00CFF)),
-UnicodeBlock("Katakana", Interval(0x030A0, 0x030FF)),
-UnicodeBlock("Katakana Phonetic Extensions", Interval(0x031F0, 0x031FF)),
-UnicodeBlock("Kayah Li", Interval(0x0A900, 0x0A92F)),
-UnicodeBlock("Kharoshthi", Interval(0x10A00, 0x10A5F)),
-UnicodeBlock("Khmer", Interval(0x01780, 0x017FF)),
-UnicodeBlock("Khmer Symbols", Interval(0x019E0, 0x019FF)),
-UnicodeBlock("Lao", Interval(0x00E80, 0x00EFF)),
-UnicodeBlock("Latin-1 Supplement", Interval(0x00080, 0x000FF)),
-UnicodeBlock("Latin Extended-A", Interval(0x00100, 0x0017F)),
-UnicodeBlock("Latin Extended Additional", Interval(0x01E00, 0x01EFF)),
-UnicodeBlock("Latin Extended-B", Interval(0x00180, 0x0024F)),
-UnicodeBlock("Latin Extended-C", Interval(0x02C60, 0x02C7F)),
-UnicodeBlock("Latin Extended-D", Interval(0x0A720, 0x0A7FF)),
-UnicodeBlock("Lepcha", Interval(0x01C00, 0x01C4F)),
-UnicodeBlock("Letterlike Symbols", Interval(0x02100, 0x0214F)),
-UnicodeBlock("Limbu", Interval(0x01900, 0x0194F)),
-UnicodeBlock("Linear B Ideograms", Interval(0x10080, 0x100FF)),
-UnicodeBlock("Linear B Syllabary", Interval(0x10000, 0x1007F)),
-UnicodeBlock("Lisu", Interval(0x0A4D0, 0x0A4FF)),
-UnicodeBlock("Low Surrogates", Interval(0x0DC00, 0x0DFFF)),
-UnicodeBlock("Lycian", Interval(0x10280, 0x1029F)),
-UnicodeBlock("Lydian", Interval(0x10920, 0x1093F)),
-UnicodeBlock("Mahjong Tiles", Interval(0x1F000, 0x1F02F)),
-UnicodeBlock("Malayalam", Interval(0x00D00, 0x00D7F)),
-UnicodeBlock("Mandaic", Interval(0x00840, 0x0085F)),
-UnicodeBlock("Mathematical Alphanumeric Symbols", Interval(0x1D400, 0x1D7FF)),
-UnicodeBlock("Mathematical Operators", Interval(0x02200, 0x022FF)),
-UnicodeBlock("Meetei Mayek", Interval(0x0ABC0, 0x0ABFF)),
-UnicodeBlock("Miscellaneous Mathematical Symbols-A", Interval(0x027C0, 0x027EF)),
-UnicodeBlock("Miscellaneous Mathematical Symbols-B", Interval(0x02980, 0x029FF)),
-UnicodeBlock("Miscellaneous Symbols", Interval(0x02600, 0x026FF)),
-UnicodeBlock("Miscellaneous Symbols and Arrows", Interval(0x02B00, 0x02BFF)),
-UnicodeBlock("Miscellaneous Symbols And Pictographs", Interval(0x1F300, 0x1F5FF)),
-UnicodeBlock("Miscellaneous Technical", Interval(0x02300, 0x023FF)),
-UnicodeBlock("Modifier Tone Letters", Interval(0x0A700, 0x0A71F)),
-UnicodeBlock("Mongolian", Interval(0x01800, 0x018AF)),
-UnicodeBlock("Musical Symbols", Interval(0x1D100, 0x1D1FF)),
-UnicodeBlock("Myanmar", Interval(0x01000, 0x0109F)),
-UnicodeBlock("Myanmar Extended-A", Interval(0x0AA60, 0x0AA7F)),
-UnicodeBlock("New Tai Lue", Interval(0x01980, 0x019DF)),
-UnicodeBlock("NKo", Interval(0x007C0, 0x007FF)),
-UnicodeBlock("No_Block", Interval(0x00000, 0x10FFFF)),
-UnicodeBlock("Number Forms", Interval(0x02150, 0x0218F)),
-UnicodeBlock("Ogham", Interval(0x01680, 0x0169F)),
-UnicodeBlock("Ol Chiki", Interval(0x01C50, 0x01C7F)),
-UnicodeBlock("Old Italic", Interval(0x10300, 0x1032F)),
-UnicodeBlock("Old Persian", Interval(0x103A0, 0x103DF)),
-UnicodeBlock("Old South Arabian", Interval(0x10A60, 0x10A7F)),
-UnicodeBlock("Old Turkic", Interval(0x10C00, 0x10C4F)),
-UnicodeBlock("Optical Character Recognition", Interval(0x02440, 0x0245F)),
-UnicodeBlock("Oriya", Interval(0x00B00, 0x00B7F)),
-UnicodeBlock("Osmanya", Interval(0x10480, 0x104AF)),
-UnicodeBlock("Phags-pa", Interval(0x0A840, 0x0A87F)),
-UnicodeBlock("Phaistos Disc", Interval(0x101D0, 0x101FF)),
-UnicodeBlock("Phoenician", Interval(0x10900, 0x1091F)),
-UnicodeBlock("Phonetic Extensions", Interval(0x01D00, 0x01D7F)),
-UnicodeBlock("Phonetic Extensions Supplement", Interval(0x01D80, 0x01DBF)),
-UnicodeBlock("Playing Cards", Interval(0x1F0A0, 0x1F0FF)),
-UnicodeBlock("Private Use Area", Interval(0x0E000, 0x0F8FF)),
-UnicodeBlock("Rejang", Interval(0x0A930, 0x0A95F)),
-UnicodeBlock("Rumi Numeral Symbols", Interval(0x10E60, 0x10E7F)),
-UnicodeBlock("Runic", Interval(0x016A0, 0x016FF)),
-UnicodeBlock("Samaritan", Interval(0x00800, 0x0083F)),
-UnicodeBlock("Saurashtra", Interval(0x0A880, 0x0A8DF)),
-UnicodeBlock("Shavian", Interval(0x10450, 0x1047F)),
-UnicodeBlock("Sinhala", Interval(0x00D80, 0x00DFF)),
-UnicodeBlock("Small Form Variants", Interval(0x0FE50, 0x0FE6F)),
-UnicodeBlock("Spacing Modifier Letters", Interval(0x002B0, 0x002FF)),
-UnicodeBlock("Specials", Interval(0x0FFF0, 0x0FFFF)),
-UnicodeBlock("Sundanese", Interval(0x01B80, 0x01BBF)),
-UnicodeBlock("Superscripts and Subscripts", Interval(0x02070, 0x0209F)),
-UnicodeBlock("Supplemental Arrows-A", Interval(0x027F0, 0x027FF)),
-UnicodeBlock("Supplemental Arrows-B", Interval(0x02900, 0x0297F)),
-UnicodeBlock("Supplemental Mathematical Operators", Interval(0x02A00, 0x02AFF)),
-UnicodeBlock("Supplemental Punctuation", Interval(0x02E00, 0x02E7F)),
-UnicodeBlock("Supplementary Private Use Area-A", Interval(0xF0000, 0xFFFFF)),
-UnicodeBlock("Supplementary Private Use Area-B", Interval(0x100000, 0x10FFFF)),
-UnicodeBlock("Syloti Nagri", Interval(0x0A800, 0x0A82F)),
-UnicodeBlock("Syriac", Interval(0x00700, 0x0074F)),
-UnicodeBlock("Tagalog", Interval(0x01700, 0x0171F)),
-UnicodeBlock("Tagbanwa", Interval(0x01760, 0x0177F)),
-UnicodeBlock("Tags", Interval(0xE0000, 0xE007F)),
-UnicodeBlock("Tai Le", Interval(0x01950, 0x0197F)),
-UnicodeBlock("Tai Tham", Interval(0x01A20, 0x01AAF)),
-UnicodeBlock("Tai Viet", Interval(0x0AA80, 0x0AADF)),
-UnicodeBlock("Tai Xuan Jing Symbols", Interval(0x1D300, 0x1D35F)),
-UnicodeBlock("Tamil", Interval(0x00B80, 0x00BFF)),
-UnicodeBlock("Telugu", Interval(0x00C00, 0x00C7F)),
-UnicodeBlock("Thaana", Interval(0x00780, 0x007BF)),
-UnicodeBlock("Thai", Interval(0x00E00, 0x00E7F)),
-UnicodeBlock("Tibetan", Interval(0x00F00, 0x00FFF)),
-UnicodeBlock("Tifinagh", Interval(0x02D30, 0x02D7F)),
-UnicodeBlock("Transport And Map Symbols", Interval(0x1F680, 0x1F6FF)),
-UnicodeBlock("Ugaritic", Interval(0x10380, 0x1039F)),
-UnicodeBlock("Unified Canadian Aboriginal Syllabics", Interval(0x01400, 0x0167F)),
-UnicodeBlock("Unified Canadian Aboriginal Syllabics Extended", Interval(0x018B0, 0x018FF)),
-UnicodeBlock("Vai", Interval(0x0A500, 0x0A63F)),
-UnicodeBlock("Variation Selectors", Interval(0x0FE00, 0x0FE0F)),
-UnicodeBlock("Variation Selectors Supplement", Interval(0xE0100, 0xE01EF)),
-UnicodeBlock("Vedic Extensions", Interval(0x01CD0, 0x01CFF)),
-UnicodeBlock("Vertical Forms", Interval(0x0FE10, 0x0FE1F)),
-UnicodeBlock("Yijing Hexagram Symbols", Interval(0x04DC0, 0x04DFF)),
-UnicodeBlock("Yi Radicals", Interval(0x0A490, 0x0A4CF)),
-UnicodeBlock("Yi Syllables", Interval(0x0A000, 0x0A48F)),
-];
 immutable Charset unicodeCc = Charset([
 Interval(0x00000,0x0001f),
 Interval(0x0007f,0x0009f),
 ]);
+
 immutable Charset unicodeCf = Charset([
 Interval(0x000ad,0x000ad),
 Interval(0x00600,0x00603),
@@ -428,6 +214,7 @@ Interval(0x1d173,0x1d17a),
 Interval(0xe0001,0xe0001),
 Interval(0xe0020,0xe007f),
 ]);
+
 immutable Charset unicodeCo = Charset([
 Interval(0x0e000,0x0e000),
 Interval(0x0f8ff,0x0f8ff),
@@ -436,12 +223,14 @@ Interval(0xffffd,0xffffd),
 Interval(0x100000,0x100000),
 Interval(0x10fffd,0x10fffd),
 ]);
+
 immutable Charset unicodeCs = Charset([
 Interval(0x0d800,0x0d800),
 Interval(0x0db7f,0x0db80),
 Interval(0x0dbff,0x0dc00),
 Interval(0x0dfff,0x0dfff),
 ]);
+
 immutable Charset unicodeL = Charset([
 Interval(0x00041,0x0005a),
 Interval(0x00061,0x0007a),
@@ -976,6 +765,7 @@ Interval(0xffffd,0xffffd),
 Interval(0x100000,0x100000),
 Interval(0x10fffd,0x10fffd),
 ]);
+
 immutable Charset unicodeLm = Charset([
 Interval(0x002b0,0x002c1),
 Interval(0x002c6,0x002d1),
@@ -1027,6 +817,7 @@ Interval(0x0aadd,0x0aadd),
 Interval(0x0ff70,0x0ff70),
 Interval(0x0ff9e,0x0ff9f),
 ]);
+
 immutable Charset unicodeLo = Charset([
 Interval(0x001bb,0x001bb),
 Interval(0x001c0,0x001c3),
@@ -1358,6 +1149,7 @@ Interval(0x2b740,0x2b740),
 Interval(0x2b81d,0x2b81d),
 Interval(0x2f800,0x2fa1d),
 ]);
+
 immutable Charset unicodeLt = Charset([
 Interval(0x001c5,0x001c5),
 Interval(0x001c8,0x001c8),
@@ -1370,6 +1162,7 @@ Interval(0x01fbc,0x01fbc),
 Interval(0x01fcc,0x01fcc),
 Interval(0x01ffc,0x01ffc),
 ]);
+
 immutable Charset unicodeMc = Charset([
 Interval(0x00903,0x00903),
 Interval(0x0093b,0x0093b),
@@ -1485,12 +1278,14 @@ Interval(0x110b7,0x110b8),
 Interval(0x1d165,0x1d166),
 Interval(0x1d16d,0x1d172),
 ]);
+
 immutable Charset unicodeMe = Charset([
 Interval(0x00488,0x00489),
 Interval(0x020dd,0x020e0),
 Interval(0x020e2,0x020e4),
 Interval(0x0a670,0x0a672),
 ]);
+
 immutable Charset unicodeMn = Charset([
 Interval(0x00300,0x0036f),
 Interval(0x00483,0x00487),
@@ -1696,6 +1491,7 @@ Interval(0x1d1aa,0x1d1ad),
 Interval(0x1d242,0x1d244),
 Interval(0xe0100,0xe01ef),
 ]);
+
 immutable Charset unicodeNd = Charset([
 Interval(0x00030,0x00039),
 Interval(0x00660,0x00669),
@@ -1736,6 +1532,7 @@ Interval(0x104a0,0x104a9),
 Interval(0x11066,0x1106f),
 Interval(0x1d7ce,0x1d7ff),
 ]);
+
 immutable Charset unicodeNl = Charset([
 Interval(0x016ee,0x016f0),
 Interval(0x02160,0x02182),
@@ -1750,6 +1547,7 @@ Interval(0x1034a,0x1034a),
 Interval(0x103d1,0x103d5),
 Interval(0x12400,0x12462),
 ]);
+
 immutable Charset unicodeNo = Charset([
 Interval(0x000b2,0x000b3),
 Interval(0x000b9,0x000b9),
@@ -1793,6 +1591,7 @@ Interval(0x11052,0x11065),
 Interval(0x1d360,0x1d371),
 Interval(0x1f100,0x1f10a),
 ]);
+
 immutable Charset unicodePc = Charset([
 Interval(0x0005f,0x0005f),
 Interval(0x0203f,0x02040),
@@ -1801,6 +1600,7 @@ Interval(0x0fe33,0x0fe34),
 Interval(0x0fe4d,0x0fe4f),
 Interval(0x0ff3f,0x0ff3f),
 ]);
+
 immutable Charset unicodePd = Charset([
 Interval(0x0002d,0x0002d),
 Interval(0x0058a,0x0058a),
@@ -1818,6 +1618,7 @@ Interval(0x0fe58,0x0fe58),
 Interval(0x0fe63,0x0fe63),
 Interval(0x0ff0d,0x0ff0d),
 ]);
+
 immutable Charset unicodePe = Charset([
 Interval(0x00029,0x00029),
 Interval(0x0005d,0x0005d),
@@ -1890,6 +1691,7 @@ Interval(0x0ff5d,0x0ff5d),
 Interval(0x0ff60,0x0ff60),
 Interval(0x0ff63,0x0ff63),
 ]);
+
 immutable Charset unicodePf = Charset([
 Interval(0x000bb,0x000bb),
 Interval(0x02019,0x02019),
@@ -1902,6 +1704,7 @@ Interval(0x02e0d,0x02e0d),
 Interval(0x02e1d,0x02e1d),
 Interval(0x02e21,0x02e21),
 ]);
+
 immutable Charset unicodePi = Charset([
 Interval(0x000ab,0x000ab),
 Interval(0x02018,0x02018),
@@ -1915,6 +1718,7 @@ Interval(0x02e0c,0x02e0c),
 Interval(0x02e1c,0x02e1c),
 Interval(0x02e20,0x02e20),
 ]);
+
 immutable Charset unicodePo = Charset([
 Interval(0x00021,0x00023),
 Interval(0x00025,0x00027),
@@ -2045,6 +1849,7 @@ Interval(0x110bb,0x110bc),
 Interval(0x110be,0x110c1),
 Interval(0x12470,0x12473),
 ]);
+
 immutable Charset unicodePs = Charset([
 Interval(0x00028,0x00028),
 Interval(0x0005b,0x0005b),
@@ -2119,6 +1924,7 @@ Interval(0x0ff5b,0x0ff5b),
 Interval(0x0ff5f,0x0ff5f),
 Interval(0x0ff62,0x0ff62),
 ]);
+
 immutable Charset unicodeSc = Charset([
 Interval(0x00024,0x00024),
 Interval(0x000a2,0x000a5),
@@ -2137,6 +1943,7 @@ Interval(0x0ff04,0x0ff04),
 Interval(0x0ffe0,0x0ffe1),
 Interval(0x0ffe5,0x0ffe6),
 ]);
+
 immutable Charset unicodeSk = Charset([
 Interval(0x0005e,0x0005e),
 Interval(0x00060,0x00060),
@@ -2166,6 +1973,7 @@ Interval(0x0ff3e,0x0ff3e),
 Interval(0x0ff40,0x0ff40),
 Interval(0x0ffe3,0x0ffe3),
 ]);
+
 immutable Charset unicodeSm = Charset([
 Interval(0x0002b,0x0002b),
 Interval(0x0003c,0x0003e),
@@ -2234,6 +2042,7 @@ Interval(0x1d789,0x1d789),
 Interval(0x1d7a9,0x1d7a9),
 Interval(0x1d7c3,0x1d7c3),
 ]);
+
 immutable Charset unicodeSo = Charset([
 Interval(0x000a6,0x000a7),
 Interval(0x000a9,0x000a9),
@@ -2400,12 +2209,15 @@ Interval(0x1f645,0x1f64f),
 Interval(0x1f680,0x1f6c5),
 Interval(0x1f700,0x1f773),
 ]);
+
 immutable Charset unicodeZl = Charset([
 Interval(0x02028,0x02028),
 ]);
+
 immutable Charset unicodeZp = Charset([
 Interval(0x02029,0x02029),
 ]);
+
 immutable Charset unicodeZs = Charset([
 Interval(0x00020,0x00020),
 Interval(0x000a0,0x000a0),
@@ -2416,86 +2228,334 @@ Interval(0x0202f,0x0202f),
 Interval(0x0205f,0x0205f),
 Interval(0x03000,0x03000),
 ]);
+
 struct UnicodeProperty
 {
     string name;
     immutable Charset set;
 }
-immutable(UnicodeProperty)[] unicodeGeneral = [
-UnicodeProperty("Cc", unicodeCc),UnicodeProperty("Control", unicodeCc),
-UnicodeProperty("Cf", unicodeCf),UnicodeProperty("Format", unicodeCf),
-UnicodeProperty("Co", unicodeCo),UnicodeProperty("Private Use", unicodeCo),
-UnicodeProperty("Cs", unicodeCs),UnicodeProperty("Surrogate", unicodeCs),
-UnicodeProperty("L", unicodeL),UnicodeProperty("Letter", unicodeL),
-UnicodeProperty("Lm", unicodeLm),UnicodeProperty("Modifier Letter", unicodeLm),
-UnicodeProperty("Lo", unicodeLo),UnicodeProperty("Other Letter", unicodeLo),
-UnicodeProperty("Lt", unicodeLt),UnicodeProperty("Titlecase Letter", unicodeLt),
-UnicodeProperty("Mc", unicodeMc),UnicodeProperty("Spacing Mark", unicodeMc),
-UnicodeProperty("Me", unicodeMe),UnicodeProperty("Enclosing Mark", unicodeMe),
-UnicodeProperty("Mn", unicodeMn),UnicodeProperty("Non-Spacing Mark", unicodeMn),
-UnicodeProperty("Nd", unicodeNd),UnicodeProperty("Decimal Digit Number", unicodeNd),
-UnicodeProperty("Nl", unicodeNl),UnicodeProperty("Letter Number", unicodeNl),
-UnicodeProperty("No", unicodeNo),UnicodeProperty("Other Number", unicodeNo),
-UnicodeProperty("Pc", unicodePc),UnicodeProperty("Connector Punctuation", unicodePc),
-UnicodeProperty("Pd", unicodePd),UnicodeProperty("Dash Punctuation", unicodePd),
-UnicodeProperty("Pe", unicodePe),UnicodeProperty("Close Punctuation", unicodePe),
-UnicodeProperty("Pf", unicodePf),UnicodeProperty("Final Punctuation", unicodePf),
-UnicodeProperty("Pi", unicodePi),UnicodeProperty("Initital Punctuation", unicodePi),
-UnicodeProperty("Po", unicodePo),UnicodeProperty("Other Punctuation", unicodePo),
-UnicodeProperty("Ps", unicodePs),UnicodeProperty("Open Punctuation", unicodePs),
-UnicodeProperty("Sc", unicodeSc),UnicodeProperty("Currency Symbol", unicodeSc),
-UnicodeProperty("Sk", unicodeSk),UnicodeProperty("Modifier Symbol", unicodeSk),
-UnicodeProperty("Sm", unicodeSm),UnicodeProperty("Math symbol", unicodeSm),
-UnicodeProperty("So", unicodeSo),UnicodeProperty("Other Symbol", unicodeSo),
-UnicodeProperty("Zl", unicodeZl),UnicodeProperty("Separator", unicodeZl),
-UnicodeProperty("Zp", unicodeZp),UnicodeProperty("Line Separator", unicodeZp),
-UnicodeProperty("Zs", unicodeZs),UnicodeProperty("Paragraph Separator", unicodeZs),
-];
-immutable(UnicodeProperty)[] unicodeScripts = [
-UnicodeProperty("Arabic", Charset([
-Interval(0x00600,0x00603),
-Interval(0x00606,0x0060b),
-Interval(0x0060d,0x0061a),
-Interval(0x0061e,0x0061e),
-Interval(0x00620,0x0063f),
-Interval(0x00641,0x0064a),
-Interval(0x00656,0x0065e),
-Interval(0x0066a,0x0066f),
-Interval(0x00671,0x006dc),
-Interval(0x006de,0x006ff),
-Interval(0x00750,0x0077f),
-Interval(0x0fb50,0x0fbc1),
-Interval(0x0fbd3,0x0fd3d),
-Interval(0x0fd50,0x0fd8f),
-Interval(0x0fd92,0x0fdc7),
-Interval(0x0fdf0,0x0fdfc),
-Interval(0x0fe70,0x0fe74),
-Interval(0x0fe76,0x0fefc),
-Interval(0x10e60,0x10e7e),
-])),
-UnicodeProperty("Armenian", Charset([
-Interval(0x00531,0x00556),
-Interval(0x00559,0x0055f),
-Interval(0x00561,0x00587),
-Interval(0x0058a,0x0058a),
-Interval(0x0fb13,0x0fb17),
-])),
-UnicodeProperty("Avestan", Charset([
-Interval(0x10b00,0x10b35),
-Interval(0x10b39,0x10b3f),
-])),
-UnicodeProperty("Balinese", Charset([
-Interval(0x01b00,0x01b4b),
-Interval(0x01b50,0x01b7c),
-])),
-UnicodeProperty("Bamum", Charset([
-Interval(0x0a6a0,0x0a6f7),
-Interval(0x16800,0x16a38),
-])),
+immutable(UnicodeProperty)[] unicodeProperties = [
+UnicodeProperty("Ol_Chiki", Charset([
+Interval(0x01c50,0x01c7f),
+])
+,),
+UnicodeProperty("InSupplemental Mathematical Operators", Charset([Interval(0x02A00, 0x02AFF)])),
+UnicodeProperty("Glagolitic", Charset([
+Interval(0x02c00,0x02c2e),
+Interval(0x02c30,0x02c5e),
+])
+,),
+UnicodeProperty("InDomino Tiles", Charset([Interval(0x1F030, 0x1F09F)])),
+UnicodeProperty("Old_Italic", Charset([
+Interval(0x10300,0x1031e),
+Interval(0x10320,0x10323),
+])
+,),
+UnicodeProperty("InMathematical Alphanumeric Symbols", Charset([Interval(0x1D400, 0x1D7FF)])),
+UnicodeProperty("InHangul Jamo", Charset([Interval(0x01100, 0x011FF)])),
+UnicodeProperty("InKaithi", Charset([Interval(0x11080, 0x110CF)])),
+UnicodeProperty("Hangul", Charset([
+Interval(0x01100,0x011ff),
+Interval(0x0302e,0x0302f),
+Interval(0x03131,0x0318e),
+Interval(0x03200,0x0321e),
+Interval(0x03260,0x0327e),
+Interval(0x0a960,0x0a97c),
+Interval(0x0ac00,0x0d7a3),
+Interval(0x0d7b0,0x0d7c6),
+Interval(0x0d7cb,0x0d7fb),
+Interval(0x0ffa0,0x0ffbe),
+Interval(0x0ffc2,0x0ffc7),
+Interval(0x0ffca,0x0ffcf),
+Interval(0x0ffd2,0x0ffd7),
+Interval(0x0ffda,0x0ffdc),
+])
+,),
+UnicodeProperty("InMongolian", Charset([Interval(0x01800, 0x018AF)])),
+UnicodeProperty("Mongolian", Charset([
+Interval(0x01800,0x01801),
+Interval(0x01804,0x01804),
+Interval(0x01806,0x0180e),
+Interval(0x01810,0x01819),
+Interval(0x01820,0x01877),
+Interval(0x01880,0x018aa),
+])
+,),
+UnicodeProperty("InKhmer", Charset([Interval(0x01780, 0x017FF)])),
+UnicodeProperty("InKharoshthi", Charset([Interval(0x10A00, 0x10A5F)])),
+UnicodeProperty("InCombining Diacritical Marks Supplement", Charset([Interval(0x01DC0, 0x01DFF)])),
+UnicodeProperty("Other Letter", unicodeLo),
+UnicodeProperty("InCJK Unified Ideographs Extension B", Charset([Interval(0x20000, 0x2A6DF)])),
+UnicodeProperty("Pi", unicodePi),UnicodeProperty("Khmer", Charset([
+Interval(0x01780,0x017dd),
+Interval(0x017e0,0x017e9),
+Interval(0x017f0,0x017f9),
+Interval(0x019e0,0x019ff),
+])
+,),
+UnicodeProperty("InLydian", Charset([Interval(0x10920, 0x1093F)])),
+UnicodeProperty("Cypriot", Charset([
+Interval(0x10800,0x10805),
+Interval(0x10808,0x10808),
+Interval(0x1080a,0x10835),
+Interval(0x10837,0x10838),
+Interval(0x1083c,0x1083c),
+Interval(0x1083f,0x1083f),
+])
+,),
+UnicodeProperty("New_Tai_Lue", Charset([
+Interval(0x01980,0x019ab),
+Interval(0x019b0,0x019c9),
+Interval(0x019d0,0x019da),
+Interval(0x019de,0x019df),
+])
+,),
+UnicodeProperty("Lm", unicodeLm),UnicodeProperty("InRunic", Charset([Interval(0x016A0, 0x016FF)])),
+UnicodeProperty("InKana Supplement", Charset([Interval(0x1B000, 0x1B0FF)])),
+UnicodeProperty("InAlchemical Symbols", Charset([Interval(0x1F700, 0x1F77F)])),
+UnicodeProperty("InCurrency Symbols", Charset([Interval(0x020A0, 0x020CF)])),
+UnicodeProperty("InAncient Symbols", Charset([Interval(0x10190, 0x101CF)])),
+UnicodeProperty("Inherited", Charset([
+Interval(0x00300,0x0036f),
+Interval(0x00485,0x00486),
+Interval(0x0064b,0x00655),
+Interval(0x0065f,0x0065f),
+Interval(0x00670,0x00670),
+Interval(0x00951,0x00952),
+Interval(0x01cd0,0x01cd2),
+Interval(0x01cd4,0x01ce0),
+Interval(0x01ce2,0x01ce8),
+Interval(0x01ced,0x01ced),
+Interval(0x01dc0,0x01de6),
+Interval(0x01dfc,0x01dff),
+Interval(0x0200c,0x0200d),
+Interval(0x020d0,0x020f0),
+Interval(0x0302a,0x0302d),
+Interval(0x03099,0x0309a),
+Interval(0x0fe00,0x0fe0f),
+Interval(0x0fe20,0x0fe26),
+Interval(0x101fd,0x101fd),
+Interval(0x1d167,0x1d169),
+Interval(0x1d17b,0x1d182),
+Interval(0x1d185,0x1d18b),
+Interval(0x1d1aa,0x1d1ad),
+Interval(0xe0100,0xe01ef),
+])
+,),
+UnicodeProperty("InCombining Diacritical Marks", Charset([Interval(0x00300, 0x0036F)])),
+UnicodeProperty("InLimbu", Charset([Interval(0x01900, 0x0194F)])),
+UnicodeProperty("InImperial Aramaic", Charset([Interval(0x10840, 0x1085F)])),
+UnicodeProperty("Kharoshthi", Charset([
+Interval(0x10a00,0x10a03),
+Interval(0x10a05,0x10a06),
+Interval(0x10a0c,0x10a13),
+Interval(0x10a15,0x10a17),
+Interval(0x10a19,0x10a33),
+Interval(0x10a38,0x10a3a),
+Interval(0x10a3f,0x10a47),
+Interval(0x10a50,0x10a58),
+])
+,),
+UnicodeProperty("InLetterlike Symbols", Charset([Interval(0x02100, 0x0214F)])),
+UnicodeProperty("Nd", unicodeNd),UnicodeProperty("InGeneral Punctuation", Charset([Interval(0x02000, 0x0206F)])),
+UnicodeProperty("Deseret", Charset([
+Interval(0x10400,0x1044f),
+])
+,),
+UnicodeProperty("Ugaritic", Charset([
+Interval(0x10380,0x1039d),
+Interval(0x1039f,0x1039f),
+])
+,),
+UnicodeProperty("Gurmukhi", Charset([
+Interval(0x00a01,0x00a03),
+Interval(0x00a05,0x00a0a),
+Interval(0x00a0f,0x00a10),
+Interval(0x00a13,0x00a28),
+Interval(0x00a2a,0x00a30),
+Interval(0x00a32,0x00a33),
+Interval(0x00a35,0x00a36),
+Interval(0x00a38,0x00a39),
+Interval(0x00a3c,0x00a3c),
+Interval(0x00a3e,0x00a42),
+Interval(0x00a47,0x00a48),
+Interval(0x00a4b,0x00a4d),
+Interval(0x00a51,0x00a51),
+Interval(0x00a59,0x00a5c),
+Interval(0x00a5e,0x00a5e),
+Interval(0x00a66,0x00a75),
+])
+,),
+UnicodeProperty("Currency Symbol", unicodeSc),
+UnicodeProperty("Tai_Le", Charset([
+Interval(0x01950,0x0196d),
+Interval(0x01970,0x01974),
+])
+,),
+UnicodeProperty("InAncient Greek Numbers", Charset([Interval(0x10140, 0x1018F)])),
+UnicodeProperty("InByzantine Musical Symbols", Charset([Interval(0x1D000, 0x1D0FF)])),
+UnicodeProperty("InKayah Li", Charset([Interval(0x0A900, 0x0A92F)])),
+UnicodeProperty("Titlecase Letter", unicodeLt),
+UnicodeProperty("InGeometric Shapes", Charset([Interval(0x025A0, 0x025FF)])),
+UnicodeProperty("InDevanagari", Charset([Interval(0x00900, 0x0097F)])),
+UnicodeProperty("InPlaying Cards", Charset([Interval(0x1F0A0, 0x1F0FF)])),
+UnicodeProperty("InSupplemental Punctuation", Charset([Interval(0x02E00, 0x02E7F)])),
+UnicodeProperty("InLao", Charset([Interval(0x00E80, 0x00EFF)])),
+UnicodeProperty("InCJK Symbols and Punctuation", Charset([Interval(0x03000, 0x0303F)])),
+UnicodeProperty("InMahjong Tiles", Charset([Interval(0x1F000, 0x1F02F)])),
+UnicodeProperty("InNew Tai Lue", Charset([Interval(0x01980, 0x019DF)])),
+UnicodeProperty("Format", unicodeCf),
+UnicodeProperty("InGeorgian Supplement", Charset([Interval(0x02D00, 0x02D2F)])),
+UnicodeProperty("InThai", Charset([Interval(0x00E00, 0x00E7F)])),
+UnicodeProperty("InRejang", Charset([Interval(0x0A930, 0x0A95F)])),
+UnicodeProperty("Latin", Charset([
+Interval(0x00041,0x0005a),
+Interval(0x00061,0x0007a),
+Interval(0x000aa,0x000aa),
+Interval(0x000ba,0x000ba),
+Interval(0x000c0,0x000d6),
+Interval(0x000d8,0x000f6),
+Interval(0x000f8,0x002b8),
+Interval(0x002e0,0x002e4),
+Interval(0x01d00,0x01d25),
+Interval(0x01d2c,0x01d5c),
+Interval(0x01d62,0x01d65),
+Interval(0x01d6b,0x01d77),
+Interval(0x01d79,0x01dbe),
+Interval(0x01e00,0x01eff),
+Interval(0x02071,0x02071),
+Interval(0x0207f,0x0207f),
+Interval(0x02090,0x0209c),
+Interval(0x0212a,0x0212b),
+Interval(0x02132,0x02132),
+Interval(0x0214e,0x0214e),
+Interval(0x02160,0x02188),
+Interval(0x02c60,0x02c7f),
+Interval(0x0a722,0x0a787),
+Interval(0x0a78b,0x0a78e),
+Interval(0x0a790,0x0a791),
+Interval(0x0a7a0,0x0a7a9),
+Interval(0x0a7fa,0x0a7ff),
+Interval(0x0fb00,0x0fb06),
+Interval(0x0ff21,0x0ff3a),
+Interval(0x0ff41,0x0ff5a),
+])
+,),
+UnicodeProperty("InUnified Canadian Aboriginal Syllabics", Charset([Interval(0x01400, 0x0167F)])),
+UnicodeProperty("InEmoticons", Charset([Interval(0x1F600, 0x1F64F)])),
+UnicodeProperty("Yi", Charset([
+Interval(0x0a000,0x0a48c),
+Interval(0x0a490,0x0a4c6),
+])
+,),
+UnicodeProperty("Connector Punctuation", unicodePc),
+UnicodeProperty("InCuneiform", Charset([Interval(0x12000, 0x123FF)])),
+UnicodeProperty("InJavanese", Charset([Interval(0x0A980, 0x0A9DF)])),
+UnicodeProperty("InPhoenician", Charset([Interval(0x10900, 0x1091F)])),
+UnicodeProperty("Nl", unicodeNl),UnicodeProperty("InCombining Diacritical Marks for Symbols", Charset([Interval(0x020D0, 0x020FF)])),
+UnicodeProperty("InAncient Greek Musical Notation", Charset([Interval(0x1D200, 0x1D24F)])),
+UnicodeProperty("InRumi Numeral Symbols", Charset([Interval(0x10E60, 0x10E7F)])),
+UnicodeProperty("InCherokee", Charset([Interval(0x013A0, 0x013FF)])),
+UnicodeProperty("InOgham", Charset([Interval(0x01680, 0x0169F)])),
+UnicodeProperty("InBuginese", Charset([Interval(0x01A00, 0x01A1F)])),
+UnicodeProperty("InOsmanya", Charset([Interval(0x10480, 0x104AF)])),
+UnicodeProperty("Tagbanwa", Charset([
+Interval(0x01760,0x0176c),
+Interval(0x0176e,0x01770),
+Interval(0x01772,0x01773),
+])
+,),
+UnicodeProperty("InInscriptional Parthian", Charset([Interval(0x10B40, 0x10B5F)])),
+UnicodeProperty("InMathematical Operators", Charset([Interval(0x02200, 0x022FF)])),
+UnicodeProperty("InOld South Arabian", Charset([Interval(0x10A60, 0x10A7F)])),
+UnicodeProperty("Old_Turkic", Charset([
+Interval(0x10c00,0x10c48),
+])
+,),
+UnicodeProperty("InArabic", Charset([Interval(0x00600, 0x006FF)])),
+UnicodeProperty("InEnclosed CJK Letters and Months", Charset([Interval(0x03200, 0x032FF)])),
+UnicodeProperty("Linear_B", Charset([
+Interval(0x10000,0x1000b),
+Interval(0x1000d,0x10026),
+Interval(0x10028,0x1003a),
+Interval(0x1003c,0x1003d),
+Interval(0x1003f,0x1004d),
+Interval(0x10050,0x1005d),
+Interval(0x10080,0x100fa),
+])
+,),
+UnicodeProperty("InOptical Character Recognition", Charset([Interval(0x02440, 0x0245F)])),
+UnicodeProperty("InCJK Compatibility", Charset([Interval(0x03300, 0x033FF)])),
+UnicodeProperty("InAlphabetic Presentation Forms", Charset([Interval(0x0FB00, 0x0FB4F)])),
+UnicodeProperty("Devanagari", Charset([
+Interval(0x00900,0x00950),
+Interval(0x00953,0x00963),
+Interval(0x00966,0x0096f),
+Interval(0x00971,0x00977),
+Interval(0x00979,0x0097f),
+Interval(0x0a8e0,0x0a8fb),
+])
+,),
+UnicodeProperty("InDingbats", Charset([Interval(0x02700, 0x027BF)])),
+UnicodeProperty("InGreek and Coptic", Charset([Interval(0x00370, 0x003FF)])),
+UnicodeProperty("InLatin Extended-B", Charset([Interval(0x00180, 0x0024F)])),
+UnicodeProperty("Letter Number", unicodeNl),
+UnicodeProperty("InEnclosed Ideographic Supplement", Charset([Interval(0x1F200, 0x1F2FF)])),
+UnicodeProperty("InKangxi Radicals", Charset([Interval(0x02F00, 0x02FDF)])),
 UnicodeProperty("Batak", Charset([
 Interval(0x01bc0,0x01bf3),
 Interval(0x01bfc,0x01bff),
-])),
+])
+,),
+UnicodeProperty("InYijing Hexagram Symbols", Charset([Interval(0x04DC0, 0x04DFF)])),
+UnicodeProperty("Separator", unicodeZl),
+UnicodeProperty("InTifinagh", Charset([Interval(0x02D30, 0x02D7F)])),
+UnicodeProperty("Letter", unicodeL),
+UnicodeProperty("InHangul Jamo Extended-B", Charset([Interval(0x0D7B0, 0x0D7FF)])),
+UnicodeProperty("InTagalog", Charset([Interval(0x01700, 0x0171F)])),
+UnicodeProperty("Katakana", Charset([
+Interval(0x030a1,0x030fa),
+Interval(0x030fd,0x030ff),
+Interval(0x031f0,0x031ff),
+Interval(0x032d0,0x032fe),
+Interval(0x03300,0x03357),
+Interval(0x0ff66,0x0ff6f),
+Interval(0x0ff71,0x0ff9d),
+Interval(0x1b000,0x1b000),
+])
+,),
+UnicodeProperty("Ogham", Charset([
+Interval(0x01680,0x0169c),
+])
+,),
+UnicodeProperty("Lepcha", Charset([
+Interval(0x01c00,0x01c37),
+Interval(0x01c3b,0x01c49),
+Interval(0x01c4d,0x01c4f),
+])
+,),
+UnicodeProperty("Hebrew", Charset([
+Interval(0x00591,0x005c7),
+Interval(0x005d0,0x005ea),
+Interval(0x005f0,0x005f4),
+Interval(0x0fb1d,0x0fb36),
+Interval(0x0fb38,0x0fb3c),
+Interval(0x0fb3e,0x0fb3e),
+Interval(0x0fb40,0x0fb41),
+Interval(0x0fb43,0x0fb44),
+Interval(0x0fb46,0x0fb4f),
+])
+,),
+UnicodeProperty("Hiragana", Charset([
+Interval(0x03041,0x03096),
+Interval(0x0309d,0x0309f),
+Interval(0x1b001,0x1b001),
+Interval(0x1f200,0x1f200),
+])
+,),
+UnicodeProperty("Enclosing Mark", unicodeMe),
+UnicodeProperty("InNumber Forms", Charset([Interval(0x02150, 0x0218F)])),
+UnicodeProperty("InSpecials", Charset([Interval(0x0FFF0, 0x0FFFF)])),
 UnicodeProperty("Bengali", Charset([
 Interval(0x00981,0x00983),
 Interval(0x00985,0x0098c),
@@ -2511,42 +2571,164 @@ Interval(0x009d7,0x009d7),
 Interval(0x009dc,0x009dd),
 Interval(0x009df,0x009e3),
 Interval(0x009e6,0x009fb),
-])),
-UnicodeProperty("Bopomofo", Charset([
-Interval(0x002ea,0x002eb),
-Interval(0x03105,0x0312d),
-Interval(0x031a0,0x031ba),
-])),
-UnicodeProperty("Brahmi", Charset([
-Interval(0x11000,0x1104d),
-Interval(0x11052,0x1106f),
-])),
-UnicodeProperty("Braille", Charset([
-Interval(0x02800,0x028ff),
-])),
+])
+,),
+UnicodeProperty("InCounting Rod Numerals", Charset([Interval(0x1D360, 0x1D37F)])),
+UnicodeProperty("Zs", unicodeZs),UnicodeProperty("InBengali", Charset([Interval(0x00980, 0x009FF)])),
+UnicodeProperty("Tibetan", Charset([
+Interval(0x00f00,0x00f47),
+Interval(0x00f49,0x00f6c),
+Interval(0x00f71,0x00f97),
+Interval(0x00f99,0x00fbc),
+Interval(0x00fbe,0x00fcc),
+Interval(0x00fce,0x00fd4),
+Interval(0x00fd9,0x00fda),
+])
+,),
+UnicodeProperty("InLatin Extended-D", Charset([Interval(0x0A720, 0x0A7FF)])),
+UnicodeProperty("Other Punctuation", unicodePo),
+UnicodeProperty("Gothic", Charset([
+Interval(0x10330,0x1034a),
+])
+,),
+UnicodeProperty("InLinear B Ideograms", Charset([Interval(0x10080, 0x100FF)])),
+UnicodeProperty("Coptic", Charset([
+Interval(0x003e2,0x003ef),
+Interval(0x02c80,0x02cf1),
+Interval(0x02cf9,0x02cff),
+])
+,),
+UnicodeProperty("Lydian", Charset([
+Interval(0x10920,0x10939),
+Interval(0x1093f,0x1093f),
+])
+,),
+UnicodeProperty("Greek", Charset([
+Interval(0x00370,0x00373),
+Interval(0x00375,0x00377),
+Interval(0x0037a,0x0037d),
+Interval(0x00384,0x00384),
+Interval(0x00386,0x00386),
+Interval(0x00388,0x0038a),
+Interval(0x0038c,0x0038c),
+Interval(0x0038e,0x003a1),
+Interval(0x003a3,0x003e1),
+Interval(0x003f0,0x003ff),
+Interval(0x01d26,0x01d2a),
+Interval(0x01d5d,0x01d61),
+Interval(0x01d66,0x01d6a),
+Interval(0x01dbf,0x01dbf),
+Interval(0x01f00,0x01f15),
+Interval(0x01f18,0x01f1d),
+Interval(0x01f20,0x01f45),
+Interval(0x01f48,0x01f4d),
+Interval(0x01f50,0x01f57),
+Interval(0x01f59,0x01f59),
+Interval(0x01f5b,0x01f5b),
+Interval(0x01f5d,0x01f5d),
+Interval(0x01f5f,0x01f7d),
+Interval(0x01f80,0x01fb4),
+Interval(0x01fb6,0x01fc4),
+Interval(0x01fc6,0x01fd3),
+Interval(0x01fd6,0x01fdb),
+Interval(0x01fdd,0x01fef),
+Interval(0x01ff2,0x01ff4),
+Interval(0x01ff6,0x01ffe),
+Interval(0x02126,0x02126),
+Interval(0x10140,0x1018a),
+Interval(0x1d200,0x1d245),
+])
+,),
+UnicodeProperty("Meetei_Mayek", Charset([
+Interval(0x0abc0,0x0abed),
+Interval(0x0abf0,0x0abf9),
+])
+,),
+UnicodeProperty("InTags", Charset([Interval(0xE0000, 0xE007F)])),
 UnicodeProperty("Buginese", Charset([
 Interval(0x01a00,0x01a1b),
 Interval(0x01a1e,0x01a1f),
-])),
-UnicodeProperty("Buhid", Charset([
-Interval(0x01740,0x01753),
-])),
-UnicodeProperty("Canadian_Aboriginal", Charset([
-Interval(0x01400,0x0167f),
-Interval(0x018b0,0x018f5),
-])),
-UnicodeProperty("Carian", Charset([
-Interval(0x102a0,0x102d0),
-])),
-UnicodeProperty("Cham", Charset([
-Interval(0x0aa00,0x0aa36),
-Interval(0x0aa40,0x0aa4d),
-Interval(0x0aa50,0x0aa59),
-Interval(0x0aa5c,0x0aa5f),
-])),
-UnicodeProperty("Cherokee", Charset([
-Interval(0x013a0,0x013f4),
-])),
+])
+,),
+UnicodeProperty("Telugu", Charset([
+Interval(0x00c01,0x00c03),
+Interval(0x00c05,0x00c0c),
+Interval(0x00c0e,0x00c10),
+Interval(0x00c12,0x00c28),
+Interval(0x00c2a,0x00c33),
+Interval(0x00c35,0x00c39),
+Interval(0x00c3d,0x00c44),
+Interval(0x00c46,0x00c48),
+Interval(0x00c4a,0x00c4d),
+Interval(0x00c55,0x00c56),
+Interval(0x00c58,0x00c59),
+Interval(0x00c60,0x00c63),
+Interval(0x00c66,0x00c6f),
+Interval(0x00c78,0x00c7f),
+])
+,),
+UnicodeProperty("InGreek Extended", Charset([Interval(0x01F00, 0x01FFF)])),
+UnicodeProperty("Tagalog", Charset([
+Interval(0x01700,0x0170c),
+Interval(0x0170e,0x01714),
+])
+,),
+UnicodeProperty("InEthiopic Extended-A", Charset([Interval(0x0AB00, 0x0AB2F)])),
+UnicodeProperty("Sm", unicodeSm),UnicodeProperty("InLycian", Charset([Interval(0x10280, 0x1029F)])),
+UnicodeProperty("InSyriac", Charset([Interval(0x00700, 0x0074F)])),
+UnicodeProperty("InBalinese", Charset([Interval(0x01B00, 0x01B7F)])),
+UnicodeProperty("Kaithi", Charset([
+Interval(0x11080,0x110c1),
+])
+,),
+UnicodeProperty("InPhags-pa", Charset([Interval(0x0A840, 0x0A87F)])),
+UnicodeProperty("Javanese", Charset([
+Interval(0x0a980,0x0a9cd),
+Interval(0x0a9cf,0x0a9d9),
+Interval(0x0a9de,0x0a9df),
+])
+,),
+UnicodeProperty("InHanunoo", Charset([Interval(0x01720, 0x0173F)])),
+UnicodeProperty("Ps", unicodePs),UnicodeProperty("InBasic Latin", Charset([Interval(0x00000, 0x0007F)])),
+UnicodeProperty("Han", Charset([
+Interval(0x02e80,0x02e99),
+Interval(0x02e9b,0x02ef3),
+Interval(0x02f00,0x02fd5),
+Interval(0x03005,0x03005),
+Interval(0x03007,0x03007),
+Interval(0x03021,0x03029),
+Interval(0x03038,0x0303b),
+Interval(0x03400,0x04db5),
+Interval(0x04e00,0x09fcb),
+Interval(0x0f900,0x0fa2d),
+Interval(0x0fa30,0x0fa6d),
+Interval(0x0fa70,0x0fad9),
+Interval(0x20000,0x2a6d6),
+Interval(0x2a700,0x2b734),
+Interval(0x2b740,0x2b81d),
+Interval(0x2f800,0x2fa1d),
+])
+,),
+UnicodeProperty("InOld Persian", Charset([Interval(0x103A0, 0x103DF)])),
+UnicodeProperty("InMiscellaneous Symbols And Pictographs", Charset([Interval(0x1F300, 0x1F5FF)])),
+UnicodeProperty("Tai_Tham", Charset([
+Interval(0x01a20,0x01a5e),
+Interval(0x01a60,0x01a7c),
+Interval(0x01a7f,0x01a89),
+Interval(0x01a90,0x01a99),
+Interval(0x01aa0,0x01aad),
+])
+,),
+UnicodeProperty("Decimal Digit Number", unicodeNd),
+UnicodeProperty("Lt", unicodeLt),UnicodeProperty("InDeseret", Charset([Interval(0x10400, 0x1044F)])),
+UnicodeProperty("InOld Turkic", Charset([Interval(0x10C00, 0x10C4F)])),
+UnicodeProperty("InEgyptian Hieroglyphs", Charset([Interval(0x13000, 0x1342F)])),
+UnicodeProperty("Runic", Charset([
+Interval(0x016a0,0x016ea),
+Interval(0x016ee,0x016f0),
+])
+,),
+UnicodeProperty("InCJK Unified Ideographs Extension A", Charset([Interval(0x03400, 0x04DBF)])),
 UnicodeProperty("Common", Charset([
 Interval(0x00000,0x00040),
 Interval(0x0005b,0x00060),
@@ -2717,48 +2899,485 @@ Interval(0x1f680,0x1f6c5),
 Interval(0x1f700,0x1f773),
 Interval(0xe0001,0xe0001),
 Interval(0xe0020,0xe007f),
-])),
-UnicodeProperty("Coptic", Charset([
-Interval(0x003e2,0x003ef),
-Interval(0x02c80,0x02cf1),
-Interval(0x02cf9,0x02cff),
-])),
+])
+,),
+UnicodeProperty("Spacing Mark", unicodeMc),
+UnicodeProperty("Pf", unicodePf),UnicodeProperty("InMandaic", Charset([Interval(0x00840, 0x0085F)])),
+UnicodeProperty("InUnified Canadian Aboriginal Syllabics Extended", Charset([Interval(0x018B0, 0x018FF)])),
+UnicodeProperty("InCyrillic", Charset([Interval(0x00400, 0x004FF)])),
+UnicodeProperty("InSmall Form Variants", Charset([Interval(0x0FE50, 0x0FE6F)])),
+UnicodeProperty("Malayalam", Charset([
+Interval(0x00d02,0x00d03),
+Interval(0x00d05,0x00d0c),
+Interval(0x00d0e,0x00d10),
+Interval(0x00d12,0x00d3a),
+Interval(0x00d3d,0x00d44),
+Interval(0x00d46,0x00d48),
+Interval(0x00d4a,0x00d4e),
+Interval(0x00d57,0x00d57),
+Interval(0x00d60,0x00d63),
+Interval(0x00d66,0x00d75),
+Interval(0x00d79,0x00d7f),
+])
+,),
+UnicodeProperty("Bamum", Charset([
+Interval(0x0a6a0,0x0a6f7),
+Interval(0x16800,0x16a38),
+])
+,),
+UnicodeProperty("Inscriptional_Pahlavi", Charset([
+Interval(0x10b60,0x10b72),
+Interval(0x10b78,0x10b7f),
+])
+,),
+UnicodeProperty("Georgian", Charset([
+Interval(0x010a0,0x010c5),
+Interval(0x010d0,0x010fa),
+Interval(0x010fc,0x010fc),
+Interval(0x02d00,0x02d25),
+])
+,),
+UnicodeProperty("InCham", Charset([Interval(0x0AA00, 0x0AA5F)])),
+UnicodeProperty("InCJK Compatibility Ideographs Supplement", Charset([Interval(0x2F800, 0x2FA1F)])),
+UnicodeProperty("Math symbol", unicodeSm),
+UnicodeProperty("InSuperscripts and Subscripts", Charset([Interval(0x02070, 0x0209F)])),
+UnicodeProperty("Phags_Pa", Charset([
+Interval(0x0a840,0x0a877),
+])
+,),
+UnicodeProperty("InBopomofo Extended", Charset([Interval(0x031A0, 0x031BF)])),
+UnicodeProperty("InGurmukhi", Charset([Interval(0x00A00, 0x00A7F)])),
+UnicodeProperty("Inscriptional_Parthian", Charset([
+Interval(0x10b40,0x10b55),
+Interval(0x10b58,0x10b5f),
+])
+,),
+UnicodeProperty("Cham", Charset([
+Interval(0x0aa00,0x0aa36),
+Interval(0x0aa40,0x0aa4d),
+Interval(0x0aa50,0x0aa59),
+Interval(0x0aa5c,0x0aa5f),
+])
+,),
+UnicodeProperty("Osmanya", Charset([
+Interval(0x10480,0x1049d),
+Interval(0x104a0,0x104a9),
+])
+,),
+UnicodeProperty("InGlagolitic", Charset([Interval(0x02C00, 0x02C5F)])),
+UnicodeProperty("Mn", unicodeMn),UnicodeProperty("Other Symbol", unicodeSo),
+UnicodeProperty("InCJK Compatibility Forms", Charset([Interval(0x0FE30, 0x0FE4F)])),
+UnicodeProperty("Open Punctuation", unicodePs),
+UnicodeProperty("Lao", Charset([
+Interval(0x00e81,0x00e82),
+Interval(0x00e84,0x00e84),
+Interval(0x00e87,0x00e88),
+Interval(0x00e8a,0x00e8a),
+Interval(0x00e8d,0x00e8d),
+Interval(0x00e94,0x00e97),
+Interval(0x00e99,0x00e9f),
+Interval(0x00ea1,0x00ea3),
+Interval(0x00ea5,0x00ea5),
+Interval(0x00ea7,0x00ea7),
+Interval(0x00eaa,0x00eab),
+Interval(0x00ead,0x00eb9),
+Interval(0x00ebb,0x00ebd),
+Interval(0x00ec0,0x00ec4),
+Interval(0x00ec6,0x00ec6),
+Interval(0x00ec8,0x00ecd),
+Interval(0x00ed0,0x00ed9),
+Interval(0x00edc,0x00edd),
+])
+,),
+UnicodeProperty("InBrahmi", Charset([Interval(0x11000, 0x1107F)])),
+UnicodeProperty("Sc", unicodeSc),UnicodeProperty("InOriya", Charset([Interval(0x00B00, 0x00B7F)])),
+UnicodeProperty("InEnclosed Alphanumerics", Charset([Interval(0x02460, 0x024FF)])),
+UnicodeProperty("InGeorgian", Charset([Interval(0x010A0, 0x010FF)])),
+UnicodeProperty("Vai", Charset([
+Interval(0x0a500,0x0a62b),
+])
+,),
+UnicodeProperty("InBatak", Charset([Interval(0x01BC0, 0x01BFF)])),
+UnicodeProperty("InCJK Unified Ideographs", Charset([Interval(0x04E00, 0x09FFF)])),
+UnicodeProperty("InBuhid", Charset([Interval(0x01740, 0x0175F)])),
+UnicodeProperty("Mc", unicodeMc),UnicodeProperty("Me", unicodeMe),UnicodeProperty("InTransport And Map Symbols", Charset([Interval(0x1F680, 0x1F6FF)])),
+UnicodeProperty("Braille", Charset([
+Interval(0x02800,0x028ff),
+])
+,),
+UnicodeProperty("InCJK Strokes", Charset([Interval(0x031C0, 0x031EF)])),
+UnicodeProperty("InCyrillic Extended-B", Charset([Interval(0x0A640, 0x0A69F)])),
+UnicodeProperty("L", unicodeL),UnicodeProperty("Lycian", Charset([
+Interval(0x10280,0x1029c),
+])
+,),
+UnicodeProperty("InHangul Syllables", Charset([Interval(0x0AC00, 0x0D7AF)])),
+UnicodeProperty("InMiscellaneous Symbols", Charset([Interval(0x02600, 0x026FF)])),
+UnicodeProperty("Close Punctuation", unicodePe),
+UnicodeProperty("InModifier Tone Letters", Charset([Interval(0x0A700, 0x0A71F)])),
+UnicodeProperty("InMalayalam", Charset([Interval(0x00D00, 0x00D7F)])),
+UnicodeProperty("InBraille Patterns", Charset([Interval(0x02800, 0x028FF)])),
+UnicodeProperty("Pc", unicodePc),UnicodeProperty("InTai Tham", Charset([Interval(0x01A20, 0x01AAF)])),
+UnicodeProperty("Lisu", Charset([
+Interval(0x0a4d0,0x0a4ff),
+])
+,),
+UnicodeProperty("InSupplemental Arrows-A", Charset([Interval(0x027F0, 0x027FF)])),
+UnicodeProperty("Thaana", Charset([
+Interval(0x00780,0x007b1),
+])
+,),
+UnicodeProperty("Other Number", unicodeNo),
+UnicodeProperty("InLow Surrogates", Charset([Interval(0x0DC00, 0x0DFFF)])),
+UnicodeProperty("InSinhala", Charset([Interval(0x00D80, 0x00DFF)])),
+UnicodeProperty("InMiscellaneous Symbols and Arrows", Charset([Interval(0x02B00, 0x02BFF)])),
+UnicodeProperty("Bopomofo", Charset([
+Interval(0x002ea,0x002eb),
+Interval(0x03105,0x0312d),
+Interval(0x031a0,0x031ba),
+])
+,),
+UnicodeProperty("Balinese", Charset([
+Interval(0x01b00,0x01b4b),
+Interval(0x01b50,0x01b7c),
+])
+,),
+UnicodeProperty("InKhmer Symbols", Charset([Interval(0x019E0, 0x019FF)])),
+UnicodeProperty("Co", unicodeCo),UnicodeProperty("Syloti_Nagri", Charset([
+Interval(0x0a800,0x0a82b),
+])
+,),
+UnicodeProperty("Zl", unicodeZl),UnicodeProperty("InPhonetic Extensions Supplement", Charset([Interval(0x01D80, 0x01DBF)])),
+UnicodeProperty("Rejang", Charset([
+Interval(0x0a930,0x0a953),
+Interval(0x0a95f,0x0a95f),
+])
+,),
+UnicodeProperty("InPhaistos Disc", Charset([Interval(0x101D0, 0x101FF)])),
+UnicodeProperty("InEthiopic", Charset([Interval(0x01200, 0x0137F)])),
+UnicodeProperty("InLatin-1 Supplement", Charset([Interval(0x00080, 0x000FF)])),
+UnicodeProperty("InTamil", Charset([Interval(0x00B80, 0x00BFF)])),
+UnicodeProperty("InCyrillic Extended-A", Charset([Interval(0x02DE0, 0x02DFF)])),
+UnicodeProperty("No", unicodeNo),UnicodeProperty("Tifinagh", Charset([
+Interval(0x02d30,0x02d65),
+Interval(0x02d6f,0x02d70),
+Interval(0x02d7f,0x02d7f),
+])
+,),
+UnicodeProperty("InCyrillic Supplement", Charset([Interval(0x00500, 0x0052F)])),
+UnicodeProperty("Egyptian_Hieroglyphs", Charset([
+Interval(0x13000,0x1342e),
+])
+,),
+UnicodeProperty("InKannada", Charset([Interval(0x00C80, 0x00CFF)])),
+UnicodeProperty("InCJK Unified Ideographs Extension C", Charset([Interval(0x2A700, 0x2B73F)])),
+UnicodeProperty("InHangul Jamo Extended-A", Charset([Interval(0x0A960, 0x0A97F)])),
+UnicodeProperty("InMiscellaneous Mathematical Symbols-A", Charset([Interval(0x027C0, 0x027EF)])),
+UnicodeProperty("InCoptic", Charset([Interval(0x02C80, 0x02CFF)])),
+UnicodeProperty("InGothic", Charset([Interval(0x10330, 0x1034F)])),
+UnicodeProperty("InTibetan", Charset([Interval(0x00F00, 0x00FFF)])),
+UnicodeProperty("InLepcha", Charset([Interval(0x01C00, 0x01C4F)])),
+UnicodeProperty("InArabic Presentation Forms-A", Charset([Interval(0x0FB50, 0x0FDFF)])),
+UnicodeProperty("InLisu", Charset([Interval(0x0A4D0, 0x0A4FF)])),
+UnicodeProperty("InHebrew", Charset([Interval(0x00590, 0x005FF)])),
+UnicodeProperty("Kayah_Li", Charset([
+Interval(0x0a900,0x0a92f),
+])
+,),
+UnicodeProperty("InControl Pictures", Charset([Interval(0x02400, 0x0243F)])),
+UnicodeProperty("Non-Spacing Mark", unicodeMn),
+UnicodeProperty("Control", unicodeCc),
+UnicodeProperty("InMeetei Mayek", Charset([Interval(0x0ABC0, 0x0ABFF)])),
+UnicodeProperty("InDevanagari Extended", Charset([Interval(0x0A8E0, 0x0A8FF)])),
+UnicodeProperty("InHiragana", Charset([Interval(0x03040, 0x0309F)])),
+UnicodeProperty("InHalfwidth and Fullwidth Forms", Charset([Interval(0x0FF00, 0x0FFEF)])),
+UnicodeProperty("Private Use", unicodeCo),
+UnicodeProperty("InSupplementary Private Use Area-A", Charset([Interval(0xF0000, 0xFFFFF)])),
 UnicodeProperty("Cuneiform", Charset([
 Interval(0x12000,0x1236e),
 Interval(0x12400,0x12462),
 Interval(0x12470,0x12473),
-])),
-UnicodeProperty("Cypriot", Charset([
-Interval(0x10800,0x10805),
-Interval(0x10808,0x10808),
-Interval(0x1080a,0x10835),
-Interval(0x10837,0x10838),
-Interval(0x1083c,0x1083c),
-Interval(0x1083f,0x1083f),
-])),
-UnicodeProperty("Cyrillic", Charset([
-Interval(0x00400,0x00484),
-Interval(0x00487,0x00527),
-Interval(0x01d2b,0x01d2b),
-Interval(0x01d78,0x01d78),
-Interval(0x02de0,0x02dff),
-Interval(0x0a640,0x0a673),
-Interval(0x0a67c,0x0a697),
-])),
-UnicodeProperty("Deseret", Charset([
-Interval(0x10400,0x1044f),
-])),
-UnicodeProperty("Devanagari", Charset([
-Interval(0x00900,0x00950),
-Interval(0x00953,0x00963),
-Interval(0x00966,0x0096f),
-Interval(0x00971,0x00977),
-Interval(0x00979,0x0097f),
-Interval(0x0a8e0,0x0a8fb),
-])),
-UnicodeProperty("Egyptian_Hieroglyphs", Charset([
-Interval(0x13000,0x1342e),
-])),
+])
+,),
+UnicodeProperty("Modifier Symbol", unicodeSk),
+UnicodeProperty("InVariation Selectors", Charset([Interval(0x0FE00, 0x0FE0F)])),
+UnicodeProperty("InSupplementary Private Use Area-B", Charset([Interval(0x100000, 0x10FFFF)])),
+UnicodeProperty("InKatakana Phonetic Extensions", Charset([Interval(0x031F0, 0x031FF)])),
+UnicodeProperty("Initital Punctuation", unicodePi),
+UnicodeProperty("InBamum", Charset([Interval(0x0A6A0, 0x0A6FF)])),
+UnicodeProperty("InOl Chiki", Charset([Interval(0x01C50, 0x01C7F)])),
+UnicodeProperty("Paragraph Separator", unicodeZs),
+UnicodeProperty("InMiscellaneous Mathematical Symbols-B", Charset([Interval(0x02980, 0x029FF)])),
+UnicodeProperty("Buhid", Charset([
+Interval(0x01740,0x01753),
+])
+,),
+UnicodeProperty("InCuneiform Numbers and Punctuation", Charset([Interval(0x12400, 0x1247F)])),
+UnicodeProperty("InVai", Charset([Interval(0x0A500, 0x0A63F)])),
+UnicodeProperty("InGujarati", Charset([Interval(0x00A80, 0x00AFF)])),
+UnicodeProperty("Syriac", Charset([
+Interval(0x00700,0x0070d),
+Interval(0x0070f,0x0074a),
+Interval(0x0074d,0x0074f),
+])
+,),
+UnicodeProperty("Avestan", Charset([
+Interval(0x10b00,0x10b35),
+Interval(0x10b39,0x10b3f),
+])
+,),
+UnicodeProperty("InNo_Block", Charset([Interval(0x00000, 0x10FFFF)])),
+UnicodeProperty("InLinear B Syllabary", Charset([Interval(0x10000, 0x1007F)])),
+UnicodeProperty("Cherokee", Charset([
+Interval(0x013a0,0x013f4),
+])
+,),
+UnicodeProperty("InLatin Extended-C", Charset([Interval(0x02C60, 0x02C7F)])),
+UnicodeProperty("Carian", Charset([
+Interval(0x102a0,0x102d0),
+])
+,),
+UnicodeProperty("Old_Persian", Charset([
+Interval(0x103a0,0x103c3),
+Interval(0x103c8,0x103d5),
+])
+,),
+UnicodeProperty("InBopomofo", Charset([Interval(0x03100, 0x0312F)])),
+UnicodeProperty("InOld Italic", Charset([Interval(0x10300, 0x1032F)])),
+UnicodeProperty("InIPA Extensions", Charset([Interval(0x00250, 0x002AF)])),
+UnicodeProperty("InCombining Half Marks", Charset([Interval(0x0FE20, 0x0FE2F)])),
+UnicodeProperty("InYi Syllables", Charset([Interval(0x0A000, 0x0A48F)])),
+UnicodeProperty("Sinhala", Charset([
+Interval(0x00d82,0x00d83),
+Interval(0x00d85,0x00d96),
+Interval(0x00d9a,0x00db1),
+Interval(0x00db3,0x00dbb),
+Interval(0x00dbd,0x00dbd),
+Interval(0x00dc0,0x00dc6),
+Interval(0x00dca,0x00dca),
+Interval(0x00dcf,0x00dd4),
+Interval(0x00dd6,0x00dd6),
+Interval(0x00dd8,0x00ddf),
+Interval(0x00df2,0x00df4),
+])
+,),
+UnicodeProperty("InKanbun", Charset([Interval(0x03190, 0x0319F)])),
+UnicodeProperty("InAegean Numbers", Charset([Interval(0x10100, 0x1013F)])),
+UnicodeProperty("Oriya", Charset([
+Interval(0x00b01,0x00b03),
+Interval(0x00b05,0x00b0c),
+Interval(0x00b0f,0x00b10),
+Interval(0x00b13,0x00b28),
+Interval(0x00b2a,0x00b30),
+Interval(0x00b32,0x00b33),
+Interval(0x00b35,0x00b39),
+Interval(0x00b3c,0x00b44),
+Interval(0x00b47,0x00b48),
+Interval(0x00b4b,0x00b4d),
+Interval(0x00b56,0x00b57),
+Interval(0x00b5c,0x00b5d),
+Interval(0x00b5f,0x00b63),
+Interval(0x00b66,0x00b77),
+])
+,),
+UnicodeProperty("InTelugu", Charset([Interval(0x00C00, 0x00C7F)])),
+UnicodeProperty("InCJK Radicals Supplement", Charset([Interval(0x02E80, 0x02EFF)])),
+UnicodeProperty("Brahmi", Charset([
+Interval(0x11000,0x1104d),
+Interval(0x11052,0x1106f),
+])
+,),
+UnicodeProperty("InMyanmar", Charset([Interval(0x01000, 0x0109F)])),
+UnicodeProperty("InCypriot Syllabary", Charset([Interval(0x10800, 0x1083F)])),
+UnicodeProperty("Canadian_Aboriginal", Charset([
+Interval(0x01400,0x0167f),
+Interval(0x018b0,0x018f5),
+])
+,),
+UnicodeProperty("InHigh Surrogates", Charset([Interval(0x0D800, 0x0DB7F)])),
+UnicodeProperty("Mandaic", Charset([
+Interval(0x00840,0x0085b),
+Interval(0x0085e,0x0085e),
+])
+,),
+UnicodeProperty("Cc", unicodeCc),UnicodeProperty("InSaurashtra", Charset([Interval(0x0A880, 0x0A8DF)])),
+UnicodeProperty("InPrivate Use Area", Charset([Interval(0x0E000, 0x0F8FF)])),
+UnicodeProperty("Tamil", Charset([
+Interval(0x00b82,0x00b83),
+Interval(0x00b85,0x00b8a),
+Interval(0x00b8e,0x00b90),
+Interval(0x00b92,0x00b95),
+Interval(0x00b99,0x00b9a),
+Interval(0x00b9c,0x00b9c),
+Interval(0x00b9e,0x00b9f),
+Interval(0x00ba3,0x00ba4),
+Interval(0x00ba8,0x00baa),
+Interval(0x00bae,0x00bb9),
+Interval(0x00bbe,0x00bc2),
+Interval(0x00bc6,0x00bc8),
+Interval(0x00bca,0x00bcd),
+Interval(0x00bd0,0x00bd0),
+Interval(0x00bd7,0x00bd7),
+Interval(0x00be6,0x00bfa),
+])
+,),
+UnicodeProperty("InVedic Extensions", Charset([Interval(0x01CD0, 0x01CFF)])),
+UnicodeProperty("InCJK Compatibility Ideographs", Charset([Interval(0x0F900, 0x0FAFF)])),
+UnicodeProperty("Sk", unicodeSk),UnicodeProperty("InArrows", Charset([Interval(0x02190, 0x021FF)])),
+UnicodeProperty("InSyloti Nagri", Charset([Interval(0x0A800, 0x0A82F)])),
+UnicodeProperty("Zp", unicodeZp),UnicodeProperty("Surrogate", unicodeCs),
+UnicodeProperty("InSundanese", Charset([Interval(0x01B80, 0x01BBF)])),
+UnicodeProperty("Hanunoo", Charset([
+Interval(0x01720,0x01734),
+])
+,),
+UnicodeProperty("InEthiopic Extended", Charset([Interval(0x02D80, 0x02DDF)])),
+UnicodeProperty("Old_South_Arabian", Charset([
+Interval(0x10a60,0x10a7f),
+])
+,),
+UnicodeProperty("Dash Punctuation", unicodePd),
+UnicodeProperty("Final Punctuation", unicodePf),
+UnicodeProperty("Lo", unicodeLo),UnicodeProperty("Samaritan", Charset([
+Interval(0x00800,0x0082d),
+Interval(0x00830,0x0083e),
+])
+,),
+UnicodeProperty("InLatin Extended Additional", Charset([Interval(0x01E00, 0x01EFF)])),
+UnicodeProperty("InSamaritan", Charset([Interval(0x00800, 0x0083F)])),
+UnicodeProperty("InAvestan", Charset([Interval(0x10B00, 0x10B3F)])),
+UnicodeProperty("InMusical Symbols", Charset([Interval(0x1D100, 0x1D1FF)])),
+UnicodeProperty("InLatin Extended-A", Charset([Interval(0x00100, 0x0017F)])),
+UnicodeProperty("InBlock Elements", Charset([Interval(0x02580, 0x0259F)])),
+UnicodeProperty("InSpacing Modifier Letters", Charset([Interval(0x002B0, 0x002FF)])),
+UnicodeProperty("Limbu", Charset([
+Interval(0x01900,0x0191c),
+Interval(0x01920,0x0192b),
+Interval(0x01930,0x0193b),
+Interval(0x01940,0x01940),
+Interval(0x01944,0x0194f),
+])
+,),
+UnicodeProperty("InArabic Presentation Forms-B", Charset([Interval(0x0FE70, 0x0FEFF)])),
+UnicodeProperty("Line Separator", unicodeZp),
+UnicodeProperty("Cs", unicodeCs),UnicodeProperty("Saurashtra", Charset([
+Interval(0x0a880,0x0a8c4),
+Interval(0x0a8ce,0x0a8d9),
+])
+,),
+UnicodeProperty("InTagbanwa", Charset([Interval(0x01760, 0x0177F)])),
+UnicodeProperty("InCJK Unified Ideographs Extension D", Charset([Interval(0x2B740, 0x2B81F)])),
+UnicodeProperty("InYi Radicals", Charset([Interval(0x0A490, 0x0A4CF)])),
+UnicodeProperty("Pe", unicodePe),UnicodeProperty("Arabic", Charset([
+Interval(0x00600,0x00603),
+Interval(0x00606,0x0060b),
+Interval(0x0060d,0x0061a),
+Interval(0x0061e,0x0061e),
+Interval(0x00620,0x0063f),
+Interval(0x00641,0x0064a),
+Interval(0x00656,0x0065e),
+Interval(0x0066a,0x0066f),
+Interval(0x00671,0x006dc),
+Interval(0x006de,0x006ff),
+Interval(0x00750,0x0077f),
+Interval(0x0fb50,0x0fbc1),
+Interval(0x0fbd3,0x0fd3d),
+Interval(0x0fd50,0x0fd8f),
+Interval(0x0fd92,0x0fdc7),
+Interval(0x0fdf0,0x0fdfc),
+Interval(0x0fe70,0x0fe74),
+Interval(0x0fe76,0x0fefc),
+Interval(0x10e60,0x10e7e),
+])
+,),
+UnicodeProperty("Cf", unicodeCf),UnicodeProperty("InKatakana", Charset([Interval(0x030A0, 0x030FF)])),
+UnicodeProperty("InTai Le", Charset([Interval(0x01950, 0x0197F)])),
+UnicodeProperty("InMyanmar Extended-A", Charset([Interval(0x0AA60, 0x0AA7F)])),
+UnicodeProperty("InTai Viet", Charset([Interval(0x0AA80, 0x0AADF)])),
+UnicodeProperty("InInscriptional Pahlavi", Charset([Interval(0x10B60, 0x10B7F)])),
+UnicodeProperty("Nko", Charset([
+Interval(0x007c0,0x007fa),
+])
+,),
+UnicodeProperty("InHigh Private Use Surrogates", Charset([Interval(0x0DB80, 0x0DBFF)])),
+UnicodeProperty("Sundanese", Charset([
+Interval(0x01b80,0x01baa),
+Interval(0x01bae,0x01bb9),
+])
+,),
+UnicodeProperty("Thai", Charset([
+Interval(0x00e01,0x00e3a),
+Interval(0x00e40,0x00e5b),
+])
+,),
+UnicodeProperty("InCommon Indic Number Forms", Charset([Interval(0x0A830, 0x0A83F)])),
+UnicodeProperty("InIdeographic Description Characters", Charset([Interval(0x02FF0, 0x02FFF)])),
+UnicodeProperty("InHangul Compatibility Jamo", Charset([Interval(0x03130, 0x0318F)])),
+UnicodeProperty("Modifier Letter", unicodeLm),
+UnicodeProperty("Myanmar", Charset([
+Interval(0x01000,0x0109f),
+Interval(0x0aa60,0x0aa7b),
+])
+,),
+UnicodeProperty("InBox Drawing", Charset([Interval(0x02500, 0x0257F)])),
+UnicodeProperty("Armenian", Charset([
+Interval(0x00531,0x00556),
+Interval(0x00559,0x0055f),
+Interval(0x00561,0x00587),
+Interval(0x0058a,0x0058a),
+Interval(0x0fb13,0x0fb17),
+])
+,),
+UnicodeProperty("InVariation Selectors Supplement", Charset([Interval(0xE0100, 0xE01EF)])),
+UnicodeProperty("Imperial_Aramaic", Charset([
+Interval(0x10840,0x10855),
+Interval(0x10857,0x1085f),
+])
+,),
+UnicodeProperty("InShavian", Charset([Interval(0x10450, 0x1047F)])),
+UnicodeProperty("InEthiopic Supplement", Charset([Interval(0x01380, 0x0139F)])),
+UnicodeProperty("InCarian", Charset([Interval(0x102A0, 0x102DF)])),
+UnicodeProperty("InPhonetic Extensions", Charset([Interval(0x01D00, 0x01D7F)])),
+UnicodeProperty("InArmenian", Charset([Interval(0x00530, 0x0058F)])),
+UnicodeProperty("InBamum Supplement", Charset([Interval(0x16800, 0x16A3F)])),
+UnicodeProperty("Kannada", Charset([
+Interval(0x00c82,0x00c83),
+Interval(0x00c85,0x00c8c),
+Interval(0x00c8e,0x00c90),
+Interval(0x00c92,0x00ca8),
+Interval(0x00caa,0x00cb3),
+Interval(0x00cb5,0x00cb9),
+Interval(0x00cbc,0x00cc4),
+Interval(0x00cc6,0x00cc8),
+Interval(0x00cca,0x00ccd),
+Interval(0x00cd5,0x00cd6),
+Interval(0x00cde,0x00cde),
+Interval(0x00ce0,0x00ce3),
+Interval(0x00ce6,0x00cef),
+Interval(0x00cf1,0x00cf2),
+])
+,),
+UnicodeProperty("Gujarati", Charset([
+Interval(0x00a81,0x00a83),
+Interval(0x00a85,0x00a8d),
+Interval(0x00a8f,0x00a91),
+Interval(0x00a93,0x00aa8),
+Interval(0x00aaa,0x00ab0),
+Interval(0x00ab2,0x00ab3),
+Interval(0x00ab5,0x00ab9),
+Interval(0x00abc,0x00ac5),
+Interval(0x00ac7,0x00ac9),
+Interval(0x00acb,0x00acd),
+Interval(0x00ad0,0x00ad0),
+Interval(0x00ae0,0x00ae3),
+Interval(0x00ae6,0x00aef),
+Interval(0x00af1,0x00af1),
+])
+,),
+UnicodeProperty("InSupplemental Arrows-B", Charset([Interval(0x02900, 0x0297F)])),
+UnicodeProperty("InVertical Forms", Charset([Interval(0x0FE10, 0x0FE1F)])),
+UnicodeProperty("InMiscellaneous Technical", Charset([Interval(0x02300, 0x023FF)])),
+UnicodeProperty("InUgaritic", Charset([Interval(0x10380, 0x1039F)])),
 UnicodeProperty("Ethiopic", Charset([
 Interval(0x01200,0x01248),
 Interval(0x0124a,0x0124d),
@@ -2792,538 +3411,155 @@ Interval(0x0ab09,0x0ab0e),
 Interval(0x0ab11,0x0ab16),
 Interval(0x0ab20,0x0ab26),
 Interval(0x0ab28,0x0ab2e),
-])),
-UnicodeProperty("Georgian", Charset([
-Interval(0x010a0,0x010c5),
-Interval(0x010d0,0x010fa),
-Interval(0x010fc,0x010fc),
-Interval(0x02d00,0x02d25),
-])),
-UnicodeProperty("Glagolitic", Charset([
-Interval(0x02c00,0x02c2e),
-Interval(0x02c30,0x02c5e),
-])),
-UnicodeProperty("Gothic", Charset([
-Interval(0x10330,0x1034a),
-])),
-UnicodeProperty("Greek", Charset([
-Interval(0x00370,0x00373),
-Interval(0x00375,0x00377),
-Interval(0x0037a,0x0037d),
-Interval(0x00384,0x00384),
-Interval(0x00386,0x00386),
-Interval(0x00388,0x0038a),
-Interval(0x0038c,0x0038c),
-Interval(0x0038e,0x003a1),
-Interval(0x003a3,0x003e1),
-Interval(0x003f0,0x003ff),
-Interval(0x01d26,0x01d2a),
-Interval(0x01d5d,0x01d61),
-Interval(0x01d66,0x01d6a),
-Interval(0x01dbf,0x01dbf),
-Interval(0x01f00,0x01f15),
-Interval(0x01f18,0x01f1d),
-Interval(0x01f20,0x01f45),
-Interval(0x01f48,0x01f4d),
-Interval(0x01f50,0x01f57),
-Interval(0x01f59,0x01f59),
-Interval(0x01f5b,0x01f5b),
-Interval(0x01f5d,0x01f5d),
-Interval(0x01f5f,0x01f7d),
-Interval(0x01f80,0x01fb4),
-Interval(0x01fb6,0x01fc4),
-Interval(0x01fc6,0x01fd3),
-Interval(0x01fd6,0x01fdb),
-Interval(0x01fdd,0x01fef),
-Interval(0x01ff2,0x01ff4),
-Interval(0x01ff6,0x01ffe),
-Interval(0x02126,0x02126),
-Interval(0x10140,0x1018a),
-Interval(0x1d200,0x1d245),
-])),
-UnicodeProperty("Gujarati", Charset([
-Interval(0x00a81,0x00a83),
-Interval(0x00a85,0x00a8d),
-Interval(0x00a8f,0x00a91),
-Interval(0x00a93,0x00aa8),
-Interval(0x00aaa,0x00ab0),
-Interval(0x00ab2,0x00ab3),
-Interval(0x00ab5,0x00ab9),
-Interval(0x00abc,0x00ac5),
-Interval(0x00ac7,0x00ac9),
-Interval(0x00acb,0x00acd),
-Interval(0x00ad0,0x00ad0),
-Interval(0x00ae0,0x00ae3),
-Interval(0x00ae6,0x00aef),
-Interval(0x00af1,0x00af1),
-])),
-UnicodeProperty("Gurmukhi", Charset([
-Interval(0x00a01,0x00a03),
-Interval(0x00a05,0x00a0a),
-Interval(0x00a0f,0x00a10),
-Interval(0x00a13,0x00a28),
-Interval(0x00a2a,0x00a30),
-Interval(0x00a32,0x00a33),
-Interval(0x00a35,0x00a36),
-Interval(0x00a38,0x00a39),
-Interval(0x00a3c,0x00a3c),
-Interval(0x00a3e,0x00a42),
-Interval(0x00a47,0x00a48),
-Interval(0x00a4b,0x00a4d),
-Interval(0x00a51,0x00a51),
-Interval(0x00a59,0x00a5c),
-Interval(0x00a5e,0x00a5e),
-Interval(0x00a66,0x00a75),
-])),
-UnicodeProperty("Han", Charset([
-Interval(0x02e80,0x02e99),
-Interval(0x02e9b,0x02ef3),
-Interval(0x02f00,0x02fd5),
-Interval(0x03005,0x03005),
-Interval(0x03007,0x03007),
-Interval(0x03021,0x03029),
-Interval(0x03038,0x0303b),
-Interval(0x03400,0x04db5),
-Interval(0x04e00,0x09fcb),
-Interval(0x0f900,0x0fa2d),
-Interval(0x0fa30,0x0fa6d),
-Interval(0x0fa70,0x0fad9),
-Interval(0x20000,0x2a6d6),
-Interval(0x2a700,0x2b734),
-Interval(0x2b740,0x2b81d),
-Interval(0x2f800,0x2fa1d),
-])),
-UnicodeProperty("Hangul", Charset([
-Interval(0x01100,0x011ff),
-Interval(0x0302e,0x0302f),
-Interval(0x03131,0x0318e),
-Interval(0x03200,0x0321e),
-Interval(0x03260,0x0327e),
-Interval(0x0a960,0x0a97c),
-Interval(0x0ac00,0x0d7a3),
-Interval(0x0d7b0,0x0d7c6),
-Interval(0x0d7cb,0x0d7fb),
-Interval(0x0ffa0,0x0ffbe),
-Interval(0x0ffc2,0x0ffc7),
-Interval(0x0ffca,0x0ffcf),
-Interval(0x0ffd2,0x0ffd7),
-Interval(0x0ffda,0x0ffdc),
-])),
-UnicodeProperty("Hanunoo", Charset([
-Interval(0x01720,0x01734),
-])),
-UnicodeProperty("Hebrew", Charset([
-Interval(0x00591,0x005c7),
-Interval(0x005d0,0x005ea),
-Interval(0x005f0,0x005f4),
-Interval(0x0fb1d,0x0fb36),
-Interval(0x0fb38,0x0fb3c),
-Interval(0x0fb3e,0x0fb3e),
-Interval(0x0fb40,0x0fb41),
-Interval(0x0fb43,0x0fb44),
-Interval(0x0fb46,0x0fb4f),
-])),
-UnicodeProperty("Hiragana", Charset([
-Interval(0x03041,0x03096),
-Interval(0x0309d,0x0309f),
-Interval(0x1b001,0x1b001),
-Interval(0x1f200,0x1f200),
-])),
-UnicodeProperty("Imperial_Aramaic", Charset([
-Interval(0x10840,0x10855),
-Interval(0x10857,0x1085f),
-])),
-UnicodeProperty("Inherited", Charset([
-Interval(0x00300,0x0036f),
-Interval(0x00485,0x00486),
-Interval(0x0064b,0x00655),
-Interval(0x0065f,0x0065f),
-Interval(0x00670,0x00670),
-Interval(0x00951,0x00952),
-Interval(0x01cd0,0x01cd2),
-Interval(0x01cd4,0x01ce0),
-Interval(0x01ce2,0x01ce8),
-Interval(0x01ced,0x01ced),
-Interval(0x01dc0,0x01de6),
-Interval(0x01dfc,0x01dff),
-Interval(0x0200c,0x0200d),
-Interval(0x020d0,0x020f0),
-Interval(0x0302a,0x0302d),
-Interval(0x03099,0x0309a),
-Interval(0x0fe00,0x0fe0f),
-Interval(0x0fe20,0x0fe26),
-Interval(0x101fd,0x101fd),
-Interval(0x1d167,0x1d169),
-Interval(0x1d17b,0x1d182),
-Interval(0x1d185,0x1d18b),
-Interval(0x1d1aa,0x1d1ad),
-Interval(0xe0100,0xe01ef),
-])),
-UnicodeProperty("Inscriptional_Pahlavi", Charset([
-Interval(0x10b60,0x10b72),
-Interval(0x10b78,0x10b7f),
-])),
-UnicodeProperty("Inscriptional_Parthian", Charset([
-Interval(0x10b40,0x10b55),
-Interval(0x10b58,0x10b5f),
-])),
-UnicodeProperty("Javanese", Charset([
-Interval(0x0a980,0x0a9cd),
-Interval(0x0a9cf,0x0a9d9),
-Interval(0x0a9de,0x0a9df),
-])),
-UnicodeProperty("Kaithi", Charset([
-Interval(0x11080,0x110c1),
-])),
-UnicodeProperty("Kannada", Charset([
-Interval(0x00c82,0x00c83),
-Interval(0x00c85,0x00c8c),
-Interval(0x00c8e,0x00c90),
-Interval(0x00c92,0x00ca8),
-Interval(0x00caa,0x00cb3),
-Interval(0x00cb5,0x00cb9),
-Interval(0x00cbc,0x00cc4),
-Interval(0x00cc6,0x00cc8),
-Interval(0x00cca,0x00ccd),
-Interval(0x00cd5,0x00cd6),
-Interval(0x00cde,0x00cde),
-Interval(0x00ce0,0x00ce3),
-Interval(0x00ce6,0x00cef),
-Interval(0x00cf1,0x00cf2),
-])),
-UnicodeProperty("Katakana", Charset([
-Interval(0x030a1,0x030fa),
-Interval(0x030fd,0x030ff),
-Interval(0x031f0,0x031ff),
-Interval(0x032d0,0x032fe),
-Interval(0x03300,0x03357),
-Interval(0x0ff66,0x0ff6f),
-Interval(0x0ff71,0x0ff9d),
-Interval(0x1b000,0x1b000),
-])),
-UnicodeProperty("Kayah_Li", Charset([
-Interval(0x0a900,0x0a92f),
-])),
-UnicodeProperty("Kharoshthi", Charset([
-Interval(0x10a00,0x10a03),
-Interval(0x10a05,0x10a06),
-Interval(0x10a0c,0x10a13),
-Interval(0x10a15,0x10a17),
-Interval(0x10a19,0x10a33),
-Interval(0x10a38,0x10a3a),
-Interval(0x10a3f,0x10a47),
-Interval(0x10a50,0x10a58),
-])),
-UnicodeProperty("Khmer", Charset([
-Interval(0x01780,0x017dd),
-Interval(0x017e0,0x017e9),
-Interval(0x017f0,0x017f9),
-Interval(0x019e0,0x019ff),
-])),
-UnicodeProperty("Lao", Charset([
-Interval(0x00e81,0x00e82),
-Interval(0x00e84,0x00e84),
-Interval(0x00e87,0x00e88),
-Interval(0x00e8a,0x00e8a),
-Interval(0x00e8d,0x00e8d),
-Interval(0x00e94,0x00e97),
-Interval(0x00e99,0x00e9f),
-Interval(0x00ea1,0x00ea3),
-Interval(0x00ea5,0x00ea5),
-Interval(0x00ea7,0x00ea7),
-Interval(0x00eaa,0x00eab),
-Interval(0x00ead,0x00eb9),
-Interval(0x00ebb,0x00ebd),
-Interval(0x00ec0,0x00ec4),
-Interval(0x00ec6,0x00ec6),
-Interval(0x00ec8,0x00ecd),
-Interval(0x00ed0,0x00ed9),
-Interval(0x00edc,0x00edd),
-])),
-UnicodeProperty("Latin", Charset([
-Interval(0x00041,0x0005a),
-Interval(0x00061,0x0007a),
-Interval(0x000aa,0x000aa),
-Interval(0x000ba,0x000ba),
-Interval(0x000c0,0x000d6),
-Interval(0x000d8,0x000f6),
-Interval(0x000f8,0x002b8),
-Interval(0x002e0,0x002e4),
-Interval(0x01d00,0x01d25),
-Interval(0x01d2c,0x01d5c),
-Interval(0x01d62,0x01d65),
-Interval(0x01d6b,0x01d77),
-Interval(0x01d79,0x01dbe),
-Interval(0x01e00,0x01eff),
-Interval(0x02071,0x02071),
-Interval(0x0207f,0x0207f),
-Interval(0x02090,0x0209c),
-Interval(0x0212a,0x0212b),
-Interval(0x02132,0x02132),
-Interval(0x0214e,0x0214e),
-Interval(0x02160,0x02188),
-Interval(0x02c60,0x02c7f),
-Interval(0x0a722,0x0a787),
-Interval(0x0a78b,0x0a78e),
-Interval(0x0a790,0x0a791),
-Interval(0x0a7a0,0x0a7a9),
-Interval(0x0a7fa,0x0a7ff),
-Interval(0x0fb00,0x0fb06),
-Interval(0x0ff21,0x0ff3a),
-Interval(0x0ff41,0x0ff5a),
-])),
-UnicodeProperty("Lepcha", Charset([
-Interval(0x01c00,0x01c37),
-Interval(0x01c3b,0x01c49),
-Interval(0x01c4d,0x01c4f),
-])),
-UnicodeProperty("Limbu", Charset([
-Interval(0x01900,0x0191c),
-Interval(0x01920,0x0192b),
-Interval(0x01930,0x0193b),
-Interval(0x01940,0x01940),
-Interval(0x01944,0x0194f),
-])),
-UnicodeProperty("Linear_B", Charset([
-Interval(0x10000,0x1000b),
-Interval(0x1000d,0x10026),
-Interval(0x10028,0x1003a),
-Interval(0x1003c,0x1003d),
-Interval(0x1003f,0x1004d),
-Interval(0x10050,0x1005d),
-Interval(0x10080,0x100fa),
-])),
-UnicodeProperty("Lisu", Charset([
-Interval(0x0a4d0,0x0a4ff),
-])),
-UnicodeProperty("Lycian", Charset([
-Interval(0x10280,0x1029c),
-])),
-UnicodeProperty("Lydian", Charset([
-Interval(0x10920,0x10939),
-Interval(0x1093f,0x1093f),
-])),
-UnicodeProperty("Malayalam", Charset([
-Interval(0x00d02,0x00d03),
-Interval(0x00d05,0x00d0c),
-Interval(0x00d0e,0x00d10),
-Interval(0x00d12,0x00d3a),
-Interval(0x00d3d,0x00d44),
-Interval(0x00d46,0x00d48),
-Interval(0x00d4a,0x00d4e),
-Interval(0x00d57,0x00d57),
-Interval(0x00d60,0x00d63),
-Interval(0x00d66,0x00d75),
-Interval(0x00d79,0x00d7f),
-])),
-UnicodeProperty("Mandaic", Charset([
-Interval(0x00840,0x0085b),
-Interval(0x0085e,0x0085e),
-])),
-UnicodeProperty("Meetei_Mayek", Charset([
-Interval(0x0abc0,0x0abed),
-Interval(0x0abf0,0x0abf9),
-])),
-UnicodeProperty("Mongolian", Charset([
-Interval(0x01800,0x01801),
-Interval(0x01804,0x01804),
-Interval(0x01806,0x0180e),
-Interval(0x01810,0x01819),
-Interval(0x01820,0x01877),
-Interval(0x01880,0x018aa),
-])),
-UnicodeProperty("Myanmar", Charset([
-Interval(0x01000,0x0109f),
-Interval(0x0aa60,0x0aa7b),
-])),
-UnicodeProperty("New_Tai_Lue", Charset([
-Interval(0x01980,0x019ab),
-Interval(0x019b0,0x019c9),
-Interval(0x019d0,0x019da),
-Interval(0x019de,0x019df),
-])),
-UnicodeProperty("Nko", Charset([
-Interval(0x007c0,0x007fa),
-])),
-UnicodeProperty("Ogham", Charset([
-Interval(0x01680,0x0169c),
-])),
-UnicodeProperty("Ol_Chiki", Charset([
-Interval(0x01c50,0x01c7f),
-])),
-UnicodeProperty("Old_Italic", Charset([
-Interval(0x10300,0x1031e),
-Interval(0x10320,0x10323),
-])),
-UnicodeProperty("Old_Persian", Charset([
-Interval(0x103a0,0x103c3),
-Interval(0x103c8,0x103d5),
-])),
-UnicodeProperty("Old_South_Arabian", Charset([
-Interval(0x10a60,0x10a7f),
-])),
-UnicodeProperty("Old_Turkic", Charset([
-Interval(0x10c00,0x10c48),
-])),
-UnicodeProperty("Oriya", Charset([
-Interval(0x00b01,0x00b03),
-Interval(0x00b05,0x00b0c),
-Interval(0x00b0f,0x00b10),
-Interval(0x00b13,0x00b28),
-Interval(0x00b2a,0x00b30),
-Interval(0x00b32,0x00b33),
-Interval(0x00b35,0x00b39),
-Interval(0x00b3c,0x00b44),
-Interval(0x00b47,0x00b48),
-Interval(0x00b4b,0x00b4d),
-Interval(0x00b56,0x00b57),
-Interval(0x00b5c,0x00b5d),
-Interval(0x00b5f,0x00b63),
-Interval(0x00b66,0x00b77),
-])),
-UnicodeProperty("Osmanya", Charset([
-Interval(0x10480,0x1049d),
-Interval(0x104a0,0x104a9),
-])),
-UnicodeProperty("Phags_Pa", Charset([
-Interval(0x0a840,0x0a877),
-])),
-UnicodeProperty("Phoenician", Charset([
-Interval(0x10900,0x1091b),
-Interval(0x1091f,0x1091f),
-])),
-UnicodeProperty("Rejang", Charset([
-Interval(0x0a930,0x0a953),
-Interval(0x0a95f,0x0a95f),
-])),
-UnicodeProperty("Runic", Charset([
-Interval(0x016a0,0x016ea),
-Interval(0x016ee,0x016f0),
-])),
-UnicodeProperty("Samaritan", Charset([
-Interval(0x00800,0x0082d),
-Interval(0x00830,0x0083e),
-])),
-UnicodeProperty("Saurashtra", Charset([
-Interval(0x0a880,0x0a8c4),
-Interval(0x0a8ce,0x0a8d9),
-])),
-UnicodeProperty("Shavian", Charset([
-Interval(0x10450,0x1047f),
-])),
-UnicodeProperty("Sinhala", Charset([
-Interval(0x00d82,0x00d83),
-Interval(0x00d85,0x00d96),
-Interval(0x00d9a,0x00db1),
-Interval(0x00db3,0x00dbb),
-Interval(0x00dbd,0x00dbd),
-Interval(0x00dc0,0x00dc6),
-Interval(0x00dca,0x00dca),
-Interval(0x00dcf,0x00dd4),
-Interval(0x00dd6,0x00dd6),
-Interval(0x00dd8,0x00ddf),
-Interval(0x00df2,0x00df4),
-])),
-UnicodeProperty("Sundanese", Charset([
-Interval(0x01b80,0x01baa),
-Interval(0x01bae,0x01bb9),
-])),
-UnicodeProperty("Syloti_Nagri", Charset([
-Interval(0x0a800,0x0a82b),
-])),
-UnicodeProperty("Syriac", Charset([
-Interval(0x00700,0x0070d),
-Interval(0x0070f,0x0074a),
-Interval(0x0074d,0x0074f),
-])),
-UnicodeProperty("Tagalog", Charset([
-Interval(0x01700,0x0170c),
-Interval(0x0170e,0x01714),
-])),
-UnicodeProperty("Tagbanwa", Charset([
-Interval(0x01760,0x0176c),
-Interval(0x0176e,0x01770),
-Interval(0x01772,0x01773),
-])),
-UnicodeProperty("Tai_Le", Charset([
-Interval(0x01950,0x0196d),
-Interval(0x01970,0x01974),
-])),
-UnicodeProperty("Tai_Tham", Charset([
-Interval(0x01a20,0x01a5e),
-Interval(0x01a60,0x01a7c),
-Interval(0x01a7f,0x01a89),
-Interval(0x01a90,0x01a99),
-Interval(0x01aa0,0x01aad),
-])),
+])
+,),
+UnicodeProperty("So", unicodeSo),UnicodeProperty("InArabic Supplement", Charset([Interval(0x00750, 0x0077F)])),
 UnicodeProperty("Tai_Viet", Charset([
 Interval(0x0aa80,0x0aac2),
 Interval(0x0aadb,0x0aadf),
-])),
-UnicodeProperty("Tamil", Charset([
-Interval(0x00b82,0x00b83),
-Interval(0x00b85,0x00b8a),
-Interval(0x00b8e,0x00b90),
-Interval(0x00b92,0x00b95),
-Interval(0x00b99,0x00b9a),
-Interval(0x00b9c,0x00b9c),
-Interval(0x00b9e,0x00b9f),
-Interval(0x00ba3,0x00ba4),
-Interval(0x00ba8,0x00baa),
-Interval(0x00bae,0x00bb9),
-Interval(0x00bbe,0x00bc2),
-Interval(0x00bc6,0x00bc8),
-Interval(0x00bca,0x00bcd),
-Interval(0x00bd0,0x00bd0),
-Interval(0x00bd7,0x00bd7),
-Interval(0x00be6,0x00bfa),
-])),
-UnicodeProperty("Telugu", Charset([
-Interval(0x00c01,0x00c03),
-Interval(0x00c05,0x00c0c),
-Interval(0x00c0e,0x00c10),
-Interval(0x00c12,0x00c28),
-Interval(0x00c2a,0x00c33),
-Interval(0x00c35,0x00c39),
-Interval(0x00c3d,0x00c44),
-Interval(0x00c46,0x00c48),
-Interval(0x00c4a,0x00c4d),
-Interval(0x00c55,0x00c56),
-Interval(0x00c58,0x00c59),
-Interval(0x00c60,0x00c63),
-Interval(0x00c66,0x00c6f),
-Interval(0x00c78,0x00c7f),
-])),
-UnicodeProperty("Thaana", Charset([
-Interval(0x00780,0x007b1),
-])),
-UnicodeProperty("Thai", Charset([
-Interval(0x00e01,0x00e3a),
-Interval(0x00e40,0x00e5b),
-])),
-UnicodeProperty("Tibetan", Charset([
-Interval(0x00f00,0x00f47),
-Interval(0x00f49,0x00f6c),
-Interval(0x00f71,0x00f97),
-Interval(0x00f99,0x00fbc),
-Interval(0x00fbe,0x00fcc),
-Interval(0x00fce,0x00fd4),
-Interval(0x00fd9,0x00fda),
-])),
-UnicodeProperty("Tifinagh", Charset([
-Interval(0x02d30,0x02d65),
-Interval(0x02d6f,0x02d70),
-Interval(0x02d7f,0x02d7f),
-])),
-UnicodeProperty("Ugaritic", Charset([
-Interval(0x10380,0x1039d),
-Interval(0x1039f,0x1039f),
-])),
-UnicodeProperty("Vai", Charset([
-Interval(0x0a500,0x0a62b),
-])),
-UnicodeProperty("Yi", Charset([
-Interval(0x0a000,0x0a48c),
-Interval(0x0a490,0x0a4c6),
-])),
+])
+,),
+UnicodeProperty("Phoenician", Charset([
+Interval(0x10900,0x1091b),
+Interval(0x1091f,0x1091f),
+])
+,),
+UnicodeProperty("Po", unicodePo),UnicodeProperty("InThaana", Charset([Interval(0x00780, 0x007BF)])),
+UnicodeProperty("Pd", unicodePd),UnicodeProperty("InNKo", Charset([Interval(0x007C0, 0x007FF)])),
+UnicodeProperty("InTai Xuan Jing Symbols", Charset([Interval(0x1D300, 0x1D35F)])),
+UnicodeProperty("Shavian", Charset([
+Interval(0x10450,0x1047f),
+])
+,),
+UnicodeProperty("InEnclosed Alphanumeric Supplement", Charset([Interval(0x1F100, 0x1F1FF)])),
+UnicodeProperty("Cyrillic", Charset([
+Interval(0x00400,0x00484),
+Interval(0x00487,0x00527),
+Interval(0x01d2b,0x01d2b),
+Interval(0x01d78,0x01d78),
+Interval(0x02de0,0x02dff),
+Interval(0x0a640,0x0a673),
+Interval(0x0a67c,0x0a697),
+])
+,),
 ];
+
+
+
+/*
+--------------------------------------------------------------------
+lookup() -- hash a variable-length key into a 32-bit value
+  k     : the key (the unaligned variable-length array of bytes)
+  len   : the length of the key, counting by bytes
+  level : can be any 4-byte value
+Returns a 32-bit value.  Every bit of the key affects every bit of
+the return value.  Every 1-bit and 2-bit delta achieves avalanche.
+About 6len+35 instructions.
+
+The best hash table sizes are powers of 2.  There is no need to do
+mod a prime (mod is sooo slow!).  If you need less than 32 bits,
+use a bitmask.  For example, if you need only 10 bits, do
+  h = (h & hashmask(10));
+In which case, the hash table should have hashsize(10) elements.
+
+If you are hashing n strings (ub1 **)k, do it like this:
+  for (i=0, h=0; i<n; ++i) h = lookup( k[i], len[i], h);
+
+By Bob Jenkins, 1996.  bob_jenkins@burtleburtle.net.  You may use this
+code any way you wish, private, educational, or commercial.
+
+See http://burtleburtle.net/bob/hash/evahash.html
+Use for hash table lookup, or anything where one collision in 2^32 is
+acceptable.  Do NOT use for cryptographic purposes.
+--------------------------------------------------------------------
+*/
+
+enum string bob_mix = q{
+  a -= b; a -= c; a ^= (c>>13);
+  b -= c; b -= a; b ^= (a<<8);
+  c -= a; c -= b; c ^= (b>>13);
+  a -= b; a -= c; a ^= (c>>12);
+  b -= c; b -= a; b ^= (a<<16);
+  c -= a; c -= b; c ^= (b>>5);
+  a -= b; a -= c; a ^= (c>>3);
+  b -= c; b -= a; b ^= (a<<10);
+  c -= a; c -= b; c ^= (b>>15);
+};
+
+uint lookup(ubyte *k, uint length, uint level){
+   uint a,b,c,len;
+
+   /* Set up the internal state */
+   len = length;
+   a = b = 0x9e3779b9;  /* the golden ratio; an arbitrary value */
+   c = level;           /* the previous hash value */
+
+   /*---------------------------------------- handle most of the key */
+   while (len >= 12)
+   {
+      a += (k[0] +(cast(uint)k[1]<<8) +(cast(uint)k[2]<<16) +(cast(uint)k[3]<<24));
+      b += (k[4] +(cast(uint)k[5]<<8) +(cast(uint)k[6]<<16) +(cast(uint)k[7]<<24));
+      c += (k[8] +(cast(uint)k[9]<<8) +(cast(uint)k[10]<<16)+(cast(uint)k[11]<<24));
+      mixin(bob_mix);
+      k += 12; len -= 12;
+   }
+
+   /*------------------------------------- handle the last 11 bytes */
+   c += length;
+   switch(len)              /* all the case statements fall through */
+   {
+   default:
+	assert(0);	
+   case 11: c+=(cast(uint)k[10]<<24);
+            goto case;
+   case 10: c+=(cast(uint)k[9]<<16);
+            goto case;
+   case 9: c+=(cast(uint)k[8]<<8);
+            goto case;
+      /* the first byte of c is reserved for the length */
+   case 8: b+=(cast(uint)k[7]<<24);
+            goto case;
+   case 7: b+=(cast(uint)k[6]<<16);
+            goto case;
+   case 6: b+=(cast(uint)k[5]<<8);
+            goto case;
+   case 5: b+=k[4];
+            goto case;
+   case 4: a+=(cast(uint)k[3]<<24);
+            goto case;
+   case 3: a+=(cast(uint)k[2]<<16);
+            goto case;
+   case 2: a+=(cast(uint)k[1]<<8);
+            goto case;
+   case 1: a+=k[0];
+            goto case;
+   case 0:
+	
+   }
+   mixin(bob_mix);
+   /*-------------------------------------------- report the result */
+   return c;
+}
+
+
+ushort tab[] = [
+0,0,264,28,258,0,316,258,62,258,184,0,258,0,234,264,
+154,154,36,328,154,328,6,117,26,162,331,154,240,154,23,243,
+243,65,0,6,249,240,324,157,154,62,234,154,230,28,243,275,
+155,146,345,159,36,0,260,383,154,347,230,258,155,256,243,62,
+62,234,39,23,48,379,65,329,154,36,0,134,155,316,344,154,
+28,28,23,144,6,0,327,321,13,240,0,6,328,112,65,238,
+39,13,0,374,258,39,319,258,150,0,162,2,154,230,379,264,
+317,9,134,230,378,28,154,284,0,83,264,258,23,240,301,4,
+];
+
+/* The hash function */
+uint phash(const(char)[] key)
+{
+  uint rsl, val = lookup(cast(ubyte*)key.ptr, key.length, 0xf519f85a);
+  rsl = ((val>>25)^tab[val&0x7f]);
+  return rsl;
+}
+
+
+enum PHASHNKEYS = 361;
