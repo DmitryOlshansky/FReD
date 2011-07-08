@@ -245,7 +245,8 @@ unittest
         TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,    "a+\u2212",    "y",    "$&",    "+\u2212"),
         TestVectors(  `\p{Ll}+`,                      "XabcD",    "y",  "$&",      "abc"),
         TestVectors(  `\p{Lu}+`,                      "абвГДЕ",   "y",  "$&",      "ГДЕ"),
-        TestVectors(  `^\p{Currency}\p{Ck}`            "$₤",      "y",  "$&",      "$₤"),  
+        TestVectors(  `^\p{Currency Symbol}\p{Sc}`    "$₤",       "y",  "$&",      "$₤"),  
+        TestVectors(  `\p{Common}\p{Thai}`            "!ฆ",       "y",  "$&",      "!ฆ"), 
 //case insensitive:
         TestVectors(   `^abcdEf$`,           "AbCdEF"                 "y",   "$&", "AbCdEF",      "i"),
         TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",             "y",   "$&", "рУсскИй ЯзЫк",     "i"),
@@ -339,7 +340,6 @@ unittest
 
                 if (c != 'c')
                 {
-
                     auto m = matchFn(to!(String)(tvd.input), r);
                     i = !m.empty;
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern: ", tvd.pattern));

@@ -630,37 +630,6 @@ struct GeneralCategory
     string full;
     immutable Charset set;
 }
-///table of aliases for Unicode General_Category property charsets
-immutable generalCategory = [
-    GeneralCategory("L",  "Letter", unicodeL),
-    GeneralCategory("Lt", "Titlecase Letter", unicodeLt),
-    GeneralCategory("Lm", "Modifier Letter", unicodeLm),
-    GeneralCategory("Mn", "Non-Spacing Mark", unicodeMn),
-    GeneralCategory("Mc", "Spacing Combining Mark", unicodeMc),    
-    GeneralCategory("Me", "Enclosing Mark", unicodeMe),
-    GeneralCategory("Nd", "Decimal Digit Number", unicodeNd),
-    GeneralCategory("Nl", "Letter Number", unicodeNl),
-    GeneralCategory("No", "Other Number", unicodeNo),
-    GeneralCategory("Sm", "Math Symbol", unicodeSm),
-    GeneralCategory("Sc", "Currency Symbol", unicodeSc),
-    GeneralCategory("Sk", "Modifier Symbol", unicodeSk),
-    GeneralCategory("So", "Other Symbol", unicodeSo),   
-    GeneralCategory("Pc", "Connector Punctuation", unicodePc),
-    GeneralCategory("Pd", "Dash Punctuation", unicodePd),
-    GeneralCategory("Ps", "Open Punctuation", unicodePs),
-    GeneralCategory("Pe", "End Punctuation", unicodePe),
-    GeneralCategory("Pi", "Initial Punctuation", unicodePi),
-    GeneralCategory("Pf", "Final Punctuation", unicodePf),
-    GeneralCategory("Po", "Other Punctuation", unicodePo),
-    GeneralCategory("Zs", "Space Separator", unicodeZs),
-    GeneralCategory("Zl", "Line Punctuation", unicodeZl),
-    GeneralCategory("Zp", "Paragraph Punctuation", unicodeZp),
-    GeneralCategory("Cc", "Control", unicodeCc),
-    GeneralCategory("Cf", "Format", unicodeCf),
-    GeneralCategory("Cs", "Surrogate", unicodeCs),
-    GeneralCategory("Co", "Private Use", unicodeCo),
-    
-];
 
 int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
@@ -744,6 +713,144 @@ unittest
     assert(getCommonCasing(0x01BC, data) == [0x01bc, 0x01bd]);
     assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
+}
+/++
+    fetch codepoint set corrsponding to a name (InBlock or binary property)
+    empty on error
++/
+auto getUnicodeSet(string name, bool negated)
+{
+    alias comparePropertyName ucmp;
+    Charset s;
+    if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
+	{//unicode block
+		name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
+		//auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
+        uint fnd;
+        for(fnd=0;fnd<unicodeBlocks.length;fnd++)
+            if(ucmp(unicodeBlocks[fnd].name,name) == 0)
+                break;
+		if(fnd >= unicodeBlocks.length)
+            return cast(immutable(Charset))s;
+		debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
+        //no need to check casefolding
+	    s = Charset([unicodeBlocks[fnd].extent]);
+	}
+	else
+	{//unicode property
+        //helper: direct access with a sanity check
+        static void addTest(ref Charset set, int delta, uint index)
+        {
+            assert(commonCaseTable[index].delta == delta, text(commonCaseTable[index].delta," vs ", delta));
+            set.add(commonCaseTable[index].set);
+        }  
+		if(ucmp(name,"LC") == 0 || ucmp(name,"Cased Letter")==0)
+        {
+            s.add(evenUpper);
+            foreach(v; commonCaseTable)
+                s.add(v.set);
+            foreach(v; casePairs)
+                s.add(v);
+            s.add(unicodeLt);//Title case
+        }
+        else if(ucmp(name,"Ll") == 0 || ucmp(name,"Lowercase Letter")==0)
+        {
+            foreach(ival; evenUpper.intervals)
+                for(uint ch=ival.begin; ch<=ival.end; ch++)
+                    if(ch & 1)
+                        s.add(ch);   
+            addTest(s,   8, 0);
+            addTest(s, -32, 7);
+            addTest(s, -37, 9);
+            addTest(s, -40, 11);
+            addTest(s, -48, 13);
+            addTest(s, -63, 15);
+            addTest(s,  74, 16);
+            addTest(s, -80, 19);
+            addTest(s,  86, 20);
+            addTest(s, 100, 22);
+            addTest(s, 112, 24);
+            addTest(s, 126, 26);
+            addTest(s, 128, 28);
+            addTest(s, 130, 30);
+            addTest(s,-205, 33);
+            addTest(s,-217, 35);
+            addTest(s,-7264, 37);
+            addTest(s,10815, 38);   
+        }
+        else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
+        {
+            foreach(ival; evenUpper.intervals)
+                for(uint ch=ival.begin; ch<=ival.end; ch++)
+                    if(!(ch & 1))
+                        s.add(ch);
+            addTest(s,  -8, 1);
+            addTest(s,  32, 6);
+            addTest(s,  37, 8);
+            addTest(s,  40, 10);
+            addTest(s,  48, 12);
+            addTest(s,  63, 14);
+            addTest(s, -74, 17);
+            addTest(s,  80, 18);
+            addTest(s, -86, 21);
+            addTest(s,-100, 23);
+            addTest(s,-112, 25);
+            addTest(s,-126, 27);
+            addTest(s,-128, 29);
+            addTest(s,-130, 31);
+            addTest(s, 205, 32);
+            addTest(s, 217, 34);
+            addTest(s, 7264, 36);
+            addTest(s,-10815, 39); 
+        }
+        else if(ucmp(name, "M") == 0 || ucmp(name, "Mark") == 0)
+        {
+            s.add(unicodeMn).add(unicodeMc).add(unicodeMe);
+        }
+        else if(ucmp(name, "P") == 0 || ucmp(name, "Punctuation") == 0)
+        {
+            s.add(unicodePc).add(unicodePd).add(unicodePs).add(unicodePe)
+                .add(unicodePi).add(unicodePf).add(unicodePo);
+        }
+        else if(ucmp(name, "S") == 0 || ucmp(name, "Symbol") == 0)
+        {
+            s.add(unicodeSm).add(unicodeSc).add(unicodeSk).add(unicodeSo);
+        }
+        else if(ucmp(name, "Z") == 0 || ucmp(name, "Separator") == 0)
+        {
+            s.add(unicodeZs).add(unicodeZl).add(unicodeZp);
+        }
+        else if(ucmp(name, "C") == 0 || ucmp(name, "Other") == 0)
+        {
+            s.add(unicodeCo).add(unicodeLo).add(unicodeNo)
+                .add(unicodeSo).add(unicodePo);
+        }
+        else if(ucmp(name, "any") == 0)
+            s.add(Interval(0,0x10FFFF));
+        else
+        {
+            foreach(t; unicodeGeneral)
+            {
+                if(ucmp(name, t.name) == 0)
+                {
+                    s.add(t.set);
+                    break;
+                }
+            }
+            if(s.empty)
+                foreach(t; unicodeScripts)
+                {
+                    if(ucmp(name, t.name) == 0)
+                    {
+                        s.add(t.set);
+                        break;
+                    }
+                }
+        }
+	}
+    if(negated)
+		s.negate();
+    return cast(immutable(Charset))s;
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -1047,7 +1154,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         bool replace = ir[offset].code == IR.Nop;
         if(empty && !replace)
             return;
-        //writefln("Quant, %s", ir[offset].code);
         uint min, max;
         switch(current)
         {
@@ -1604,125 +1710,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 		auto end = find!(sep)(pat);
 		string name = to!string(pat[0..$-end.length]);
 		pat = end;
-		Charset s;
-		if(name.length > 2 && tolower(name[0]) == 'i' && tolower(name[1]) == 'n')
-		{//unicode block
-			name = name[2..$];//"In" is ascii only, so 2 codepoint == 2 codeunits
-			//auto fnd = assumeSorted!(propertyNameLess)(map!"a.name"(unicodeBlocks)).lowerBound(name).length;
-            uint fnd;
-            for(fnd=0;fnd<unicodeBlocks.length;fnd++)
-                if(ucmp(unicodeBlocks[fnd].name,name) == 0)
-                    break;
-			fnd < unicodeBlocks.length || error("unrecognized unicode block name");
-			debug(fred_charset) writefln("For %s using unicode block: %s", name, unicodeBlocks[fnd].extent);
-            //no need to check casefolding
-		    s = Charset([unicodeBlocks[fnd].extent]);
-			if(negated)
-				s.negate();
-		}
-		else
-		{//unicode property
-            //helper: direct access with a sanity check
-            static void addTest(ref Charset set, int delta, uint index)
-            {
-                assert(commonCaseTable[index].delta == delta, text(commonCaseTable[index].delta," vs ", delta));
-                set.add(commonCaseTable[index].set);
-            }  
-			if(ucmp(name,"LC") == 0 || ucmp(name,"Cased Letter")==0)
-            {
-                s.add(evenUpper);
-                foreach(v; commonCaseTable)
-                    s.add(v.set);
-                foreach(v; casePairs)
-                    s.add(v);
-                s.add(unicodeLt);//Title case
-            }
-            else if(ucmp(name,"Ll") == 0 || ucmp(name,"Lowercase Letter")==0)
-            {
-                foreach(ival; evenUpper.intervals)
-                    for(uint ch=ival.begin; ch<=ival.end; ch++)
-                        if(ch & 1)
-                            s.add(ch);   
-                addTest(s,   8, 0);
-                addTest(s, -32, 7);
-                addTest(s, -37, 9);
-                addTest(s, -40, 11);
-                addTest(s, -48, 13);
-                addTest(s, -63, 15);
-                addTest(s,  74, 16);
-                addTest(s, -80, 19);
-                addTest(s,  86, 20);
-                addTest(s, 100, 22);
-                addTest(s, 112, 24);
-                addTest(s, 126, 26);
-                addTest(s, 128, 28);
-                addTest(s, 130, 30);
-                addTest(s,-205, 33);
-                addTest(s,-217, 35);
-                addTest(s,-7264, 37);
-                addTest(s,10815, 38);   
-            }
-            else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
-            {
-                foreach(ival; evenUpper.intervals)
-                    for(uint ch=ival.begin; ch<=ival.end; ch++)
-                        if(!(ch & 1))
-                            s.add(ch);
-                addTest(s,  -8, 1);
-                addTest(s,  32, 6);
-                addTest(s,  37, 8);
-                addTest(s,  40, 10);
-                addTest(s,  48, 12);
-                addTest(s,  63, 14);
-                addTest(s, -74, 17);
-                addTest(s,  80, 18);
-                addTest(s, -86, 21);
-                addTest(s,-100, 23);
-                addTest(s,-112, 25);
-                addTest(s,-126, 27);
-                addTest(s,-128, 29);
-                addTest(s,-130, 31);
-                addTest(s, 205, 32);
-                addTest(s, 217, 34);
-                addTest(s, 7264, 36);
-                addTest(s,-10815, 39); 
-            }
-            else if(ucmp(name, "M") == 0 || ucmp(name, "Mark") == 0)
-            {
-                s.add(unicodeMn).add(unicodeMc).add(unicodeMe);
-            }
-            else if(ucmp(name, "P") == 0 || ucmp(name, "Punctuation") == 0)
-            {
-                s.add(unicodePc).add(unicodePd).add(unicodePs).add(unicodePe)
-                    .add(unicodePi).add(unicodePf).add(unicodePo);
-            }
-            else if(ucmp(name, "S") == 0 || ucmp(name, "Symbol") == 0)
-            {
-                s.add(unicodeSm).add(unicodeSc).add(unicodeSk).add(unicodeSo);
-            }
-            else if(ucmp(name, "Z") == 0 || ucmp(name, "Separator") == 0)
-            {
-                s.add(unicodeZs).add(unicodeZl).add(unicodeZp);
-            }
-            else if(ucmp(name, "C") == 0 || ucmp(name, "Other") == 0)
-            {
-                s.add(unicodeCo).add(unicodeLo).add(unicodeNo)
-                    .add(unicodeSo).add(unicodePo);
-            }
-            else if(ucmp(name, "any") == 0)
-                s.add(Interval(0,0x10FFFF));
-            else //if(ucmp(name,"Lt") == 0 || ucmp(name,"Titlecase Letter"))
-            {
-                foreach(t; generalCategory)
-                {
-                    if(ucmp(name, t.abbr) == 0 || ucmp(name, t.full) == 0)
-                    {
-                        s.add(t.set);
-                        break;
-                    }
-                }
-            }
-		}
+		auto s = getUnicodeSet(name, negated);
+		if(s.empty)
+            error("unrecognized unicode property spec");
 		next() && current == '}' || error("} expected ");
 		next();
 		return cast(immutable Charset)(s);

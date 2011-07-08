@@ -13,18 +13,30 @@ struct UniBlock
 Charset[int] casefold;//entries by delta
 UniBlock[] blocks;
 string[] gcNames = [
-	"Cc", "Cf", "Co", "Cs",
+	"Cc", "Cf", "Co", "Cs", 
 	"L", "LC", "Ll", "Lm", "Lo", "Lt", "Lu",
 	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
 	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
-	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"
+	 "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"
+];
+string[] gcAliases = [
+	"Control", "Format", "Private Use", "Surrogate",
+	"Letter", "Cased Letter", "Lowercase Letter", "Modifier Letter",
+    "Other Letter", "Titlecase Letter", "Uppercase Letter",
+	"Spacing Mark", "Enclosing Mark", "Non-Spacing Mark",  
+    "Decimal Digit Number", "Letter Number", "Other Number",
+	 "Connector Punctuation", "Dash Punctuation", "Close Punctuation",
+    "Final Punctuation", "Initital Punctuation", "Other Punctuation", 
+    "Open Punctuation",	 "Currency Symbol", "Modifier Symbol", 
+    "Math symbol", "Other Symbol", "Separator", "Line Separator", 
+    "Paragraph Separator", "Space Separator"
 ];
 string[] directGcNames = [//to be printed as is
 	"Cc", "Cf", "Co", "Cs",
 	"L", "Lm", "Lo", "Lt",
 	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
 	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
-	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"
+	 "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"
 ];
 uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
 uint[] highIrreg; //so we check that ;)
@@ -98,7 +110,7 @@ void testCasingIrregular()
 void loadCaseFolding(File f)
 {
 	uint[uint] hash;
-	auto r = regex("([^;]*); C;\\s*([^;]*);");
+	auto r = regex("([^;]*); [CS];\\s*([^;]*);");
 	foreach(line; f.byLine)
 	{
 		auto m = match(line, r);
@@ -182,8 +194,7 @@ void loadProperties(File inp)
 
 void loadScripts(File inp)
 {
-    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(.*)\s*#`);
-    r.print();
+    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#`);
 	foreach(char[] s; inp.byLine)
 	{
         static int cnt;
@@ -196,7 +207,6 @@ void loadScripts(File inp)
             {
                 auto sa = m.captures[1];
                 auto sb = m.captures[2];
-                stderr.writeln(sa," ",sb);
                 uint a = parse!uint(sa, 16);
                 uint b = parse!uint(sb, 16);
                 if(name !in scripts)
@@ -206,7 +216,6 @@ void loadScripts(File inp)
             else
             {
                 auto sx = m.captures[3];
-                stderr.writeln(sx);
                 uint x = parse!uint(sx, 16);
                 if(name !in scripts)
                     scripts[name] = Charset.init;
@@ -216,12 +225,12 @@ void loadScripts(File inp)
     }
 }
 
-void writeCharset(in Charset set, dchar sep=';')
+void writeCharset(in Charset set, string sep=";\n")
 {
 	writeln("Charset([");
 	foreach(i; set.intervals)
 		writef("Interval(0x%05x,0x%05x),\n", i.begin, i.end);
-	writeln("])",sep);
+	write("])",sep);
 }
 
 void writeCaseFolding()
@@ -293,11 +302,12 @@ immutable commonCaseTable = [");
 
 void writeBlocks()
 {
-    write("struct UnicodeBlock\n"
-"{\n"
-"    string name;\n"
-"    Interval extent;\n"
-"}\nimmutable unicodeBlocks = [");
+    write("struct UnicodeBlock
+{
+     string name;
+     Interval extent;
+}
+immutable unicodeBlocks = [");
     static bool less(UniBlock a,UniBlock b)
     {
         return propertyNameLess(a.name, b.name);
@@ -313,22 +323,29 @@ void writeBlocks()
 
 void writeProperties()
 {
-    write(
-q{{struct UnicodeProperty
-{
-    string name;
-    Charset set;
-}
-}});
     foreach(i, cs; gcSets)
 	{
         if(canFind(directGcNames,gcNames[i]))
         {
-		    writef("immutable unicode%s = ", gcNames[i]);
+		    writef("immutable Charset unicode%s = ", gcNames[i]);
 		    writeCharset(cs);
         }
 	}
-
+    write("struct UnicodeProperty
+{
+    string name;
+    immutable Charset set;
+}
+immutable(UnicodeProperty)[] unicodeGeneral = [\n");
+    foreach(i, abbr; gcNames)
+    {
+        if(canFind(directGcNames,abbr))
+        {
+            writef("UnicodeProperty(\"%s\", unicode%s),",abbr, abbr);
+            writefln("UnicodeProperty(\"%s\", unicode%s),",gcAliases[i], abbr);
+        }
+    }
+    writeln("];");
 }
 
 void writeScripts()
@@ -338,9 +355,9 @@ void writeScripts()
     writef("immutable(UnicodeProperty)[] unicodeScripts = [\n");
     foreach(k; keys)
     {
-        writef("UnicodeProperty(\"%s\", ");
-        writeCharset(scripts[k],' ');
-        write("),");
+        writef("UnicodeProperty(\"%s\", ",k);
+        writeCharset(scripts[k],"");
+        writeln("),");
     }
     writeln("];");
 }
