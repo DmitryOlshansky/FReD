@@ -13,22 +13,24 @@ struct UniBlock
 Charset[int] casefold;//entries by delta
 UniBlock[] blocks;
 string[] gcNames = [
-	"Cc", "Cf", "Co", "Cs",       
-	"L", "LC", "Ll", "Lm", "Lo", "Lt", "Lu", 
-	"Mc", "Me", "Mn",  "Nd", "Nl", "No", 
-	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", 
-	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"  
+	"Cc", "Cf", "Co", "Cs",
+	"L", "LC", "Ll", "Lm", "Lo", "Lt", "Lu",
+	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
+	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
+	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"
 ];
 string[] directGcNames = [//to be printed as is
-	"Cc", "Cf", "Co", "Cs",       
-	"L", "Lm", "Lo", "Lt", 
-	"Mc", "Me", "Mn",  "Nd", "Nl", "No", 
-	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", 
-	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"  
+	"Cc", "Cf", "Co", "Cs",
+	"L", "Lm", "Lo", "Lt",
+	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
+	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
+	 "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs"
 ];
 uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
-uint[] highIrreg; 
+uint[] highIrreg; //so we check that ;)
 Charset[] gcSets;//General category
+Charset[string] scripts;
+
 static this()
 {
     gcSets = new Charset[gcNames.length];
@@ -54,11 +56,12 @@ import fred;");
     loadCaseFolding(casef);
     loadBlocks(blockf);
     loadProperties(propf);
+    loadScripts(scriptf);
     testCasingIrregular();
     writeCaseFolding();
     writeBlocks();
     writeProperties();
-    
+    writeScripts();
 }
 
 void testCasingIrregular()
@@ -73,17 +76,23 @@ void testCasingIrregular()
     /*lowSet.printUnicodeSet((const(char)[] s){stderr.write(s); });
     irreg.printUnicodeSet((const(char)[] s){stderr.write(s); });*/
     lowSet.intersect(irreg);
-    uint lowArray[];
+    uint array[];
     foreach(ival; lowSet.intervals)
     {
         for(uint ch=ival.begin; ch<=ival.end; ch++)
-            lowArray ~= ch;
+            array ~= ch;
     }
-    assert(equal(sort(lowArray),sort(lowIrreg.dup)));
-
-    //auto highSet = gcSets[high].dup;
-    //lowSet.printUnicodeSet((const(char)[] s){stderr.write(s); });
-    //stderr.writeln();
+    assert(equal(sort(array),sort(lowIrreg.dup)));
+    auto upper = countUntil(gcNames,"Lu");
+    auto upperSet = gcSets[upper].dup;
+    upperSet.intersect(irreg);
+    array.length = 0;
+    foreach(ival; upperSet.intervals)
+    {
+        for(uint ch=ival.begin; ch<=ival.end; ch++)
+            array ~= ch;
+    }
+    assert(equal(sort(array),sort(highIrreg.dup)));
 }
 
 void loadCaseFolding(File f)
@@ -128,7 +137,7 @@ void loadCaseFolding(File f)
 
 void loadBlocks(File f)
 {
-	auto r = regex(`([0-9A-F]+)..([0-9A-F]+);\s*(.*)\s*$`);
+	auto r = regex(`([0-9A-F]+)\.\.([0-9A-F]+);\s*(.*)\s*$`);
 	foreach(line; f.byLine)
 	{
 		auto m = match(line, r);
@@ -145,7 +154,7 @@ void loadBlocks(File f)
 
 void loadProperties(File inp)
 {
-	auto r = regex("([0-9A-F]*);[^;]*;([^;]*);[^;]*;([^;]*);");
+	auto r = regex("^([0-9A-F]*);[^;]*;([^;]*);[^;]*;([^;]*);");
 	foreach(char[] s; inp.byLine)
 	{
 		static int cnt;
@@ -171,13 +180,48 @@ void loadProperties(File inp)
 	}
 }
 
+void loadScripts(File inp)
+{
+    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(.*)\s*#`);
+    r.print();
+	foreach(char[] s; inp.byLine)
+	{
+        static int cnt;
+		auto m = tmatch(s, r);
+		if(!m.empty)
+		{
+            auto name = to!string(m.captures[4]);
+           
+			if(!m.captures[1].empty)
+            {
+                auto sa = m.captures[1];
+                auto sb = m.captures[2];
+                stderr.writeln(sa," ",sb);
+                uint a = parse!uint(sa, 16);
+                uint b = parse!uint(sb, 16);
+                if(name !in scripts)
+                    scripts[name] = Charset.init;
+                scripts[name].add(Interval(a,b));
+            }
+            else
+            {
+                auto sx = m.captures[3];
+                stderr.writeln(sx);
+                uint x = parse!uint(sx, 16);
+                if(name !in scripts)
+                    scripts[name] = Charset.init;
+                scripts[name].add(x);
+            }
+		}
+    }
+}
 
-void writeCharset(in Charset set)
+void writeCharset(in Charset set, dchar sep=';')
 {
 	writeln("Charset([");
 	foreach(i; set.intervals)
 		writef("Interval(0x%05x,0x%05x),\n", i.begin, i.end);
-	writeln("]);");
+	writeln("])",sep);
 }
 
 void writeCaseFolding()
@@ -255,7 +299,7 @@ void writeBlocks()
 "    Interval extent;\n"
 "}\nimmutable unicodeBlocks = [");
     static bool less(UniBlock a,UniBlock b)
-    {  
+    {
         return propertyNameLess(a.name, b.name);
     }
     sort!(less)(blocks);
@@ -269,7 +313,13 @@ void writeBlocks()
 
 void writeProperties()
 {
-    
+    write(
+q{{struct UnicodeProperty
+{
+    string name;
+    Charset set;
+}
+}});
     foreach(i, cs; gcSets)
 	{
         if(canFind(directGcNames,gcNames[i]))
@@ -278,5 +328,19 @@ void writeProperties()
 		    writeCharset(cs);
         }
 	}
-    
+
+}
+
+void writeScripts()
+{
+    auto keys = scripts.keys;
+    sort!(propertyNameLess)(keys);
+    writef("immutable(UnicodeProperty)[] unicodeScripts = [\n");
+    foreach(k; keys)
+    {
+        writef("UnicodeProperty(\"%s\", ");
+        writeCharset(scripts[k],' ');
+        write("),");
+    }
+    writeln("];");
 }

@@ -7,6 +7,8 @@ import core.memory;
 
 unittest
 {//sanity checks
+    regex("(a|b)*");
+    regex(`(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(.*)\s*#`);
     regex("abc|edf|ighrg");
     auto r1 = regex("abc");
     auto r2 = regex("(gylba)");

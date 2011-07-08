@@ -901,6 +901,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     switch(current)
                     {
                     case ':':
+                        put(Bytecode(IR.Nop, 0));
                         next();
                         break;
                     case '=':
@@ -971,10 +972,20 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     // two fixups: last option + full OR
                     finishAlternation();
                     fix = fixupStack.top;
-                    if(ir[fix].code == IR.GroupStart)//was also a group
+                    switch(ir[fix].code)
                     {
+                    case IR.GroupStart:
                         fixupStack.pop();
                         put(Bytecode(IR.GroupEnd,ir[fix].data));
+                        parseQuantifier(fix);
+                        break;
+                    case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
+                        fixupStack.pop();
+                        ir[fix] = Bytecode(ir[fix].code, ir.length - fix - 1);
+                        put(ir[fix].paired);
+                        break;
+                    default://(?:xxx)
+                        fixupStack.pop();
                         parseQuantifier(fix);
                     }
                     break;
@@ -994,11 +1005,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     put(Bytecode(IR.Option, 0));
                     break;
                 default:    //start a new option
-                    if(fixupStack.length == 1)//only one entry
+                    if(fixupStack.length == 1)//only root entry
                         fix = -1;
                     uint len = ir.length - fix;
-                    Bytecode[2] piece = [Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len)];
-                    insertInPlace(ir, fix+1, piece[]);
+                    insertInPlace(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
                     assert(ir[fix+1].code == IR.OrStart);
                     put(Bytecode(IR.GotoEndOr, 0));
                     fixupStack.push(fix+1); // fixup for StartOR
@@ -1034,9 +1044,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     */
     void parseQuantifier(uint offset)
     {
-        if(empty)
+        bool replace = ir[offset].code == IR.Nop;
+        if(empty && !replace)
             return;
-        uint len = cast(uint)ir.length - offset;
+        //writefln("Quant, %s", ir[offset].code);
         uint min, max;
         switch(current)
         {
@@ -1074,11 +1085,16 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             else
                 error("Unexpected symbol in regex pattern");
-
             break;
         default:
+            if(replace)
+            {
+                moveAll(ir[offset+1..$],ir[offset..$-1]);
+                ir.length -= 1;
+            }
             return;
         }
+        uint len = cast(uint)ir.length - offset - cast(uint)replace;
         bool greedy = true;
         //check only if we managed to get new symbol
         if(next() && current == '?')
@@ -1090,7 +1106,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1 || max != 1)
             {
-                insertInPlace(ir, offset, Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len));
+                Bytecode op = Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len);
+                if(replace)
+                    ir[offset] = op;
+                else
+                    insertInPlace(ir, offset, op);
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1);
                 putRaw(min);
@@ -1102,13 +1122,22 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         {
             if(min != 1)
             {
-                insertInPlace(ir, offset, Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len));
+                Bytecode op = Bytecode(greedy ? IR.RepeatStart : IR.RepeatQStart, len);
+                if(replace)
+                    ir[offset] = op;
+                else
+                    insertInPlace(ir, offset, op);
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1);
                 putRaw(min);
                 putRaw(min);
                 counterDepth = std.algorithm.max(counterDepth, nesting+1);
+            }
+            else if(replace)
+            {
+                moveAll(ir[offset+1..$],ir[offset..$-1]);
+                ir.length -= 1;
             }
             put(Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
             ir ~= ir[offset .. offset+len];
@@ -1118,7 +1147,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         }
         else//vanila {0,inf}
         {
-            insertInPlace(ir, offset, Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
+            Bytecode op = Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len);
+            if(replace)
+                ir[offset] = op;
+            else
+                insertInPlace(ir, offset, op);
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
             put(Bytecode.init); //merge index
@@ -2348,6 +2381,9 @@ if( is(Char : dchar) )
                 else
                     goto L_backtrack;
                 break;
+             case IR.Nop:
+                pc += IRL!(IR.Nop);
+                break;
             case IR.LookaheadEnd:
             case IR.NeglookaheadEnd:
                 return true;
@@ -2768,6 +2804,9 @@ struct ThompsonMatcher(Char)
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
                     assert(0, "No lookaround for ThompsonVM yet!");
+                case IR.Nop:
+                    t.pc += IRL!(IR.Nop);
+                    break;
                 static if(withInput)
                 {
                     case IR.OrChar://assumes IRL!(OrChar) == 1
