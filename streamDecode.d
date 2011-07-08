@@ -6,27 +6,48 @@ struct StreamCBuf(Char)
     if(is(Char == char) || is(Char == wchar))
 {
     alias const(Char)[] String;
+    /// current chunk of the string
     String chunkAtt;
+    /// position that will be read next in the chunk
     size_t chunkPos;
+    /// circular buffer with history/decoded chars, its use is avoided as much as possible
     dchar[] bufAtt;
+    /// circular buffer connected with bufAtt, giving the position of the char wrt. the original stream
     ulong[] indexes;
-    int maxRead; // maxium number of codepoints that should be read before normalizing
-    int historyWindow; // amount of histor to keep (in non normalized codepoints)
-    int bufHistorySize;
+    /// maxium number of codepoints that should be read before normalizing (fix to 255?)
+    int maxRead;
+    /// amount of histor to keep (in non normalized codepoints)
+    int historyWindow;
+    /// position that will be read next in the buffer
     int bufPos;
+    /// amount of stored history (going back from bufPos)
+    int bufHistorySize;
+    /// amount of buffer already normalized and still to use from bufPos on (but the last char is not necessarily normalized)
     int bufSize;
+    /// size already read in the buffer, but not yed decoded, range start after bufPos+bufSize
     int bufReadSize;
+    /// index of the first char of the current chunk
     ulong chunkStart;
-    bool hasEnd; // if the end of the current chunk is the end of the file
-    dchar decodedChar;
-    ulong decodedPos;
+    /// if the end of the current chunk is the end of the stream
+    bool hasEnd;
+    /// * if status is DirectCharOne cached quickcheck=yes char that will be returned 
+    ///   if the next char is also quickcheck=yes (the normal case).
+    /// * if status is BufCharPartial it contains the partially decoded char
+    /// * otherwise it is invalid
+    dchar decodedChar; 
+    ulong decodedPos; /// position of decodedChar if it is valid
     
     enum Status{
+        /// initial status
         DirectCharNone,
+        /// one char was quickcheck==Yes, and is stored in decodedChar (normal case)
         DirectCharOne,
+        /// we should use the buffer eiter extracting already normalized chars, or filling it and normalizing chars
         BufChar,
+        /// we should use the buffer and the last char is partially decoded and is stored in decodedChar
         BufCharPartial,
-        End, // not really needed
+        /// we have no further chars left
+        End,
     }
     
     Status status;
@@ -96,6 +117,9 @@ struct StreamCBuf(Char)
                 decodedPos=pos;
                 return nextChar(res,pos);
             }
+            // we need to normalize this char (the normalized will have to decide what to do when the first char is not stable like this, this can happen only if )
+            ++bufReadSize;
+            --bufPos;
         }
         if (status==Status.BufCharPartial){
             static if (!is(Char==dchar)){
@@ -160,7 +184,7 @@ struct StreamCBuf(Char)
         // we could optimize if we detect that the normalization didn't change anything
         
         // fix indexes (if the normalization did change something)
-        long idxBase=indexes[bufPos];
+        ulong idxBase=indexes[bufPos];
         assert(idxBase&(255UL<<48))==0);
         int mPos=bufPos;
         assert(bufSize>0)
@@ -176,7 +200,10 @@ struct StreamCBuf(Char)
             if (mPos>indexes.length) mPos-=cast(int)indexes.length;
         }
     }
-    
+    /// return the start of the grapheme that contains this the char at this index (if decodeing is needed)
+    ulong decodeStart(ulong i){
+        return (i&~(255UL<<48))-(i>>48);
+    }
     /// if we are at the end of the stream
     bool atEnd(){
         return status==Status.End;
@@ -189,10 +216,11 @@ struct StreamCBuf(Char)
         bufAtt[mp]=c;
         indexes[mp]=pos;
     }
-    
+    /// the next position (mostly given for informative purposes, normally you should not use this)
     ulong nextPos(){
         switch (status){
-        case Status.decodedPos
+        case Status.DirectCharOne:
+            return decodedPos;
     }
     ulong bufStart(){
         if (bufHistorySize==0){
