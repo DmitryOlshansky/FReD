@@ -612,7 +612,10 @@ struct Charset
     {
         sink("[");
         foreach(i; intervals)
-            formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
+            if(i.begin == i.end)
+                formattedWrite(sink, "\\U%08x", i.begin);
+            else
+                formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
         sink("]");
     }
     
@@ -815,7 +818,6 @@ auto getUnicodeSet(string name, bool negated)
         s.add(Interval(0,0x10FFFF));
     else
     {
-        //TODO: casefolding
         uint key = phash(name);
         if(key >= PHASHNKEYS || ucmp(name,unicodeProperties[key].name) != 0)
             return s;
@@ -1409,6 +1411,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add(parseUnicodePropertySpec(true));
                     state = State.Start;
                     continue L_CharTermLoop; //next char already fetched
+                case 'u':
+                    assert(0);
+                case 'U':
+                    assert(0);
                 //TODO: charsets for commmon properties
                 /+
                     case 'd':
@@ -1646,7 +1652,31 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
             return Bytecode(IR.Char, code);
         case 'U':
-            assert(0, "8 hexdigit unicode!");
+            auto save = pat;
+            uint code = 0;
+            for(int i=0; i<8; i++)
+            {
+                if(!next())
+                {
+                    restart(save);
+                    return Bytecode(IR.Char, 'U');
+                }
+                if('0' <= current && current <= '9')
+                    code = code * 16 + current - '0';
+                else if('a' <= current && current <= 'f')
+                    code = code * 16 + current -'a' + 10;
+                else if('A' <= current && current <= 'Z')
+                    code = code * 16 + current - 'A' + 10;
+                else //wrong unicode escape treat \U like 'U'
+                {
+                    restart(save);
+                    return Bytecode(IR.Char, 'U');
+                }
+            }
+            if(code > 0x10FFF)
+                error("Invalid codepoint");
+            next();
+            return Bytecode(IR.Char, code);
         case 'c': //control codes
             next() || error("Unfinished escape sequence");
             ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
