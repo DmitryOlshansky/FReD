@@ -54,6 +54,10 @@ struct StreamCBuf(Char)
     
     Status status;
     
+    /// constructor
+    this(dchar[]){
+        
+    }
     /// adds a new chunck to evaluate
     void addChunk(String chunk){
         assert(chunkPos==chunkAtt.length);
@@ -330,34 +334,87 @@ struct StreamCBuf(Char)
                     if (bufHistorySize<historyWindow) ++bufHistorySize;
                     if (bufPos>=bufAtt.length) bufPos-=bufAtt.length;
                 }
+            } else if (bEnd+historyWindow<upTo){
+                // clear buf
+                bufHistorySize=0;
             }
         }
     }
     /// an iterator that goes back in history.
     /// is invalidated by nextPos or addChunk
     static struct BackLooper{
-        StreamCBuf streamBuf;
-        ulong nextPos;
-        ulong bufEnd;
+        StreamCBuf *streamBuf;
+        ulong bound;
         ulong posAtt;
         int iPos;
-        Status 
-        
-        /// returns the next char going back from 
-        bool nextChar(ref dchar,ref ulong pos){
-            if (i>historyWindow || i>=) return false;
-            // to do
+        enum Access{
+            PreBuf,
+            InBuf,
+            PostBuf,
         }
-        /// looks back at the previous character (inefficient, probably we should give back an iterator that does it)
+        Access status;
+        
+        bool setupBound(){
+            auto bufStart=streamBuf.bufStart();
+            auto bufEnd=streamBuf.bufEnd();
+            if (status==Access.InBuf && iPos+streamBuf.bufHistorySize==streamBuf.bufPos){
+                posAtt=decodeStart(streamBuf.indexes[bufStart]);
+                // if we allow increasing the history window one should do something here
+                if (streamBuf.nextPos()-posAtt>=streamBuf.historyWindow) return false;
+            }
+            if (bufEnd==ulong.max){
+                if (posAtt<=streamBuf.chunkStart) return false;
+                this.status=Access.PostBuf;
+                bound=streamBuf.chunkStart;
+            }
+            if (posAtt>bufEnd){
+                this.status=Access.PreBuf;
+                bound=bufEnd;
+            } else if (posAtt>bufStart){
+                this.status=Access.InBuf,
+                bound=bufStart;
+                iPos=bufPos+cast(int)(posAtt-indexes[bufPos]);
+            } else if (posAtt>streamBuf.chunkStart){
+                this.status=Access.PostBuf;
+                bound=streamBuf.chunkStart;
+            } else {
+                bound=ulong.max;
+                return false;
+            }
+            return true;
+        }
+
+        /// returns the next char going back from the current position
+        bool nextChar(ref dchar res,ref ulong pos){
+            if (bound>=posAtt){
+                if (!setupBound()) return false;
+            }
+            switch (status){
+            case Access.InBuf:
+                --iPos;
+                pos=streamBuf.indexes[iPos];
+                res=streamBuf.bufAtt[iPos];
+                return true;
+            case Access.PreBuf||Access.PostBuf:
+                --posAtt;
+                dchar newC=streamBuf[cast(size_t)(posAtt-bound)];
+                /// maybe decode more into newC for char/wchar, and update posAtt
+                res=newC;
+                pos=posAtt;
+                return true;
+            default:
+                assert(0);
+            }
+        }
+        
+        this(ref StreamCBuf streamBuf){
+            this.streamBuf=&streamBuf;
+            this.posAtt=streamBuf.nextPos();
+        }
         
     }
     
     BackLooper loopBack(){
-        BackLooper res;
-        res.streamBuf=this;
-        res.nextP=nextPos();
-        res.bufEnd=bufEnd();
-        res.posAtt=0
-        return res;
+        return BackLooper(this);
     }
 }
