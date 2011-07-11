@@ -31,7 +31,7 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
 //  Loops with Q (non-greedy, with ? mark) must have the same size / other properties as non Q version
 /// open questions:
 /// * encode non eagerness (*q) and groups with content (B) differently?
-/// * merge equivalent ends?
+/// * merge group, option, infinite/repeat start (to never copy during parsing of (a|b){1,2}) ?
 /// * reorganize groups to make n args easier to find, or simplify the check for groups of similar ops
 ///   (like lookaround), or make it easier to identify hotspots.
 /// * there is still an unused bit that might be used for something
@@ -56,8 +56,10 @@ enum IR:uint {
     GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
     Nop               = 0b1_10010_00, /// no operation (padding)
-    OrChar            = 0b1_10011_00, /// match with any of a consecutive OrChar's inthis sequence (used for case insensitive match)
-    //OrChar holds in upper two bits of data total number of OrChars in this _sequence_
+    /// match with any of a consecutive OrChar's inthis sequence (used for case insensitive match)
+    /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
+    /// the drwaback of this representation is that it is difficult to detect a jump in the middle of it
+    OrChar            = 0b1_10011_00,
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
@@ -204,7 +206,7 @@ struct Bytecode
 
 static assert(Bytecode.sizeof == 4);
 
-/// debuging tool, prints out instruction along with opcodes
+/// debugging tool, prints out instruction along with opcodes
 string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
 {
     auto output = appender!string();
@@ -599,7 +601,7 @@ struct Charset
     bool contains(dchar ch) const
     {
         //debug(fred_charset) writeln(intervals);
-        for(uint i=0; i<intervals.length; i++)
+        for(uint i=0; i<intervals.length; i++) // could use binary search (lower bound) on (cast(uint*)intervals.ptr)[0..2*intervals.length], and then check if it is even or odd...
             if(ch >= intervals[i].begin && ch <= intervals[i].end)
                 return true;
         return false;
