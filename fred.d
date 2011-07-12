@@ -339,6 +339,29 @@ uint checkedMulAdd(uint f1, uint f2, uint add)
     return cast(uint)r;
 }
 
+/// test if a given string starts with hex number of maxDigit that's a valid codepoint
+/// returns it's value and skips these maxDigit chars on success, throws on failure
+dchar parseUniHex(Char)(ref immutable(Char)[] str, uint maxDigit)
+{
+    enforce(str.length >= maxDigit,"incomplete escape sequence");        
+    uint val;
+    for(int k=0;k<maxDigit;k++)
+    {
+        auto current = str[k];//accepts ascii only, so it's OK to index directly
+        if('0' <= current && current <= '9')
+            val = val * 16 + current - '0';
+        else if('a' <= current && current <= 'f')
+            val = val * 16 + current -'a' + 10;
+        else if('A' <= current && current <= 'Z')
+            val = val * 16 + current - 'A' + 10;
+        else
+            throw new Exception("invalid escape sequence");
+    }
+    enforce(val <= 0x10FFFF, "invalid codepoint");
+    str = str[maxDigit..$];
+    return val;
+}
+
 struct NamedGroup
 {
     string name;
@@ -884,7 +907,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         ir.reserve(pat.length);
         next();
         parseFlags(flags);
-        parseRegex();
+        try
+        {    
+            parseRegex();
+        }
+        catch(Exception e)
+        {
+            error(e.msg);//also adds pattern location
+        }
     }
     @property dchar current(){ return _current; }
     bool next()
@@ -1297,7 +1327,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     // also fetches next set operation
     Tuple!(Charset,Operator) parseCharTerm()
     {
-        enum State{ Start, Char, Escape, Dash };
+        enum State{ Start, Char, Escape, Dash, DashEscape };
         Operator op = Operator.None;;
         dchar last;
         Charset set;
@@ -1382,27 +1412,27 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 switch(current)
                 {
                 case 'f':
-                    set.add('\f');
+                    last = '\f';
                     state = State.Char;
                     break;
                 case 'n':
-                    set.add('\n');
+                    last = '\n';
                     state = State.Char;
                     break;
                 case 'r':
-                    set.add('\r');
+                    last = '\r';
                     state = State.Char;
                     break;
                 case 't':
-                    set.add('\t');
+                    last = '\t';
                     state = State.Char;
                     break;
                 case 'v':
-                    set.add('\v');
+                    last = '\v';
                     state = State.Char;
                     break;
                 case '\\':
-                    set.add('\\');
+                    last = '\\';
                     state = State.Char;
                     break;
                 case 'p':
@@ -1413,10 +1443,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add(parseUnicodePropertySpec(true));
                     state = State.Start;
                     continue L_CharTermLoop; //next char already fetched
-                case 'u':
-                    assert(0);
-                case 'U':
-                    assert(0);
+                case 'u': case 'U':
+                    last = parseUniHex(pat, current == 'u' ? 4 : 8);
+                    state = State.Char;
+                    break;
                 //TODO: charsets for commmon properties
                 /+
                     case 'd':
@@ -1452,17 +1482,52 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     op = Operator.Difference;
                     next();//skip '-'
                     break L_CharTermLoop;
+                case '\\':
+                    state = State.DashEscape;
+                    break;
                 default:
-                    last <= current || error("reversed order in interval");
+                    enforce(last <= current, "inverted range");
                     if(re_flags & RegexOption.casefold)
                     {
-                        for(uint ch = last; ch < current; ch++)
+                        for(uint ch = last; ch <= current; ch++)
                             addWithFlags(set, ch, re_flags);
                     }
                     else
                         set.add(Interval(last, current));
                     state = State.Start;
                 }
+                break;            
+            case State.DashEscape:
+                uint end;
+                switch(current)
+                {
+                case 'f':
+                    end = '\f';
+                    break;
+                case 'n':
+                    end = '\n';
+                    break;
+                case 'r':
+                    end = '\r';
+                    break;
+                case 't':
+                    end = '\t';
+                    break;
+                case 'v':
+                    end = '\v';
+                    break;
+                case '\\': 
+                    end = '\\';
+                    break;
+                case  'u': case 'U':
+                    end = parseUniHex(pat, current == 'u' ? 4 : 8);
+                    break;
+                default:
+                    error("invalid escape sequence");
+                }
+                enforce(last <= end,"inverted range");
+                set.add(Interval(last,end)); 
+                state = State.Start;
                 break;
             }
             next() || error("unexpected end of charset");
@@ -1629,54 +1694,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             }
             next();
             return Bytecode(IR.Char,code);
-        case 'u':
-            auto save = pat;
+        case 'u': case 'U':
             uint code = 0;
-            for(int i=0; i<4; i++)
-            {
-                if(!next())
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'u');
-                }
-                if('0' <= current && current <= '9')
-                    code = code * 16 + current - '0';
-                else if('a' <= current && current <= 'f')
-                    code = code * 16 + current -'a' + 10;
-                else if('A' <= current && current <= 'Z')
-                    code = code * 16 + current - 'A' + 10;
-                else //wrong unicode escape treat \u like 'u'
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'u');
-                }
-            }
-            next();
-            return Bytecode(IR.Char, code);
-        case 'U':
-            auto save = pat;
-            uint code = 0;
-            for(int i=0; i<8; i++)
-            {
-                if(!next())
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'U');
-                }
-                if('0' <= current && current <= '9')
-                    code = code * 16 + current - '0';
-                else if('a' <= current && current <= 'f')
-                    code = code * 16 + current -'a' + 10;
-                else if('A' <= current && current <= 'Z')
-                    code = code * 16 + current - 'A' + 10;
-                else //wrong unicode escape treat \U like 'U'
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'U');
-                }
-            }
-            if(code > 0x10FFF)
-                error("Invalid codepoint");
+            code = parseUniHex(pat, current == 'u' ? 4 : 8);
             next();
             return Bytecode(IR.Char, code);
         case 'c': //control codes

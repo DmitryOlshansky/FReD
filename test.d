@@ -253,7 +253,15 @@ unittest
         TestVectors(    `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
         TestVectors(    "\U00010400{2}",  "\U00010428\U00010400 ",    "y",   "$&", "\U00010428\U00010400", "i"),
         TestVectors(    `[adzУ-Я]{4}`,    "DzюА"                      "y",   "$&", "DzЮа", "i"),
-        TestVectors(    `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",              "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(    `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",         "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+//escapes:
+        TestVectors(    `\u0041\u005a\U00000065\u0001`,         "AZe\u0001",       "y",   "$&", "AZe\u0001"),  
+        TestVectors(    `\u`,               "",   "c",   "-",  "-"),
+        TestVectors(    `\U`,               "",   "c",   "-",  "-"),
+        TestVectors(    `\u003`,            "",   "c",   "-",  "-"),
+        TestVectors(    `\r\n\v\t\f\\`,     "\r\n\v\t\f\\",   "y",   "$&", "\r\n\v\t\f\\"),
+        TestVectors(    `[\u0003\u0001]{2}`,  "\u0001\u0003",         "y",   "$&", "\u0001\u0003"),
+        TestVectors(    `^[\u0020-\u0080\u0001\n-\r]{8}`,  "abc\u0001\v\f\r\n",  "y",   "$&", "abc\u0001\v\f\r\n"),
         ];
 
     int i;
