@@ -9,7 +9,7 @@
  */
 //Automatically generated from Unicode Character Database files
 import fred;
-//any codepoint in these intervals is trivally uppercased/lowercased (lowest bit set -> lower)
+//any codepoint in these intervals is trivially uppercased/lowercased (lowest bit set -> lower)
 immutable evenUpper = Charset([
 Interval(0x00100,0x0012f),
 Interval(0x00132,0x00137),

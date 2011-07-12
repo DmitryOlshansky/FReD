@@ -246,7 +246,7 @@ string charsetString(in Charset set, string sep=";\n")
 
 void writeCaseFolding()
 {
-    write("//any codepoint in these intervals is trivally uppercased/lowercased"
+    write("//any codepoint in these intervals is trivially uppercased/lowercased"
 " (lowest bit set -> lower)\nimmutable evenUpper = ");
 	write(charsetString(casefold[1]));
 	writeln("struct CommonCaseEntry

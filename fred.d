@@ -1889,80 +1889,9 @@ struct Regex(Char)
 
 }
 
-/// Simple UTF-string stream abstraction with caching
-struct Input(Char)//TODO: simillar thing with UTF normalization
-    if(is(Char == char) || is(Char == wchar))
-{
-    alias const(Char)[] String;
-    String _origin;
-    size_t _index;
-    uint _cached;
-    enum { cachedBack = 0x1, cachedFront = 0x2, cachedNext = 0x4 };
-    dchar _back, _cur, _next;
-    /// constructs Input object out of plain string
-    this(String input)
-    {
-        _origin = input;
-        _index = 0;
-        _cached = 0;
-    }
-    /// previous codepoint
-    @property dchar back()
-    {
-        if((_cached & cachedBack))
-        {
-            _cached |= cachedBack;
-            _back = _origin[0.._index].back;
-        }
-        return _back;
-    }
-    /// peek at the next codepoint
-    @property dchar next()
-    {
-        if((_cached & cachedNext))
-        {
-            _cached |= cachedNext;
-            _next = _origin[_index+std.utf.stride(_origin, _index)..$].front;
-        }
-        return _next;
-    }
-    /// codepoint at current stream position
-    @property dchar front()
-    {
-        if(!(_cached & cachedFront))
-        {
-            _cached |= cachedFront;
-            _cur = _origin[_index..$].front;
-        }
-        return _cur;
-    }
-    /// reset position to i
-    void seek(size_t i)
-    {
-        _index = i;
-        _cached = 0;
-    }
-    // returns position in input
-    @property size_t index(){ return _index; }
-    /// advance input to the next codepoint
-    void popFront()
-    {
-        _index += std.utf.stride(_origin, _index);
-        _cached >>= 1;
-        _back = _cur;
-        _cur = _next;
-    }
-    /// true if it's end of input
-    @property empty(){  return _index == _origin.length; }
-    /// true if it's start of input
-    @property atStart(){ return _index == 0; }
-    String opSlice(size_t start, size_t end){   return _origin[start..end]; }
-    @property size_t length(){  return _origin.length;  }
-}
-
-///ditto
+/// Simple UTF-string stream abstraction (w/o normalization and such)
 struct Input(Char)
-    if(is(Char == dchar))
+    if(is(Char :dchar))
 {
     alias const(Char)[] String;
     String _origin;
@@ -1973,39 +1902,39 @@ struct Input(Char)
         _origin = input;
         _index = 0;
     }
-    /// previous codepoint
-    @property dchar back()
-    {
-        return _origin[_index-1];
-    }
-    /// peek at the next codepoint
-    @property dchar next()
-    {
-        return _origin[_index+1];
-    }
     /// codepoint at current stream position
-    @property dchar front()
+    bool nextChar(ref dchar res,ref size_t pos)
     {
-        return _origin[_index];
+        if(_index == _origin.length)
+            return false;
+        pos = _index;
+        res = std.utf.decode(_origin, _index);
+        return true;
     }
-    /// reset position to i
-    void seek(size_t i)
-    {
-        _index = i;
-    }
-    // returns position in input
-    @property size_t index(){ return _index; }
-    /// advance input to the next codepoint
-    void popFront()
-    {
-        _index++;
-    }
-    /// true if it's end of input
-    @property empty(){  return _index == _origin.length; }
-    /// true if it's start of input
-    @property atStart(){ return _index == 0; }
+    @property size_t lastIndex(){   return _origin.length; }
+    
     String opSlice(size_t start, size_t end){   return _origin[start..end]; }
-    @property size_t length(){  return _origin.length;  }
+    struct BackLooper
+    {
+        String _origin;
+        size_t _index;
+        this(Input input)
+        {
+            _origin = input._origin;
+            _index = input._index;
+        }
+        bool nextChar(ref dchar res,ref size_t pos)
+        {
+            if(_index == 0)
+                return false;
+            _index -= std.utf.strideBack(_origin, _index);
+            if(_index == 0)
+                return false;
+            res = _origin[0.._index].back;
+            return true;
+        }
+    }
+    @property auto loopBack(){   return BackLooper(this); }
 }
 
 
@@ -2510,9 +2439,15 @@ struct ThompsonMatcher(Char)
     uint[] merge;
     Program re;           //regex program
     Input!Char s;
+    dchar front;
+    size_t index;
+    
     size_t genCounter;    //merge trace counter, goes up on every dchar
     bool matched;
-
+    /// true if it's start of input
+    @property bool atStart(){   return index == 0; }
+    /// true if it's end of input
+    @property bool atEnd(){  return index == s.lastIndex; }
     this(Program program, String input)
     {
         re = program;
@@ -2537,12 +2472,17 @@ struct ThompsonMatcher(Char)
 
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
-        while(!s.empty)
+        for(;;)
         {
+            if(!s.nextChar(front, index))
+            {
+                index =  s.lastIndex;
+                break;
+            }
             genCounter++;
             debug(fred_matching)
             {
-                writefln("Threaded matching %d threads at index %s", clist.length, s.index);
+                writefln("Threaded matching %d threads at index %s", clist.length, index);
                 foreach(t; clist[])
                 {
                     assert(t);
@@ -2556,7 +2496,7 @@ struct ThompsonMatcher(Char)
                 eval!true(t, matches);
             }
             if(!matched)//if we already have match no need to push the engine
-                eval!true(createStart(s.index), matches);// new thread staring at this position
+                eval!true(createStart(index), matches);// new thread staring at this position
             else if(nlist.empty)
             {
                 debug(fred_matching) writeln("Stopped  matching before consuming full input");
@@ -2564,14 +2504,12 @@ struct ThompsonMatcher(Char)
             }
             clist = nlist;
             nlist = ThreadList.init;
-            //to next codepoint
-            s.popFront();
         }
         genCounter++; //increment also on each end
         debug(fred_matching) writefln("Threaded matching %d threads at end", clist.length);
         //try out all zero-width posibilities
         if(!matched)
-            eval!false(createStart(s.index), matches);// new thread starting at end of input
+            eval!false(createStart(index), matches);// new thread starting at end of input
         for(Thread* t = clist.fetch(); t; t = clist.fetch())
         {
             eval!false(t, matches);
@@ -2588,7 +2526,7 @@ struct ThompsonMatcher(Char)
         //debug(fred_matching) writeln(t.matches);
         matches[] = t.matches[];
         //end of the whole match happens after current symbol
-        matches[0].end = s.index;
+        matches[0].end = index;
         debug(fred_matching) writefln("FOUND pc=%s prog_len=%s: %s..%s",
                     t.pc, re.ir.length,matches[0].begin, matches[0].end);
         matched = true;
@@ -2626,53 +2564,89 @@ struct ThompsonMatcher(Char)
                 switch(prog[t.pc].code)
                 {
                 case IR.Wordboundary:
+                    dchar back;
+                    size_t bi;
                     //at start & end of input
-                    if((s.empty && isUniAlpha(s.back))
-                       || (s.atStart && isUniAlpha(s.front)) )
-                        t.pc += IRL!(IR.Wordboundary);
-                    else if( (isUniAlpha(s.front) && !isUniAlpha(s.back))
-                          || (!isUniAlpha(s.front) && isUniAlpha(s.back)) )
-                        t.pc += IRL!(IR.Wordboundary);
-                    else
+                    if(atStart && isUniAlpha(front))
                     {
-                        recycle(t);
-                        t = worklist.fetch();
+                        t.pc += IRL!(IR.Wordboundary);
+                        break;
                     }
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && isUniAlpha(back))
+                    {
+                        t.pc += IRL!(IR.Wordboundary);
+                        break;
+                    }
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = isUniAlpha(front) != 0;
+                        bool ab = isUniAlpha(back) != 0;
+                        if(af ^ ab)
+                        {
+                            t.pc += IRL!(IR.Wordboundary);
+                            break;
+                        }
+                    }
+                    recycle(t);
+                    t = worklist.fetch();
                     break;
                 case IR.Notwordboundary:
-                    if((s.empty && isUniAlpha(s.back))
-                       || (s.atStart && isUniAlpha(s.front)) )
+                    dchar back;
+                    size_t bi;
+                    //at start & end of input
+                    if(atStart && !isUniAlpha(front))
                     {
                         recycle(t);
                         t = worklist.fetch();
+                        break;
                     }
-                    else if( (isUniAlpha(s.front) && !isUniAlpha(s.back))
-                          || (!isUniAlpha(s.front) && isUniAlpha(s.back)) )
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && !isUniAlpha(back))
                     {
                         recycle(t);
                         t = worklist.fetch();
+                        break;
                     }
-                    else
-                        t.pc += IRL!(IR.Wordboundary);
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = isUniAlpha(front) != 0;
+                        bool ab = isUniAlpha(back)  != 0;
+                        if(af ^ ab)
+                        {
+                            recycle(t);
+                            t = worklist.fetch();
+                            break;
+                        }    
+                    }
+                    t.pc += IRL!(IR.Wordboundary);
                     break;
                 case IR.Bol:
+                    dchar back;
+                    size_t bi;
                     //TODO: multiline & attributes, unicode line terminators
-                    if(s.atStart || (s.back == '\n'))
-                    {
+                    if(atStart)
                         t.pc += IRL!(IR.Bol);
-                    }
+                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                        t.pc += IRL!(IR.Bol);
                     else
+                    {
+                        recycle(t);
                         t = worklist.fetch();
+                    }
                     break;
                 case IR.Eol:
                     //TODO: ditto for the end of line
-                    debug(fred_matching) writeln("EOL ", s);
-                    if(s.empty || s.front == '\n')
+                    debug(fred_matching) writeln("EOL ", s[index..s.lastIndex]);
+                    if(atEnd || front == '\n')
                     {
                         t.pc += IRL!(IR.Eol);
                     }
                     else
+                    {
+                        recycle(t);
                         t = worklist.fetch();
+                    }
                     break;
                 case IR.InfiniteStart, IR.InfiniteQStart:
                     t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
@@ -2722,13 +2696,13 @@ struct ThompsonMatcher(Char)
                     if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         merge[prog[t.pc + 1].raw+t.counter] = genCounter;
                     }
                     else
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
                         break;
                     }
@@ -2750,14 +2724,14 @@ struct ThompsonMatcher(Char)
                     if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         merge[prog[t.pc + 1].raw+t.counter] = genCounter;
                         t.pc += IRL!(IR.OrEnd);
                     }
                     else
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[s.index..s.length], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         t = worklist.fetch();
                     }
                     break;
@@ -2778,13 +2752,13 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].begin = s.index;
+                    t.matches[re.index[n]+1].begin = cast(size_t)index;
                     t.pc += IRL!(IR.GroupStart);
                     //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                     break;
                 case IR.GroupEnd:   //TODO: ditto
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].end = s.index;
+                    t.matches[re.index[n]+1].end = cast(size_t)index;
                     t.pc += IRL!(IR.GroupEnd);
                     //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                     break;
@@ -2797,9 +2771,10 @@ struct ThompsonMatcher(Char)
                     else static if(withInput)
                     {
                         uint idx = t.matches[n+1].begin + t.uopCounter;
-                        if(s[idx..s.length].front == s.front)
+                        uint end = t.matches[n+1].end;
+                        if(s[idx..end].front == front)
                         {
-                           t.uopCounter += std.utf.stride(s[idx..s.length], 0);
+                           t.uopCounter += std.utf.stride(s[idx..end], 0);
                            if(t.uopCounter + t.matches[n+1].begin == t.matches[n+1].end)
                            {//last codepoint
                                 t.pc += IRL!(IR.Backref);
@@ -2835,7 +2810,7 @@ struct ThompsonMatcher(Char)
                         uint len = prog[t.pc].sequence;
                         uint end = t.pc + len;
                         for(; t.pc<end; t.pc++)
-                            if(prog[t.pc].data == s.front)
+                            if(prog[t.pc].data == front)
                                 break;
                         if(t.pc != end)
                         {
@@ -2847,9 +2822,9 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Char:
-                        if(s.front == prog[t.pc].data)
+                        if(front == prog[t.pc].data)
                         {
-                            // debug(fred_matching) writefln("IR.Char %s vs %s ", s.front, cast(dchar)prog[t.pc].data);
+                            // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)prog[t.pc].data);
                             t.pc += IRL!(IR.Char);
                             nlist.insertBack(t);
                         }
@@ -2863,7 +2838,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Word:
-                        if(isUniAlpha(s.front))
+                        if(isUniAlpha(front))
                         {
                             t.pc += IRL!(IR.Word);
                             nlist.insertBack(t);
@@ -2873,7 +2848,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notword:
-                        if(!isUniAlpha(s.front))
+                        if(!isUniAlpha(front))
                         {
                             t.pc += IRL!(IR.Notword);
                             nlist.insertBack(t);
@@ -2883,7 +2858,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Digit:
-                        if(isdigit(s.front))
+                        if(isdigit(front))
                         {
                             t.pc += IRL!(IR.Digit);
                             nlist.insertBack(t);
@@ -2893,7 +2868,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notdigit:
-                        if(!isdigit(s.front))
+                        if(!isdigit(front))
                         {
                             t.pc += IRL!(IR.Notdigit);
                             nlist.insertBack(t);
@@ -2903,7 +2878,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Space:
-                        if(isspace(s.front))
+                        if(isspace(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -2913,7 +2888,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notspace:
-                        if(!isspace(s.front))
+                        if(!isspace(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -2923,7 +2898,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Charset:
-                        if(re.charsets[prog[t.pc].data].contains(s.front))
+                        if(re.charsets[prog[t.pc].data].contains(front))
                         {
                             debug(fred_matching) writeln("Charset passed");
                             t.pc += IRL!(IR.Charset);
