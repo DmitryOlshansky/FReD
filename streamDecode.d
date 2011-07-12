@@ -214,11 +214,11 @@ struct StreamCBuf(Char)
             ++mPos;
             if (mPos>indexes.length) mPos-=cast(int)indexes.length;
         }
-        if (bufReadSize>1){
+        /+if (bufReadSize>1){
             // we "fix" its index to be the same of the following character (so that already from the index
             // on sees that normalization is required, and hasn't to check with quickcheck)
             indexes[bufPos]+=(1UL<<48)+1;
-        }
+        }+/
         // even if qc!=Yes we keep the last char index as it is for the "next" decoding run
     }
     /// return the start of the grapheme that contains this the char at this index (if decodeing is needed)
@@ -422,5 +422,12 @@ struct StreamCBuf(Char)
     
     BackLooper loopBack(){
         return BackLooper(this);
+    }
+    
+    const(Char)[] opIndex(ulong from,ulong to,char[] buf=null){
+        
+    }
+    const(Char)[] opIndex(Group)(Group g,char[] buf=null){
+        return opIndex(g.start,g.end,buf);
     }
 }
