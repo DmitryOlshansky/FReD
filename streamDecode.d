@@ -54,8 +54,15 @@ struct StreamCBuf(Char)
     
     Status status;
     
-    /// constructor
-    this(dchar[]){
+    /// constructor, charBuf and indexBuf need to have the same size, which must be a power of two
+    /// historyWindow can be at most charBuf.length-256
+    this(dchar[]charBuf,ulong[]indexBuf){
+        indexes=indexBuf;
+        bufAtt=charBuf;
+        assert(charBuf.length>255,"length has to be larger than 255");
+        assert(charBuf.length==indexBuf.length,"length of buffers have to be equal");
+        assert(((charBuf.length-1)&charBuf.length)==0,"the length has to be a power of two");
+        indexes[0]=ulong.max;
         
     }
     /// adds a new chunck to evaluate
@@ -104,7 +111,6 @@ struct StreamCBuf(Char)
                 return false; // we could automatically try to load more
             }
         }
-        bool didOverflow=false; // if we had to normalize more than maxRead
         if ((status==Status.BufChar || status==Status.BufCharPartial)&&
             bufSize>0)
         {
@@ -127,7 +133,6 @@ struct StreamCBuf(Char)
             // we need to normalize this char (this happens only when we overflow)
             ++bufReadSize;
             --bufPos;
-            didOverflow=true;
         }
         if (status==Status.BufCharPartial){
             static if (!is(Char==dchar)){
@@ -200,15 +205,16 @@ struct StreamCBuf(Char)
         
         // fix indexes (if the normalization did change something)
         ulong idxBase=indexes[bufPos];
-        assert(idxBase&(255UL<<48))==0);
+        assert((idxBase&(255UL<<48))==0);
         int mPos=bufPos;
-        assert(bufSize>0)
-        for (i=0;i<bufSize-1;++i){
+        assert(bufSize==0);
+        assert(bufReadSize>0);
+        for (int i=0;i<bufReadSize-1;++i){
             indexes[mPos]=idxBase+1+((cast(ulong)i)<<48);
             ++mPos;
             if (mPos>indexes.length) mPos-=cast(int)indexes.length;
         }
-        if (didOverflow){
+        if (bufReadSize>1){
             // we "fix" its index to be the same of the following character (so that already from the index
             // on sees that normalization is required, and hasn't to check with quickcheck)
             indexes[bufPos]+=(1UL<<48)+1;
@@ -226,7 +232,7 @@ struct StreamCBuf(Char)
     /// adds a not yet normalized character c
     void bufPushNonNormal(dchar c,ulong pos){
         assert(bufReadSize<maxRead);
-        assert(bufReadSize+bufSize+bufHistorySize<bufAtt.length)
+        assert(bufReadSize+bufSize+bufHistorySize<bufAtt.length);
         int mp=(bufPos+bufReadSize+bufSize)%bufAtt.length;
         bufAtt[mp]=c;
         indexes[mp]=pos;
