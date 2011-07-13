@@ -16,6 +16,8 @@ unittest
     assert(match("wida",r2).empty);
     assert(tmatch("abcdef", r1).hit == "abc");
     assert(tmatch("wida", r2).empty);
+    //compile-time regex
+    enum ctr = regex("abc");
 }
 
 
@@ -262,6 +264,8 @@ unittest
         TestVectors(    `\r\n\v\t\f\\`,     "\r\n\v\t\f\\",   "y",   "$&", "\r\n\v\t\f\\"),
         TestVectors(    `[\u0003\u0001]{2}`,  "\u0001\u0003",         "y",   "$&", "\u0001\u0003"),
         TestVectors(    `^[\u0020-\u0080\u0001\n-\r]{8}`,  "abc\u0001\v\f\r\n",  "y",   "$&", "abc\u0001\v\f\r\n"),
+// no newline inside \r\n :
+        TestVectors(    `\r.*$`,    "abc\r\nxy", "y",    "$&", "\r\nxy"),
         ];
 
     int i;
@@ -363,7 +367,7 @@ unittest
         }
         writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
     }
-    run_tests!match(); //backtracker
+    //run_tests!match(); //backtracker
     run_tests!tmatch(); //thompson VM
 }
 

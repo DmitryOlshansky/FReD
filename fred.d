@@ -56,9 +56,9 @@ enum IR:uint {
     GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
     Nop               = 0b1_10010_00, /// no operation (padding)
-    /// match with any of a consecutive OrChar's inthis sequence (used for case insensitive match)
+    /// match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
     /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
-    /// the drwaback of this representation is that it is difficult to detect a jump in the middle of it
+    /// the drawback of this representation is that it is difficult to detect a jump in the middle of it
     OrChar            = 0b1_10011_00,
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
@@ -329,7 +329,7 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
 /// casefold - case insensitive matching, do casefolding on match in unicode mode
 /// freeform - ignore whitespace in pattern, to match space use [ ] or \s
 enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8,  };
-
+private immutable NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
 //multiply-add, throws exception on overflow
 uint checkedMulAdd(uint f1, uint f2, uint add)
 {
@@ -904,7 +904,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     {
         pat = origin = pattern;
         index = [ 0 ]; //map first to start-end of the whole match
-        ir.reserve(pat.length);
+        //ir.reserve(pat.length);
         next();
         parseFlags(flags);
         try
@@ -2441,9 +2441,9 @@ struct ThompsonMatcher(Char)
     Input!Char s;
     dchar front;
     size_t index;
-    
     size_t genCounter;    //merge trace counter, goes up on every dchar
     bool matched;
+    bool seenCr;    //true if CR was processed
     /// true if it's start of input
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
@@ -2474,6 +2474,7 @@ struct ThompsonMatcher(Char)
         assert(nlist == ThreadList.init);
         for(;;)
         {
+            seenCr = front == '\r';
             if(!s.nextChar(front, index))
             {
                 index =  s.lastIndex;
@@ -2636,9 +2637,10 @@ struct ThompsonMatcher(Char)
                     }
                     break;
                 case IR.Eol:
-                    //TODO: ditto for the end of line
-                    debug(fred_matching) writeln("EOL ", s[index..s.lastIndex]);
-                    if(atEnd || front == '\n')
+                    debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                    //no matching inside \r\n
+                    if(atEnd || ((front == '\n') ^ seenCr) || front == LS 
+                       || front == PS || front == NEL)
                     {
                         t.pc += IRL!(IR.Eol);
                     }
