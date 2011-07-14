@@ -13,8 +13,9 @@ module fred;
 
 import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
-       std.conv, std.exception, std.ctype, std.traits, std.typetuple,
+       std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception;
+import ascii = std.ascii;
 
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
@@ -214,7 +215,7 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     switch(irb[pc].code)
     {
     case IR.Char:
-        formattedWrite(output, " %s",cast(dchar)irb[pc].data);
+        formattedWrite(output, " %s (0x%x)",cast(dchar)irb[pc].data, irb[pc].data);
         break;
     case IR.RepeatStart, IR.InfiniteStart, IR.Option, IR.GotoEndOr, IR.OrStart:
         //forward-jump instructions
@@ -402,8 +403,8 @@ struct Interval
     {
         auto s = appender!string;
         formattedWrite(s,"%s(%s)..%s(%s)",
-                       begin, isgraph(begin) ? to!string(cast(dchar)begin) : "",
-                       end, isgraph(end) ? to!string(cast(dchar)end) : "");
+                       begin, ascii.isGraphical(begin) ? to!string(cast(dchar)begin) : "",
+                       end, ascii.isGraphical(end) ? to!string(cast(dchar)end) : "");
         return s.data;
     }
 }
@@ -656,11 +657,11 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
     for(;;)
     {
-        while(!a.empty && (isspace(a.front) || a.front == '-' || a.front =='_'))
+        while(!a.empty && (isWhite(a.front) || a.front == '-' || a.front =='_'))
         {
             a.popFront();
         }
-        while(!b.empty && (isspace(b.front) || b.front == '-' || b.front =='_'))
+        while(!b.empty && (isWhite(b.front) || b.front == '-' || b.front =='_'))
         {
             b.popFront();
         }
@@ -668,7 +669,7 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
             return b.empty ? 0 : -1;
         if(b.empty)
             return 1;
-        auto ca = tolower(a.front), cb = tolower(b.front);
+        auto ca = toLower(a.front), cb = toLower(b.front);
         if(ca > cb)
             return 1;
         else if( ca < cb)
@@ -740,7 +741,7 @@ unittest
     fetch codepoint set corrsponding to a name (InBlock or binary property)
     empty on error
 +/
-auto getUnicodeSet(string name, bool negated)
+immutable(Charset) getUnicodeSet(in char[] name, bool negated)
 {
     alias comparePropertyName ucmp;
     Charset s;
@@ -752,7 +753,16 @@ auto getUnicodeSet(string name, bool negated)
         assert(commonCaseTable[index].delta == delta, text(commonCaseTable[index].delta," vs ", delta));
         set.add(commonCaseTable[index].set);
     }  
-	if(ucmp(name,"LC") == 0 || ucmp(name,"Cased Letter")==0)
+    if(ucmp(name, "L") == 0 || ucmp(name, "Letter") == 0)
+    {
+        s.add(evenUpper);
+        foreach(v; commonCaseTable)
+            s.add(v.set);
+        foreach(v; casePairs)
+            s.add(v);
+        s.add(unicodeLt).add(unicodeLo).add(unicodeLm);
+    }
+    else if(ucmp(name,"LC") == 0 || ucmp(name,"Cased Letter")==0)
     {
         s.add(evenUpper);
         foreach(v; commonCaseTable)
@@ -839,17 +849,27 @@ auto getUnicodeSet(string name, bool negated)
         s.add(Interval(0,0x7f));
     else
     {
-        uint key = phash(name);
-        if(key >= PHASHNKEYS || ucmp(name,unicodeProperties[key].name) != 0)
-            return s;
-        s = cast(Charset)unicodeProperties[key].set;
+        version(fred_perfect_hashing)
+        {
+            uint key = phash(name);
+            if(key >= PHASHNKEYS || ucmp(name,unicodeProperties[key].name) != 0)
+                throw("invalid property name");
+            s = cast(Charset)unicodeProperties[key].set;
+        }
+        else
+        {
+            auto range = assumeSorted!((x,y){ return ucmp(x.name, y.name) < 0; })(unicodeProperties); 
+            auto eq = range.equalRange(UnicodeProperty(cast(string)name,Charset.init));//TODO: hackish
+            enforce(!eq.empty,"invalid property name");
+            s = cast(Charset)eq.front.set;
+        }
     }
     if(negated)
     {
 		s = s.dup;//tables are immutable
         s.negate();
     }
-    return s;
+    return cast(immutable(Charset))s;
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -927,7 +947,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     }
     void skipSpace()
     {
-        while(isspace(current) && next()){ }
+        while(isWhite(current) && next()){ }
     }
     void restart(R newpat)
     {
@@ -940,7 +960,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     uint parseDecimal()
     {
         uint r=0;
-        while(isdigit(current))
+        while(ascii.isDigit(current))
         {
             if(r >= (uint.max/10))
                 error("Overflow in decimal number");
@@ -948,6 +968,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
         }
         return r;
+    }
+    // parse control code of form \cXXX, c assumed to be the current symbol
+    dchar parseControlCode()
+    {
+        next() || error("Unfinished escape sequence");
+        ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
+            || error("Only letters are allowed after \\c");
+        return current & 0x1f;
     }
     /**
 
@@ -1031,7 +1059,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                         if(current != '<')
                             error("Expected '<' in named group");
                         string name;
-                        while(next() && isalpha(current))
+                        while(next() && isAlpha(current))
                         {
                             name ~= current;
                         }
@@ -1178,7 +1206,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             break;
         case '{':
             next() || error("Unexpected end of regex pattern");
-            isdigit(current) || error("First number required in repetition");
+            ascii.isDigit(current) || error("First number required in repetition");
             min = parseDecimal();
             //skipSpace();
             if(current == '}')
@@ -1186,7 +1214,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             else if(current == ',')
             {
                 next();
-                if(isdigit(current))
+                if(ascii.isDigit(current))
                     max = parseDecimal();
                 else if(current == '}')
                     max = infinite;
@@ -1436,6 +1464,10 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     last = '\v';
                     state = State.Char;
                     break;
+                case 'c':
+                    last = parseControlCode();
+                    state = State.Char;
+                    break;
                 case '\\', '[', ']':
                     last = current;
                     state = State.Char;
@@ -1531,10 +1563,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 case '\\', '[', ']': 
                     end = current;
                     break;
+                case 'c':
+                    end = parseControlCode();
+                    break;
                 case 'x':
                     end = parseUniHex(pat, 2);
                     break;
-                case  'u': 
+                case 'u': 
                     end = parseUniHex(pat, 4);
                     break;
                 case 'U':
@@ -1696,10 +1731,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             next();
             return Bytecode(IR.Char, code);
         case 'c': //control codes
-            next() || error("Unfinished escape sequence");
-            ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
-                || error("Only letters are allowed after \\c");
-            Bytecode code = Bytecode(IR.Char, current &  0x1f);
+            Bytecode code = Bytecode(IR.Char, parseControlCode());
             next();
             return code;
         case '0':
@@ -1710,7 +1742,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             nref <  index.length || error("Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
-            while(nref <= index.length && next() && isdigit(current))
+            while(nref <= index.length && next() && ascii.isDigit(current))
             {
                 nref = nref * 10 + current - '0';
             }
@@ -1729,19 +1761,18 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 	immutable(Charset) parseUnicodePropertySpec(bool negated)
 	{
         alias comparePropertyName ucmp;
+        enum MAX_PROPERTY = 128;
 		next() && current == '{' || error("{ expected ");
-		static bool sep(dchar x){ return x ==':' || x== '}'; }
-		auto end = find!(sep)(pat);
-		auto name = pat[0..$-end.length];
-        string result;
-        foreach(ch; name)
-            if(ch != '-' && ch != ' ' && ch != '_')
-                result ~= tolower(ch);
-		pat = end;
-		auto s = getUnicodeSet(result, negated);
+        char[MAX_PROPERTY] result;
+        uint k=0;
+        while(k<MAX_PROPERTY && next() && current !='}' && current !=':')
+            if(current != '-' && current != ' ' && current != '_')
+                result[k++] = cast(char)ascii.toLower(current);
+        enforce(k != MAX_PROPERTY, "invalid property name");
+		auto s = getUnicodeSet(result[0..k], negated);
 		if(s.empty)
             error("unrecognized unicode property spec");
-		next() && current == '}' || error("} expected ");
+		current == '}' || error("} expected ");
 		next();
 		return cast(immutable Charset)(s);
 	}
@@ -2124,25 +2155,25 @@ if( is(Char : dchar) )
                 pc += IRL!(IR.Word);
                 break;
             case IR.Digit:
-                if(s.empty || !isdigit(s.front))
+                if(s.empty || !ascii.isDigit(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Notdigit:
-                if(s.empty || isdigit(s.front))
+                if(s.empty || ascii.isDigit(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Notdigit);
                 break;
             case IR.Space:
-                if(s.empty || !isspace(s.front))
+                if(s.empty || !isWhite(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Space);
                 break;
             case IR.Notspace:
-                if(s.empty || isspace(s.front))
+                if(s.empty || isWhite(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Notspace);
@@ -2856,7 +2887,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Digit:
-                        if(isdigit(front))
+                        if(ascii.isDigit(front))
                         {
                             t.pc += IRL!(IR.Digit);
                             nlist.insertBack(t);
@@ -2866,7 +2897,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notdigit:
-                        if(!isdigit(front))
+                        if(!ascii.isDigit(front))
                         {
                             t.pc += IRL!(IR.Notdigit);
                             nlist.insertBack(t);
@@ -2876,7 +2907,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Space:
-                        if(isspace(front))
+                        if(isWhite(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -2886,7 +2917,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notspace:
-                        if(!isspace(front))
+                        if(!isWhite(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);

@@ -2,60 +2,29 @@
 /**
     gen_uni is a quick & dirty source code generator for unicode datastructures
 */
-import fred, std.stdio, std.conv, std.algorithm, std.array, std.format, std.string;
+import fred;
+import std.ascii, std.stdio, std.conv, std.algorithm, std.array, std.format, std.string;
 
-
-struct UniBlock
-{
-    string name;
-    Interval ival;
-}
 Charset[int] casefold;//entries by delta
-UniBlock[] blocks;
-string[] gcNames = [
-	"Cc", "Cf", "Co", "Cs", 
-	"L", "LC", "Ll", "Lm", "Lo", "Lt", "Lu",
-	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
-	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
-	 "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"
-];
-string[] gcAliases = [
-	"Control", "Format", "Private Use", "Surrogate",
-	"Letter", "Cased Letter", "Lowercase Letter", "Modifier Letter",
-    "Other Letter", "Titlecase Letter", "Uppercase Letter",
-	"Spacing Mark", "Enclosing Mark", "Non-Spacing Mark",  
-    "Decimal Digit Number", "Letter Number", "Other Number",
-	 "Connector Punctuation", "Dash Punctuation", "Close Punctuation",
-    "Final Punctuation", "Initital Punctuation", "Other Punctuation", 
-    "Open Punctuation",	 "Currency Symbol", "Modifier Symbol", 
-    "Math symbol", "Other Symbol", "Separator", "Line Separator", 
-    "Paragraph Separator", "Space Separator"
-];
-string[] directGcNames = [//to be printed as is
-	"Cc", "Cf", "Co", "Cs",
-	"L", "Lm", "Lo", "Lt",
-	"Mc", "Me", "Mn",  "Nd", "Nl", "No",
-	 "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps",
-	 "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"
-];
 uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
 uint[] highIrreg; //so we check that ;)
-Charset[] gcSets;//General category
-Charset[string] scripts;
+Charset[string] props;
+string[string] aliases;
+string[] blacklist = [ "Lu", "Ll" ];
 uint[] globalIndex;
-static this()
+
+void scanUniData(alias Fn)(string name, Regex!char r)
 {
-    gcSets = new Charset[gcNames.length];
+    foreach(line; File(name).byLine)
+	{
+        auto m = match(line, r);
+        if(!m.empty)
+            Fn(m);
+    }
 }
 
 void main(string[] argv)
 {
-    File casef = File("Casefolding.txt");
-    File scriptf = File("Scripts.txt");
-    File blockf  = File("Blocks.txt");
-    File propf= File("UnicodeData.txt");
-    File indexf = File("Global.txt");
-    
     writeln("//Written in the D programming language
 /**
  * Fast Regular expressions for D
@@ -67,11 +36,12 @@ void main(string[] argv)
  */
 //Automatically generated from Unicode Character Database files
 import fred;");
-    loadGlobalIndex(indexf);
-    loadCaseFolding(casef);
-    loadBlocks(blockf);
-    loadProperties(propf);
-    loadScripts(scriptf);
+    loadGlobalIndex("Global.txt");
+    loadCaseFolding("Casefolding.txt");
+    loadBlocks("Blocks.txt");
+    loadProperties("PropList.txt");
+    loadProperties("DerivedGeneralCategory.txt");
+    loadProperties("Scripts.txt");
     testCasingIrregular();
     writeCaseFolding();
     writeProperties();
@@ -79,15 +49,12 @@ import fred;");
 
 void testCasingIrregular()
 {
-    auto low = countUntil(gcNames,"Ll");
-    auto lowSet = gcSets[low].dup;
+    auto lowSet = props["Ll"].dup;
     Charset irreg;
     foreach(ch; lowIrreg)
             irreg.add(ch);
     foreach(ch; highIrreg)
             irreg.add(ch);
-    /*lowSet.printUnicodeSet((const(char)[] s){stderr.write(s); });
-    irreg.printUnicodeSet((const(char)[] s){stderr.write(s); });*/
     lowSet.intersect(irreg);
     uint array[];
     foreach(ival; lowSet.intervals)
@@ -96,8 +63,7 @@ void testCasingIrregular()
             array ~= ch;
     }
     assert(equal(sort(array),sort(lowIrreg.dup)));
-    auto upper = countUntil(gcNames,"Lu");
-    auto upperSet = gcSets[upper].dup;
+    auto upperSet = props["Lu"].dup;
     upperSet.intersect(irreg);
     array.length = 0;
     foreach(ival; upperSet.intervals)
@@ -107,8 +73,10 @@ void testCasingIrregular()
     }
     assert(equal(sort(array),sort(highIrreg.dup)));
 }
-void loadGlobalIndex(File f)
+
+void loadGlobalIndex(string name)
 {
+    File f = File(name);
     foreach(line; f.byLine)
 	{
         if(!line.empty)
@@ -116,11 +84,11 @@ void loadGlobalIndex(File f)
     }
 }
 
-void loadCaseFolding(File f)
+void loadCaseFolding(string name)
 {
 	uint[uint] hash;
 	auto r = regex("([^;]*); [CS];\\s*([^;]*);");
-	foreach(line; f.byLine)
+	foreach(line; File(name).byLine)
 	{
 		auto m = match(line, r);
 		if(!m.empty)
@@ -156,82 +124,55 @@ void loadCaseFolding(File f)
         }
 }
 
-void loadBlocks(File f)
+void loadBlocks(string f)
 {
-	auto r = regex(`([0-9A-F]+)\.\.([0-9A-F]+);\s*(.*)\s*$`);
-	foreach(line; f.byLine)
-	{
-		auto m = match(line, r);
-		if(!m.empty)
-		{
+	auto r = regex(`^([0-9A-F]+)\.\.([0-9A-F]+);\s*(.*)\s*$`);
+	scanUniData!((m){
 			auto s1 = m.captures[1];
 			auto s2 = m.captures[2];
 			auto a1 = parse!uint(s1, 16);
 			auto a2 = parse!uint(s2, 16);
-			blocks ~= UniBlock(m.captures[3].idup, Interval(a1, a2));
-		}
-	}
+			props["In"~to!string(m.captures[3])] = Charset([Interval(a1, a2)]);
+	})(f, r);
 }
 
-void loadProperties(File inp)
+void loadProperties(string inp)
 {
-	auto r = regex("^([0-9A-F]*);[^;]*;([^;]*);[^;]*;([^;]*);");
-	foreach(char[] s; inp.byLine)
-	{
-		static int cnt;
-		auto m = tmatch(s, r);
-		if(!m.empty)
-		{
-			auto i = countUntil(gcNames, m.captures[2]);
-            uint val;
-			if(i >= 0)
+    auto r = regex(`^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`);
+    string aliasStr;
+	scanUniData!((m){
+        auto name = to!string(m.captures[4]);
+        if(!m.captures[5].empty)
+            aliasStr = to!string(m.captures[5]);
+		else if(!m.captures[1].empty)
+        {
+            auto sa = m.captures[1];
+            auto sb = m.captures[2];
+            uint a = parse!uint(sa, 16);
+            uint b = parse!uint(sb, 16);
+            if(name !in props)
+                props[name] = Charset.init;
+            props[name].add(Interval(a,b));
+            if(!aliasStr.empty)
             {
-                auto x = m.captures[1];
-                val = parse!uint(x,16);
-				gcSets[i].add(val);
+                aliases[name] = aliasStr;
+                aliasStr = "";
             }
-			i = countUntil(gcNames, m.captures[3]);
-			if(i >= 0)
+        }
+        else if(!m.captures[3].empty)
+        {
+            auto sx = m.captures[3];
+            uint x = parse!uint(sx, 16);
+            if(name !in props)
+                props[name] = Charset.init;
+            props[name].add(x);
+            if(!aliasStr.empty)
             {
-				auto x = m.captures[1];
-                val = parse!uint(x,16);
-				gcSets[i].add(val);
+                aliases[name] = aliasStr;
+                aliasStr = "";
             }
-		}
-	}
-}
-
-void loadScripts(File inp)
-{
-    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#`);
-	foreach(char[] s; inp.byLine)
-	{
-        static int cnt;
-		auto m = tmatch(s, r);
-		if(!m.empty)
-		{
-            auto name = to!string(m.captures[4]);
-           
-			if(!m.captures[1].empty)
-            {
-                auto sa = m.captures[1];
-                auto sb = m.captures[2];
-                uint a = parse!uint(sa, 16);
-                uint b = parse!uint(sb, 16);
-                if(name !in scripts)
-                    scripts[name] = Charset.init;
-                scripts[name].add(Interval(a,b));
-            }
-            else
-            {
-                auto sx = m.captures[3];
-                uint x = parse!uint(sx, 16);
-                if(name !in scripts)
-                    scripts[name] = Charset.init;
-                scripts[name].add(x);
-            }
-		}
-    }
+        }
+	})(inp, r);
 }
 
 string charsetString(in Charset set, string sep=";\n")
@@ -239,7 +180,7 @@ string charsetString(in Charset set, string sep=";\n")
     auto app = appender!(char[])();
 	formattedWrite(app,"Charset([\n");
 	foreach(i; set.intervals)
-		formattedWrite(app, "Interval(0x%05x,0x%05x),\n", i.begin, i.end);
+		formattedWrite(app, "    Interval(0x%05x,0x%05x),\n", i.begin, i.end);
 	formattedWrite(app, "])%s\n",sep);
     return cast(string)app.data;
 }
@@ -253,6 +194,7 @@ void writeCaseFolding()
 {
     short delta;
     Charset set;
+
 }
 //these are a bit harder to lowercase/uppercase lower: +- delta
 immutable commonCaseTable = [");
@@ -311,62 +253,78 @@ immutable commonCaseTable = [");
 	writeln("];");
 }
 
+string identName(string s)
+{
+    auto app = appender!(char[])();
+    foreach(c; s)
+        if(c == '-' || c == ' ')
+            app.put('_');
+        else
+            app.put(c);
+    return cast(string)app.data;
+}
+
+string uniformName(string s)
+{
+    auto app = appender!(char[])();
+    foreach(c; s)
+        if(c != '-' && c != ' ' && c != '_')
+            app.put(toLower(c));
+    return cast(string)app.data;
+}
+
+
 void writeProperties()
 {
-    foreach(i, cs; gcSets)
-	{
-        if(canFind(directGcNames,gcNames[i]))
-        {
-		    writef("immutable Charset unicode%s = ", gcNames[i]);
-		    write(charsetString(cs));
-        }
-	}
-    static bool less(UniBlock a,UniBlock b)
-    {
-        return propertyNameLess(a.name, b.name);
-    }
-    write("struct UnicodeProperty
+    File hashf = File("HashKeys.txt", "wb");
+    writeln("struct UnicodeProperty
 {
     string name;
     immutable Charset set;
-}
-immutable(UnicodeProperty)[] unicodeProperties = [\n");
-    string[] lines;
-    auto app = appender!(char[])();
-    sort!(less)(blocks);
-    foreach(b; blocks)
+}");
+    foreach(k, v; props)
     {
-        formattedWrite(app,"UnicodeProperty(\"In%s\", Charset([Interval(0x%05X, 0x%05X)])),\n",
-                 b.name, b.ival.begin, b.ival.end);
-        lines ~= app.data.idup;
-        app.shrinkTo(0);
-    }
-    foreach(i, abbr; gcNames)
-    {
-        if(canFind(directGcNames,abbr))
+        if(countUntil(blacklist, k) < 0)
         {
-            formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),",abbr, abbr);
-            lines ~= app.data.idup;
-            app.shrinkTo(0);
-            formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),\n",gcAliases[i], abbr);
-            lines ~= app.data.idup;
-            app.shrinkTo(0);
+            writef("immutable(Charset) unicode%s = ", identName(k));
+            write(charsetString(v));
         }
     }
-    auto keys = scripts.keys;
-    sort!(propertyNameLess)(keys);
+    write("immutable(UnicodeProperty)[] unicodeProperties = [\n");
+    string[] lines;
+    string[] hashLines;
+    auto app = appender!(char[])();
+    auto keys = props.keys;
+    
     foreach(k; keys)
     {
-        formattedWrite(app, "UnicodeProperty(\"%s\", ",k);
-        formattedWrite(app, "%s,",charsetString(scripts[k],""));
-        formattedWrite(app, "),\n");
-        lines ~= app.data.idup;
-        app.shrinkTo(0);
+        if(countUntil(blacklist, k) < 0)
+        {
+            formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),\n", k, identName(k));
+            lines ~= app.data.idup;
+            hashLines ~= uniformName(k);
+            app.shrinkTo(0);
+            if(k in aliases)
+            {
+                stderr.writeln(aliases[k]);
+                formattedWrite(app, "UnicodeProperty(\"%s\", unicode%s),\n",aliases[k], identName(k));
+                lines ~= app.data.idup;
+                hashLines ~= uniformName(aliases[k]);
+                app.shrinkTo(0);
+            }
+            
+        }
     }
-    foreach(i, k; lines)
+    assert(hashLines.length ==lines.length);
+    int[] index = new int[lines.length];
+    makeIndex!propertyNameLess(lines, index);
+    foreach(i, v; lines)
     {
-        auto j = countUntil(globalIndex, i);
-        write(lines[j]);
+        //auto j = countUntil(globalIndex, i);
+        //write(lines[j]);
+        write(lines[index[i]]);
+        hashf.writeln(hashLines[index[i]]);
     }
+        
     writeln("];");
 }

@@ -1,6 +1,6 @@
 module test;
 import std.algorithm, std.stdio, std.conv, std.string, std.range, std.exception;
-import std.typetuple, std.ctype;
+import std.typetuple, std.ascii;
 import fred;
 import core.memory;
 
@@ -261,6 +261,8 @@ unittest
         TestVectors(    `\u`,               "",   "c",   "-",  "-"),
         TestVectors(    `\U`,               "",   "c",   "-",  "-"),
         TestVectors(    `\u003`,            "",   "c",   "-",  "-"),
+        TestVectors(    `[\x00-\x7f]{4}`,        "\x00\x09ab",   "y", "$&", "\x00\x09ab"),
+        TestVectors(    `[\cJ\cK\cA-\cD]{3}\cQ`, "\x01\x0B\x0A\x11", "y", "$&", "\x01\x0B\x0A\x11"),
         TestVectors(    `\r\n\v\t\f\\`,     "\r\n\v\t\f\\",   "y",   "$&", "\r\n\v\t\f\\"),
         TestVectors(    `[\u0003\u0001]{2}`,  "\u0001\u0003",         "y",   "$&", "\u0001\u0003"),
         TestVectors(    `^[\u0020-\u0080\u0001\n-\r]{8}`,  "abc\u0001\v\f\r\n",  "y",   "$&", "abc\u0001\v\f\r\n"),
@@ -289,7 +291,7 @@ unittest
 							fmt.popFront();
 							if(fmt.empty)
 								throw new Exception("wrong format in produceExpected");
-							if(isdigit(fmt.front))
+							if(ascii.isDigit(fmt.front))
 							{
 								auto nmatch = parse!uint(fmt);
 								if(nmatch < m.captures.length)
@@ -348,7 +350,7 @@ unittest
                     //debug writeln(e.msg);
                 }
 
-                assert((c == 'c') ? !i : i);
+                assert((c == 'c') ? !i : i, "failed to match pattern "~tvd.pattern);
 
                 if (c != 'c')
                 {
