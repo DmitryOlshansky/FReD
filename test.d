@@ -17,7 +17,7 @@ unittest
     assert(tmatch("abcdef", r1).hit == "abc");
     assert(tmatch("wida", r2).empty);
     //compile-time regex
-    enum ctr = regex("abc");
+    //enum ctr = regex("abc");
 }
 
 

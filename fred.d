@@ -1971,12 +1971,12 @@ if( is(Char : dchar) )
         }
         if(exhausted) //all matches collected
             return false;
+        auto mainStack = (cast(uint*)enforce(malloc(initialStack*uint.sizeof)))
+                [0..initialStack];
+        scope(exit) free(mainStack.ptr);
         for(;;)
         {
             size_t start = origin.length - s.length;
-            auto mainStack = (cast(uint*)enforce(malloc(initialStack*uint.sizeof)))
-                [0..initialStack];
-            scope(exit) free(mainStack.ptr);
             if(matchImpl(re.ir, matches[1..$], mainStack))
             {//s updated
                 matches[0].begin = start;
