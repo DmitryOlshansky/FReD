@@ -329,7 +329,7 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
 /// casefold - case insensitive matching, do casefolding on match in unicode mode
 /// freeform - ignore whitespace in pattern, to match space use [ ] or \s
 enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8,  };
-private immutable NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
+private enum NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
 //multiply-add, throws exception on overflow
 uint checkedMulAdd(uint f1, uint f2, uint add)
 {
@@ -361,13 +361,13 @@ dchar parseUniHex(Char)(ref immutable(Char)[] str, uint maxDigit)
     str = str[maxDigit..$];
     return val;
 }
-
+///index entry structure for name --> number of submatch
 struct NamedGroup
 {
     string name;
     uint group;
 }
-
+///holds pir of start-end markers for a submatch
 struct Group
 {
     size_t begin, end;
@@ -464,7 +464,7 @@ struct Charset
         debug(fred_charset) writeln(intervals);
         return this;
     }
-    /// this = this || set
+    /// this = this -- set
     ref sub(in Charset set)
     {
         if(empty)
@@ -651,14 +651,7 @@ struct Charset
     }
     
 }
-
-struct GeneralCategory
-{
-    string abbr;
-    string full;
-    immutable Charset set;
-}
-
+/// fussy compare for unicode property names as per UTS-18
 int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
     for(;;)
@@ -684,7 +677,7 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
         b.popFront();
     }
 }
-
+///ditto
 bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
 {
 	return comparePropertyName(a, b) < 0;
@@ -742,6 +735,7 @@ unittest
     assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
+
 /++
     fetch codepoint set corrsponding to a name (InBlock or binary property)
     empty on error
@@ -841,6 +835,8 @@ auto getUnicodeSet(string name, bool negated)
     }
     else if(ucmp(name, "any") == 0)
         s.add(Interval(0,0x10FFFF));
+    else if(ucmp(name, "ascii") == 0)
+        s.add(Interval(0,0x7f));
     else
     {
         uint key = phash(name);
@@ -884,6 +880,7 @@ struct Stack(T)//TODO: redo with TmpAlloc
         return t;
     }
 }
+
 struct Parser(R)
 if (isForwardRange!R && is(ElementType!R : dchar))
 {
@@ -898,13 +895,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
-    uint counterDepth = 0;
+    uint counterDepth = 0; //current depth of nested counted repetitions
     immutable(Charset)[] charsets;
     this(R pattern, R flags)
     {
         pat = origin = pattern;
         index = [ 0 ]; //map first to start-end of the whole match
-        //ir.reserve(pat.length);
+        ir.reserve(pat.length);
         next();
         parseFlags(flags);
         try
@@ -1368,6 +1365,14 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             case State.Char:
                 switch(current)
                 {
+                case '|':
+                    if(last == '|')
+                    {
+                        op = Operator.Union;
+                        next();
+                        break L_CharTermLoop;
+                    }
+                    goto default;   
                 case '-':
                     if(last == '-')
                     {
@@ -1431,8 +1436,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     last = '\v';
                     state = State.Char;
                     break;
-                case '\\':
-                    last = '\\';
+                case '\\', '[', ']':
+                    last = current;
                     state = State.Char;
                     break;
                 case 'p':
@@ -1443,8 +1448,16 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     set.add(parseUnicodePropertySpec(true));
                     state = State.Start;
                     continue L_CharTermLoop; //next char already fetched
-                case 'u': case 'U':
-                    last = parseUniHex(pat, current == 'u' ? 4 : 8);
+                case 'x':
+                    last = parseUniHex(pat, 2);
+                    state = State.Char;
+                    break;
+                case 'u':
+                    last = parseUniHex(pat, 4);
+                    state = State.Char;
+                    break;
+                case 'U':
+                    last = parseUniHex(pat, 8);
                     state = State.Char;
                     break;
                 //TODO: charsets for commmon properties
@@ -1472,7 +1485,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     op = Operator.Union;
                     goto case;
                 case ']':
-                    //error("unexpected end of charset");
                     //means dash is a single char not an interval specifier
                     addWithFlags(set, last, re_flags);
                     set.add('-');
@@ -1497,7 +1509,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                     state = State.Start;
                 }
                 break;            
-            case State.DashEscape:
+            case State.DashEscape:  // xxxx-\yyyy
                 uint end;
                 switch(current)
                 {
@@ -1516,11 +1528,17 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 case 'v':
                     end = '\v';
                     break;
-                case '\\': 
-                    end = '\\';
+                case '\\', '[', ']': 
+                    end = current;
                     break;
-                case  'u': case 'U':
-                    end = parseUniHex(pat, current == 'u' ? 4 : 8);
+                case 'x':
+                    end = parseUniHex(pat, 2);
+                    break;
+                case  'u': 
+                    end = parseUniHex(pat, 4);
+                    break;
+                case 'U':
+                    end = parseUniHex(pat, 8);
                     break;
                 default:
                     error("invalid escape sequence");
@@ -1587,7 +1605,6 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             return true;
         }
 
-
         L_CharsetLoop:
         do
         {
@@ -1646,13 +1663,13 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         put(Bytecode(IR.Charset, charsets.length));
         charsets ~= cast(immutable(Charset))(vstack.top);//unique
     }
-    ///parse and return IR
+    ///parse and return IR for escape stand alone escape sequence
     Bytecode escape()
     {
 
         switch(current)
         {
-        case 'f':   next(); return Bytecode(IR.Char,'\f');
+        case 'f':   next(); return Bytecode(IR.Char, '\f');
         case 'n':   next(); return Bytecode(IR.Char, '\n');
         case 'r':   next(); return Bytecode(IR.Char, '\r');
         case 't':   next(); return Bytecode(IR.Char, '\t');
@@ -1671,32 +1688,11 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             charsets ~= parseUnicodePropertySpec(current == 'P');
             return Bytecode(IR.Charset, charsets.length-1);
         case 'x':
-            auto save = pat;
-            uint code = 0;
-            for(int i=0;i<2;i++)
-            {
-                if(!next())
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'x');
-                }
-                if('0' <= current && current <= '9')
-                    code = code * 16 + current - '0';
-                else if('a' <= current && current <= 'f')
-                    code = code * 16 + current -'a' + 10;
-                else if('A' <= current && current <= 'Z')
-                    code = code * 16 + current - 'A' + 10;
-                else//wrong unicode escape treat \x like 'x'
-                {
-                    restart(save);
-                    return Bytecode(IR.Char, 'x');
-                }
-            }
+            uint code = parseUniHex(pat, 2);
             next();
             return Bytecode(IR.Char,code);
         case 'u': case 'U':
-            uint code = 0;
-            code = parseUniHex(pat, current == 'u' ? 4 : 8);
+            uint code = parseUniHex(pat, current == 'u' ? 4 : 8);
             next();
             return Bytecode(IR.Char, code);
         case 'c': //control codes
@@ -1768,7 +1764,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
 ///Object that holds all persistent data about compiled regex
 struct Program
 {
-    Bytecode[] ir;
+    Bytecode[] ir;      // compiled bytecode of pattern
     uint[] index;       //user group number -> internal number
     NamedGroup[] dict;  //maps name -> user group number
     uint ngroup;        //number of internal groups
@@ -3054,7 +3050,7 @@ public:
         index = prog.index;
         matches = new Group[prog.ngroup];
         engine = EngineType(prog, input);
-        popFront();
+        _empty = !engine.match(matches);
     }
     ///
     @property R pre()
