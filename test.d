@@ -249,6 +249,7 @@ unittest
         TestVectors(  `\p{Lu}+`,                      "абвГДЕ",   "y",  "$&",      "ГДЕ"),
         TestVectors(  `^\p{Currency Symbol}\p{Sc}`    "$₤",       "y",  "$&",      "$₤"),  
         TestVectors(  `\p{Common}\p{Thai}`            "!ฆ",       "y",  "$&",      "!ฆ"), 
+        TestVectors(  `[\d\s]*\D`,     "12 \t3\U00001680\u0F20_2",        "y",  "$&", "12 \t3\U00001680\u0F20_"),
 //case insensitive:
         TestVectors(   `^abcdEf$`,           "AbCdEF"                 "y",   "$&", "AbCdEF",      "i"),
         TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",             "y",   "$&", "рУсскИй ЯзЫк",     "i"),
@@ -266,8 +267,9 @@ unittest
         TestVectors(    `\r\n\v\t\f\\`,     "\r\n\v\t\f\\",   "y",   "$&", "\r\n\v\t\f\\"),
         TestVectors(    `[\u0003\u0001]{2}`,  "\u0001\u0003",         "y",   "$&", "\u0001\u0003"),
         TestVectors(    `^[\u0020-\u0080\u0001\n-\r]{8}`,  "abc\u0001\v\f\r\n",  "y",   "$&", "abc\u0001\v\f\r\n"),
+        TestVectors(    `\w+\S\w+`, "ab7!44c", "y", "$&", "ab7!44c"),
 // no newline inside \r\n :
-        TestVectors(    `\r.*$`,    "abc\r\nxy", "y",    "$&", "\r\nxy"),
+        TestVectors(    `\r.*?$`,    "abc\r\nxy", "y",    "$&", "\r\nxy"),
         ];
 
     int i;

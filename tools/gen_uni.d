@@ -41,6 +41,7 @@ import fred;");
     loadBlocks("Blocks.txt");
     loadProperties("PropList.txt");
     loadProperties("DerivedGeneralCategory.txt");
+    loadProperties("DerivedCoreProperties.txt");
     loadProperties("Scripts.txt");
     testCasingIrregular();
     writeCaseFolding();

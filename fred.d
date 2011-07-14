@@ -605,12 +605,12 @@ struct Charset
         return this;
     }
     /// this = !this (i.e. [^...] in regex syntax)
-    void negate()
+    auto negate()
     {
         if(intervals.empty)
         {
             intervals ~= Interval(0, 0x10FFFF);
-            return;
+            return this;
         }
         Interval[] negated;
         if(intervals[0].begin != 0)
@@ -620,6 +620,7 @@ struct Charset
         if(intervals[$-1].end != 0x10FFFF)
             negated ~= Interval(intervals[$-1].end+1, 0x10FFFF);
         intervals = negated;
+        return this;
     }
     /// test if ch is present in this set
     bool contains(dchar ch) const
@@ -736,10 +737,17 @@ unittest
     assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
+//property for \w character class
+Charset wordCharacter;
+
+static this()
+{
+    wordCharacter.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
+        .add(unicodeMe).add(unicodeNd).add(unicodePc); 
+}
 
 /++
     fetch codepoint set corrsponding to a name (InBlock or binary property)
-    empty on error
 +/
 immutable(Charset) getUnicodeSet(in char[] name, bool negated)
 {
@@ -853,7 +861,7 @@ immutable(Charset) getUnicodeSet(in char[] name, bool negated)
         {
             uint key = phash(name);
             if(key >= PHASHNKEYS || ucmp(name,unicodeProperties[key].name) != 0)
-                throw("invalid property name");
+                enforce(0, "invalid property name");
             s = cast(Charset)unicodeProperties[key].set;
         }
         else
@@ -1491,21 +1499,31 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 case 'U':
                     last = parseUniHex(pat, 8);
                     state = State.Char;
+                    break;                
+                case 'd':
+                    set.add(unicodeNd);
+                    state = State.Start;
                     break;
-                //TODO: charsets for commmon properties
-                /+
-                    case 'd':
-
-                    case 'D':
-
-                    case 's':
-
-                    case 'S':
-
-                    case 'w':
-
-                    case 'W':
-                +/
+                case 'D':
+                    set.add(unicodeNd.dup.negate);
+                    state = State.Start;
+                    break;
+                case 's':
+                    set.add(unicodeWhite_Space);
+                    state = State.Start;
+                    break;
+                case 'S':
+                    set.add(unicodeWhite_Space.dup.negate);
+                    state = State.Start;
+                    break;
+                case 'w':
+                    set.add(wordCharacter);
+                    state = State.Start;
+                    break;
+                case 'W':
+                    set.add(wordCharacter.dup.negate);
+                    state = State.Start;
+                    break;
                 default:
 					assert(0);
                 }
@@ -2143,37 +2161,37 @@ if( is(Char : dchar) )
                 s.popFront();
                 break;
             case IR.Word:
-                if(s.empty || !isUniAlpha(s.front))
+                if(s.empty || !wordCharacter.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Notword:
-                if(s.empty || isUniAlpha(s.front))
+                if(s.empty || wordCharacter.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Digit:
-                if(s.empty || !ascii.isDigit(s.front))
+                if(s.empty || !unicodeNd.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Notdigit:
-                if(s.empty || ascii.isDigit(s.front))
+                if(s.empty || unicodeNd.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Notdigit);
                 break;
             case IR.Space:
-                if(s.empty || !isWhite(s.front))
+                if(s.empty || !unicodeWhite_Space.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Space);
                 break;
             case IR.Notspace:
-                if(s.empty || isWhite(s.front))
+                if(s.empty || unicodeWhite_Space.contains(s.front))
                     goto L_backtrack;
                 s.popFront();
                 pc += IRL!(IR.Notspace);
@@ -2867,7 +2885,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Word:
-                        if(isUniAlpha(front))
+                        if(wordCharacter.contains(front))
                         {
                             t.pc += IRL!(IR.Word);
                             nlist.insertBack(t);
@@ -2877,7 +2895,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notword:
-                        if(!isUniAlpha(front))
+                        if(!wordCharacter.contains(front))
                         {
                             t.pc += IRL!(IR.Notword);
                             nlist.insertBack(t);
@@ -2887,7 +2905,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Digit:
-                        if(ascii.isDigit(front))
+                        if(unicodeNd.contains(front))
                         {
                             t.pc += IRL!(IR.Digit);
                             nlist.insertBack(t);
@@ -2897,7 +2915,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notdigit:
-                        if(!ascii.isDigit(front))
+                        if(!unicodeNd.contains(front))
                         {
                             t.pc += IRL!(IR.Notdigit);
                             nlist.insertBack(t);
@@ -2907,7 +2925,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Space:
-                        if(isWhite(front))
+                        if(unicodeWhite_Space.contains(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -2917,7 +2935,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notspace:
-                        if(!isWhite(front))
+                        if(!unicodeWhite_Space.contains(front))
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
