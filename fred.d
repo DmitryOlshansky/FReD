@@ -2613,21 +2613,21 @@ struct ThompsonMatcher(Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && isUniAlpha(front))
+                    if(atStart && wordCharacter.contains(front))
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && isUniAlpha(back))
+                            && wordCharacter.contains(back))
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = isUniAlpha(front) != 0;
-                        bool ab = isUniAlpha(back) != 0;
+                        bool af = wordCharacter.contains(front) != 0;
+                        bool ab = wordCharacter.contains(back) != 0;
                         if(af ^ ab)
                         {
                             t.pc += IRL!(IR.Wordboundary);
@@ -2641,14 +2641,14 @@ struct ThompsonMatcher(Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && !isUniAlpha(front))
+                    if(atStart && !wordCharacter.contains(front))
                     {
                         recycle(t);
                         t = worklist.fetch();
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !isUniAlpha(back))
+                            && !wordCharacter.contains(back))
                     {
                         recycle(t);
                         t = worklist.fetch();
@@ -2656,8 +2656,8 @@ struct ThompsonMatcher(Char)
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = isUniAlpha(front) != 0;
-                        bool ab = isUniAlpha(back)  != 0;
+                        bool af = wordCharacter.contains(front) != 0;
+                        bool ab = wordCharacter.contains(back)  != 0;
                         if(af ^ ab)
                         {
                             recycle(t);
