@@ -99,15 +99,12 @@ unittest
         TestVectors(  "a[]b",      "-",    "c",    "-",    "-" ),
         TestVectors(  "a[",        "-",    "c",    "-",    "-" ),
         TestVectors(  "a]",        "a]",   "y",    "$&",    "a]" ),
-//This one won't ever be supported, it's incompatible with our nested [] syntax
-//TestVectors(  "a[]]b",     "a]b",  "y",    "&",    "a]b" ),
+        TestVectors(  "a[\\]]b",     "a]b",  "y",  "$&",    "a]b" ),
         TestVectors(  "a[^bc]d",   "aed",  "y",    "$&",    "aed" ),
         TestVectors(  "a[^bc]d",   "abd",  "n",    "-",    "-" ),
         TestVectors(  "a[^-b]c",   "adc",  "y",    "$&",    "adc" ),
         TestVectors(  "a[^-b]c",   "a-c",  "n",    "-",    "-" ),
-//same here:
-//TestVectors(  "a[^]b]c",   "a]c",  "n",    "-",    "-" ),
-//TestVectors(  "a[^]b]c",   "adc",  "y",    "&",    "adc" ),
+        TestVectors(  "a[^\\]b]c",   "adc",  "y",  "$&",    "adc" ),
         TestVectors(  "ab|cd",     "abc",  "y",    "$&",    "ab" ),
         TestVectors(  "ab|cd",     "abcd", "y",    "$&",    "ab" ),
         TestVectors(  "()ef",      "def",  "y",    "$&-$1",        "ef-" ),
@@ -361,7 +358,7 @@ unittest
                 {
                     auto m = matchFn(to!(String)(tvd.input), r);
                     i = !m.empty;
-                    assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern: ", tvd.pattern));
+                    assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern #", a ,": ", tvd.pattern));
                     if (c == 'y')
                     {
                         auto result = produceExpected(m, to!(String)(tvd.format));
@@ -374,7 +371,7 @@ unittest
         }
         writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
     }
-    //run_tests!match(); //backtracker
+    run_tests!match(); //backtracker
     run_tests!tmatch(); //thompson VM
 }
 
