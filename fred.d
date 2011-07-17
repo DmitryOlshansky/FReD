@@ -1925,13 +1925,18 @@ struct Program
 }
 
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
-struct Regex(Char)
+/*struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
     Program storage;
     this(Program rs){ storage = rs; }
     alias storage this;
 
+}*/
+template Regex(Char)
+    if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
+{
+    alias Program Regex;
 }
 
 /// Simple UTF-string stream abstraction (w/o normalization and such)
@@ -2021,8 +2026,13 @@ if( is(Char : dchar) )
     this(Program program, String input)
     {
         re = program;
-        s = Input!Char(input);        
+        s = Input!Char(input);
         exhausted = false;
+    }
+    //
+    this(this)
+    {
+        //writeln("*");
     }
     ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
@@ -2547,6 +2557,7 @@ struct ThompsonMatcher(Char)
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
     @property bool atEnd(){  return index == s.lastIndex; }
+    ///
     this(Program program, String input)
     {
         re = program;
@@ -2557,6 +2568,14 @@ struct ThompsonMatcher(Char)
         }
         genCounter = 0;
     }
+    ///
+    this(this)
+    {
+        if(re.hotspotTableSize)
+            merge[] = 0;
+        genCounter = 0;
+        //free list is  efectively shared ATM
+    }
     /++
         the usual match the input and fill matches
     +/
@@ -2566,6 +2585,8 @@ struct ThompsonMatcher(Char)
         {
             writeln("------------------------------------------");
         }
+        if(matched && !(re.flags & RegexOption.global))
+           return false;
         matched = false; //reset match flag
         Bytecode[] prog = re.ir;
 
@@ -3026,7 +3047,6 @@ struct ThompsonMatcher(Char)
             }
         }while(t);
     }
-
     ///get a dirty recycled Thread
     Thread* allocate()
     {
@@ -3088,9 +3108,56 @@ struct ThompsonMatcher(Char)
     }
 }
 
+//
+struct Captures(R)
+//    if(isSomeString!R)
+{
+    R input;
+    Group[] groups;
+    uint[] index;
+    Program re;
+    this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
+    {
+        input = rmatch.input;
+        index = rmatch.index;
+        groups = rmatch.matches;
+        re = rmatch.engine.re;
+    }
+    @property R front()
+    {
+        assert(!index.empty);
+        return input[groups[index[0]].begin .. groups[index[0]].end];
+    }
+    @property R back()
+    {
+        assert(!index.empty);
+        return input[groups[index[$-1]].begin .. groups[index[$-1]].end];
+    }
+    void popFront()
+    {
+        index = index[1..$];
+    }
+    void popBack()
+    {
+        index = index[0..$-1];
+    }
+    @property bool empty(){ return index.empty; }
+    R opIndex(size_t i)
+    {
+        return input[groups[index[i]].begin..groups[index[i]].end];
+    }
+    R opIndex(string i)
+    {
+        size_t index = re.lookupNamedGroup(i);
+        return opIndex(index);
+    }
+    @property size_t length() const { return index.length; }
+}
+
 /**
 */
 struct RegexMatch(R, alias Engine = BacktrackingMatcher)
+    if(isSomeString!R)
 {
 private:
     R input;
@@ -3101,50 +3168,7 @@ private:
     NamedGroup[] named;
     alias Engine!(Unqual!(typeof(R.init[0]))) EngineType;
     EngineType engine;
-    struct Captures
-    {
-        R input;
-        Group[] groups;
-        uint[] index;
-        Program re;
-        this(ref RegexMatch rmatch)
-        {
-            input = rmatch.input;
-            index = rmatch.index;
-            groups = rmatch.matches;
-            re = rmatch.engine.re;
-        }
-        @property R front()
-        {
-            assert(!index.empty);
-            return input[groups[index[0]].begin .. groups[index[0]].end];
-        }
-        @property R back()
-        {
-            assert(!index.empty);
-            return input[groups[index[$-1]].begin .. groups[index[$-1]].end];
-        }
-        void popFront()
-        {
-            index = index[1..$];
-        }
-        void popBack()
-        {
-            index = index[0..$-1];
-        }
-        @property bool empty(){ return index.empty; }
-        R opIndex(size_t i)
-        {
-            return input[groups[index[i]].begin..groups[index[i]].end];
-        }
-        R opIndex(string i)
-        {
-            size_t index = re.lookupNamedGroup(i);
-            return opIndex(index);
-        }
-        @property size_t length() const { return index.length; }
-    }
-
+    
 public:
     ///
     this(Program prog, R _input)
@@ -3158,14 +3182,12 @@ public:
     ///
     @property R pre()
     {
-        assert(!empty);
-        return input[0 .. matches[0].begin];
+        return empty ? input[] : input[0 .. matches[0].begin];
     }
     ///
     @property R post()
     {
-        assert(!empty);
-        return input[matches[0].end..$];
+        return empty ? input[] : input[matches[0].end .. $];
     }
     ///
     @property R hit()
@@ -3174,7 +3196,7 @@ public:
         return input[matches[0].begin .. matches[0].end];
     }
     ///
-    @property auto front()
+    @property ref front()
     {
         return this;
     }
@@ -3187,9 +3209,10 @@ public:
     ///
     @property bool empty(){ return _empty; }
     ///
-    @property auto captures(){ return Captures(this); }
+    @property auto captures(){ return Captures!R(this); }
 }
 
+///
 auto regex(S)(S pattern, S flags=[])
 {
     auto parser = Parser!(typeof(pattern))(pattern, flags);
@@ -3197,15 +3220,200 @@ auto regex(S)(S pattern, S flags=[])
     return r;
 }
 
-auto match(R,C)(R input, Regex!C re)
+///
+auto match(R)(R input, Program re)
 {
     return RegexMatch!(Unqual!(typeof(input)))(re, input);
 }
 
-auto tmatch(R,C)(R input, Regex!C re)
+///
+auto tmatch(R)(R input, Program re)
 {
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
+
+
+private void replaceImpl(R)(in ElementEncodingType!R[] format, Captures!R captures, void delegate(in ElementEncodingType[]) sink)
+{
+    for(;;)
+    {
+        
+        switch (c)
+        {
+        case '&':
+            
+        case '`':
+            
+
+        case '\'':
+            
+		case '$':
+			fmt.popFront();
+			if(fmt.empty)
+				throw new Exception("wrong format in produceExpected");
+			if(ascii.isDigit(fmt.front))
+			{
+				auto nmatch = parse!uint(fmt);
+				if(nmatch < m.captures.length)
+	                result ~= m.captures[nmatch];
+			}
+			else if(fmt.front == '&')
+			{
+				result ~= m.captures[0];
+				fmt.popFront();
+			}
+			else if(fmt.front == '$')
+			{
+				result ~= '$';
+				fmt.popFront();
+			}
+			else if(fmt.front == '{')
+			{
+				fmt.popFront();
+				string s;
+				while(!fmt.empty && fmt.front != '}')
+				{
+					s ~= fmt.front;
+					fmt.popFront();
+				}
+				result ~= m.captures[s];
+				if(fmt.front != '}')
+					throw new Exception("wrong format in produceExpected");
+				fmt.popFront();
+			}
+			else
+				throw new Exception("wrong format in produceExpected");
+
+			break;
+        default:
+            result ~= fmt.front;
+            fmt.popFront();
+        }
+    }
+}
+
+/**
+Range that splits another range using a regular expression as a
+separator.
+
+Example:
+----
+auto s1 = ", abc, de,  fg, hi, ";
+assert(equal(splitter(s1, regex(", *")),
+    ["", "abc", "de", "fg", "hi", ""]));
+----
+ */
+struct Splitter(Range, alias Engine=ThompsonMatcher)
+    if(isSomeString!Range)
+{
+    Range _input;
+    size_t _offset;
+    alias RegexMatch!(Range, Engine) Rx; 
+    Rx _match;
+
+    this(Range input, Program separator)
+    {
+        _input = input;
+        separator.flags |= RegexOption.global;
+        if (_input.empty)
+        {
+            // there is nothing to match at all, make _offset > 0
+            _offset = 1;
+        }
+        else
+        {
+            _match = Rx(separator, _input);
+        }
+    }
+
+    auto ref opSlice()
+    {
+        return this.save();
+    }
+    ///
+    @property Range front()
+    {
+        assert(!empty && _offset <= _match.pre.length
+                && _match.pre.length <= _input.length);
+        return _input[_offset .. min($, _match.pre.length)];
+    }
+    ///
+    @property bool empty()
+    {
+        return _offset > _input.length;
+    }
+    ///
+    void popFront()
+    {
+        assert(!empty);
+        if (_match.empty)
+        {
+            // No more separators, work is done here
+            _offset = _input.length + 1;
+        }
+        else
+        {
+            // skip past the separator
+            _offset = _match.pre.length + _match.hit.length;
+            _match.popFront;
+        }
+    }
+    ///
+    @property typeof(this) save()
+    {
+        auto ret = this;
+        ret._input = _input.save;
+        return ret;
+    }
+}
+
+/// Ditto
+Splitter!(Range) splitter(Range)(Range r, Program pat)
+    if (is(Unqual!(typeof(Range.init[0])) : dchar))
+{
+    return Splitter!(Range)(r, pat);
+}
+
+unittest
+{
+    auto s1 = ", abc, de,     fg, hi, ";
+    auto sp1 = splitter(s1, regex(", *"));
+    auto w1 = ["", "abc", "de", "fg", "hi", ""];
+    assert(equal(sp1, w1));
+    auto a = match(s1, regex(", *", "g"));
+
+    auto s2 = ", abc, de,  fg, hi";
+    auto sp2 = splitter(s2, regex(", *"));
+    auto w2 = ["", "abc", "de", "fg", "hi"];
+
+    uint cnt;
+    foreach(e; sp2) {
+        
+    }
+    assert(equal(sp2, w2));
+}
+
+unittest
+{
+    char[] s1 = ", abc, de,  fg, hi, ".dup;
+    auto sp2 = splitter(s1, regex(", *"));
+}
+
+String[] split(String)(String input, Program rx)
+{
+    auto a = appender!(String[])();
+    foreach(e; splitter(input, rx))
+        a.put(e);
+    return a.data;
+}
+
+unittest
+{
+    auto s1 = ", abc, de,  fg, hi, ";
+    auto w1 = ["", "abc", "de", "fg", "hi", ""];
+    assert(equal(split(s1, regex(", *")), w1[]));
+}
+
 /// Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception
 {

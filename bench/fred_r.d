@@ -5,7 +5,12 @@ import std.stdio;
 import std.datetime;
 
 import fred;
-
+version(backtracking)
+	alias match matchFn;
+else version(thompson)	
+	alias tmatch matchFn;
+else
+	static assert(0, "Choose version: backtracking or thompson");
 int main(string[] argv)
 {
     if(argv.length < 3){
@@ -18,12 +23,12 @@ int main(string[] argv)
     StopWatch sw;
     sw.start();
     if(argv.length == 4 && argv[3] =="print")
-        foreach(m; tmatch(data,engine)){
+        foreach(m; matchFn(data,engine)){
             writeln(m.hit);
             count++;
         }
     else
-        foreach(m; tmatch(data,engine)){
+        foreach(m; matchFn(data,engine)){
             count++;
         }
     sw.stop();
