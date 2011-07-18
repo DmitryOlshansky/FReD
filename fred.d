@@ -1892,17 +1892,15 @@ struct Program
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
 	///
-	uint lookupNamedGroup(string name)
+	uint lookupNamedGroup(String)(String name)
 	{
 		//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
         uint fnd;
         for(fnd = 0; fnd<dict.length; fnd++)
-            if(dict[fnd].name == name)
+            if(equal(dict[fnd].name,name))
                 break;
         if(fnd == dict.length)
                throw new Exception("out of range");
-		/*if(dict[fnd].name != name)
-			throw new Exception("out of range");*/
 		return dict[fnd].group;
 	}
 	///
@@ -3142,11 +3140,12 @@ struct Captures(R)
         index = index[0..$-1];
     }
     @property bool empty(){ return index.empty; }
-    R opIndex(size_t i)
+    R opIndex()(size_t i)
     {
         return input[groups[index[i]].begin..groups[index[i]].end];
     }
-    R opIndex(string i)
+    R opIndex(String)(String i)
+        if(isSomeString!String)
     {
         size_t index = re.lookupNamedGroup(i);
         return opIndex(index);
@@ -3232,64 +3231,90 @@ auto tmatch(R)(R input, Program re)
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
 
-
-private void replaceImpl(R)(in ElementEncodingType!R[] format, Captures!R captures, void delegate(in ElementEncodingType[]) sink)
+R replace(R)(R input, Program re, R format)
 {
-    for(;;)
+    auto app = appender!(R)();
+    auto matches = match(input, re);
+    size_t offset = 0;
+    foreach(m; matches)
     {
-        
-        switch (c)
-        {
-        case '&':
-            
-        case '`':
-            
-
-        case '\'':
-            
-		case '$':
-			fmt.popFront();
-			if(fmt.empty)
-				throw new Exception("wrong format in produceExpected");
-			if(ascii.isDigit(fmt.front))
-			{
-				auto nmatch = parse!uint(fmt);
-				if(nmatch < m.captures.length)
-	                result ~= m.captures[nmatch];
-			}
-			else if(fmt.front == '&')
-			{
-				result ~= m.captures[0];
-				fmt.popFront();
-			}
-			else if(fmt.front == '$')
-			{
-				result ~= '$';
-				fmt.popFront();
-			}
-			else if(fmt.front == '{')
-			{
-				fmt.popFront();
-				string s;
-				while(!fmt.empty && fmt.front != '}')
-				{
-					s ~= fmt.front;
-					fmt.popFront();
-				}
-				result ~= m.captures[s];
-				if(fmt.front != '}')
-					throw new Exception("wrong format in produceExpected");
-				fmt.popFront();
-			}
-			else
-				throw new Exception("wrong format in produceExpected");
-
-			break;
-        default:
-            result ~= fmt.front;
-            fmt.popFront();
-        }
+        app.put(m.pre[offset .. $]);
+        //writeln(app.data);
+        replaceFmt(format, m.captures, app);
+        offset = m.pre.length + m.hit.length;
     }
+    app.put(input[offset .. $]);
+    return app.data;
+}
+
+void replaceFmt(R, OutR)(R format, Captures!R captures, OutR sink, bool ignoreBadSubs=false)
+    if(isOutputRange!(OutR, ElementEncodingType!R[]))
+{
+    enum State { Normal, Escape, Dollar };
+    auto state = State.Normal;
+    size_t offset;
+L_Replace_Loop:
+    while(!format.empty)
+        final switch(state)
+        {
+        case State.Normal:
+            for(offset = 0; offset < format.length; offset++)//no decoding
+            {
+                switch(format[offset])
+                {
+                case '\\':
+                    state = State.Escape;
+                    sink.put(format[0 .. offset]);
+                    format = format[offset+1 .. $];// safe since special chars are ascii only
+                    continue L_Replace_Loop;
+                case '$':
+                    state = State.Dollar;
+                    sink.put(format[0 .. offset]);
+                    format = format[offset+1 .. $];//ditto
+                    continue L_Replace_Loop;
+                default: 
+                }
+            }
+            sink.put(format[0 .. offset]);
+            format = format[offset .. $];
+            break;
+        case State.Escape:
+            offset = std.utf.stride(format, 0);
+            sink.put(format[0 .. offset]);
+            format = format[offset .. $];
+            state = State.Normal;
+            break;
+        case State.Dollar:
+            if(ascii.isDigit(format[0]))
+            {
+                uint digit = parse!uint(format);
+                enforce(ignoreBadSubs || digit < captures.length, text("invalid submatch number ", digit));
+                if(digit < captures.length)                    
+                    sink.put(captures[digit]);
+            }
+            else if(format[0] == '{') 
+            {
+                auto x = find!"!std.ascii.isAlpha(a)"(format[1..$]);
+                enforce(!x.empty && x[0] == '}', "no matching '}' in replacement format");
+                auto name = format[1 .. $ - x.length];
+                format = x[1..$];
+                enforce(!name.empty, "invalid name in ${...} replacement format");
+                sink.put(captures[name]);
+            }
+            else if(format[0] == '&')
+            {
+                sink.put(captures[0]);
+                format = format[1 .. $];
+            }
+            else if(format[0] == '$')
+            {
+                sink.put(format[0 .. 1]);
+                format = format[1 .. $];
+            }
+            state = State.Normal;
+            break;
+        }
+    enforce(state == State.Normal, "invalid format string in regex replace");
 }
 
 /**
@@ -3359,11 +3384,9 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
         }
     }
     ///
-    @property typeof(this) save()
+    @property auto save()
     {
-        auto ret = this;
-        ret._input = _input.save;
-        return ret;
+        return this;
     }
 }
 
@@ -3374,32 +3397,10 @@ Splitter!(Range) splitter(Range)(Range r, Program pat)
     return Splitter!(Range)(r, pat);
 }
 
-unittest
-{
-    auto s1 = ", abc, de,     fg, hi, ";
-    auto sp1 = splitter(s1, regex(", *"));
-    auto w1 = ["", "abc", "de", "fg", "hi", ""];
-    assert(equal(sp1, w1));
-    auto a = match(s1, regex(", *", "g"));
 
-    auto s2 = ", abc, de,  fg, hi";
-    auto sp2 = splitter(s2, regex(", *"));
-    auto w2 = ["", "abc", "de", "fg", "hi"];
-
-    uint cnt;
-    foreach(e; sp2) {
-        
-    }
-    assert(equal(sp2, w2));
-}
-
-unittest
-{
-    char[] s1 = ", abc, de,  fg, hi, ".dup;
-    auto sp2 = splitter(s1, regex(", *"));
-}
 
 String[] split(String)(String input, Program rx)
+    if(isSomeString!String)
 {
     auto a = appender!(String[])();
     foreach(e; splitter(input, rx))
@@ -3407,12 +3408,6 @@ String[] split(String)(String input, Program rx)
     return a.data;
 }
 
-unittest
-{
-    auto s1 = ", abc, de,  fg, hi, ";
-    auto w1 = ["", "abc", "de", "fg", "hi", ""];
-    assert(equal(split(s1, regex(", *")), w1[]));
-}
 
 /// Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception

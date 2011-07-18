@@ -1,5 +1,6 @@
 module test;
-import std.algorithm, std.stdio, std.conv, std.string, std.range, std.exception;
+import std.algorithm, std.stdio, std.conv, std.range, std.exception;
+import std.string: strip;
 import std.typetuple, std.ascii;
 import fred;
 import core.memory;
@@ -285,53 +286,9 @@ unittest
             alias immutable(Char)[] String;
             String produceExpected(M,Range)(M m, Range fmt)
             {
-                String result;
-                while (!fmt.empty)
-                    switch (fmt.front)
-                    {
-						case '$':
-							fmt.popFront();
-							if(fmt.empty)
-								throw new Exception("wrong format in produceExpected");
-							if(ascii.isDigit(fmt.front))
-							{
-								auto nmatch = parse!uint(fmt);
-								if(nmatch < m.captures.length)
-	                                result ~= m.captures[nmatch];
-							}
-							else if(fmt.front == '&')
-							{
-								result ~= m.captures[0];
-								fmt.popFront();
-							}
-							else if(fmt.front == '$')
-							{
-								result ~= '$';
-								fmt.popFront();
-							}
-							else if(fmt.front == '{')
-							{
-								fmt.popFront();
-								string s;
-								while(!fmt.empty && fmt.front != '}')
-								{
-									s ~= fmt.front;
-									fmt.popFront();
-								}
-								result ~= m.captures[s];
-								if(fmt.front != '}')
-									throw new Exception("wrong format in produceExpected");
-								fmt.popFront();
-							}
-							else
-								throw new Exception("wrong format in produceExpected");
-
-							break;
-                        default:
-                            result ~= fmt.front;
-                            fmt.popFront();
-                    }
-                return result;
+                auto app = appender!(String)();
+                replaceFmt(fmt, m.captures, app, true);
+                return app.data;
             }
             Regex!(Char) r;
             start = 0;
@@ -361,6 +318,7 @@ unittest
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern #", a ,": ", tvd.pattern));
                     if (c == 'y')
                     {
+                        writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
                         //make stderr collect all mismatches
                         assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
@@ -451,6 +409,46 @@ unittest
     }
     test_body!match();
     test_body!tmatch();
+}
+// tests for replace 
+unittest
+{
+    assert(replace("ark rapacity", regex("r"), "c") == "ack rapacity");
+    assert(replace("ark rapacity", regex("r", "g"), "c") == "ack capacity");
+    assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
+}
+
+// tests for splitter
+unittest
+{
+    auto s1 = ", abc, de,     fg, hi, ";
+    auto sp1 = splitter(s1, regex(", *"));
+    auto w1 = ["", "abc", "de", "fg", "hi", ""];
+    assert(equal(sp1, w1));
+    auto a = match(s1, regex(", *", "g"));
+
+    auto s2 = ", abc, de,  fg, hi";
+    auto sp2 = splitter(s2, regex(", *"));
+    auto w2 = ["", "abc", "de", "fg", "hi"];
+
+    uint cnt;
+    foreach(e; sp2) {
+        
+    }
+    assert(equal(sp2, w2));
+}
+
+unittest
+{
+    char[] s1 = ", abc, de,  fg, hi, ".dup;
+    auto sp2 = splitter(s1, regex(", *"));
+}
+
+unittest
+{
+    auto s1 = ", abc, de,  fg, hi, ";
+    auto w1 = ["", "abc", "de", "fg", "hi", ""];
+    assert(equal(split(s1, regex(", *")), w1[]));
 }
 
 version(unittest){
