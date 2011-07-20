@@ -478,20 +478,16 @@ struct Charset
         Interval[] result;
         auto a = intervals;
         const(Interval)[] b = set.intervals;
-        for(;;)
+        while(!a.empty && !b.empty)
         {
             if(a.front.end < b.front.begin)
             {
                 result ~= a.front;
                 a.popFront();
-                if(a.empty)
-                    break;
             }
             else if(a.front.begin > b.front.end)
             {
                 b.popFront();
-                if(b.empty)
-                    break;
             }
             else //there is an intersection
             {
@@ -501,23 +497,19 @@ struct Charset
                     if(a.front.end < b.front.end)
                     {
                         a.popFront();
-                        if(a.empty)
-                            break;
                     }
                     else if(a.front.end > b.front.end)
                     {
                         //adjust a in place
                         a.front.begin = b.front.end+1;
+                        if(a.front.begin > a.front.end)
+                            a.popFront();
                         b.popFront();
-                        if(b.empty)
-                            break;
                     }
                     else //==
                     {
                         a.popFront();
                         b.popFront();
-                        if(a.empty || b.empty)
-                            break;
                     }
                 }
                 else //a.front.begin > b.front.begin
@@ -525,18 +517,15 @@ struct Charset
                     if(a.front.end < b.front.end)
                     {
                         a.popFront();
-                        if(a.empty)
-                            break;
                     }
                     else
                     {
                         a.front.begin = b.front.end+1;
+                        if(a.front.begin > a.front.end)
+                            a.popFront();
                         b.popFront();
-                        if(b.empty)
-                            break;
                     }
                 }
-
             }
         }
         intervals = result ~ a;//+ leftover of original (if any)
