@@ -974,7 +974,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             if(r >= (uint.max/10))
                 error("Overflow in decimal number");
             r = 10*r + cast(uint)(current-'0');
-            next();
+            if(!next())
+                break;
         }
         return r;
     }
@@ -1621,18 +1622,22 @@ if (isForwardRange!R && is(ElementType!R : dchar))
                 break;
             case Operator.Union:
                 auto s = stack.pop();//2nd operand
+                enforce(!stack.empty, "no operand for '||'");
                 stack.top.add(s);
                 break;
             case Operator.Difference:
                 auto s = stack.pop();//2nd operand
+                enforce(!stack.empty, "no operand for '--'");
                 stack.top.sub(s);
                 break;
             case Operator.SymDifference:
                 auto s = stack.pop();//2nd operand
+                enforce(!stack.empty, "no operand for '~~'");
                 stack.top.symmetricSub(s);
                 break;
             case Operator.Intersection:
                 auto s = stack.pop();//2nd operand
+                enforce(!stack.empty, "no operand for '&&'");
                 stack.top.intersect(s);
                 break;
             default:

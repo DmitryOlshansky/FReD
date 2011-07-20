@@ -10,14 +10,18 @@ import std.stdio, std.string, std.array, std.exception, std.conv, std.random;
 
 int main(string[] args)
 {
-    if(args.length < 3)
+    void usage()
     {
         writeln("FReD stress test tool\nUsage: \n\tstress command <args>\n",
                 "Commands:\n",
                 "permutation: tests all permutations of terms up to max_pattern_length\n",
                 "\targs are: \"term1 term2 ... termN\" max_pattern_length\n",
                 "random: tests given number of random combination of terms of specified length",
-                "\targs are: \"term1 term2 ... termN\" length iterations");
+                "\targs are: \"term1 term2 ... termN\" length iterations [seed]");
+    }
+    if(args.length < 3)
+    {
+        usage();
         return 1;
     }
     if(args[1] == "permutation")
@@ -83,7 +87,8 @@ int main(string[] args)
         int len = to!int(args[3]);
         int iterations = to!int(args[4]);
         auto rnd = Xorshift(0);
-        auto seed = unpredictableSeed();
+        
+        auto seed = args.length < 6 ? unpredictableSeed() : to!uint(args[5]);
         rnd.seed(seed);
         writeln("Random test using seed ", seed);
         enforce(len > 0);
@@ -104,7 +109,7 @@ int main(string[] args)
             }
             catch(RegexException)
             {
-                writeln(app.data);
+                debug writeln(app.data);
             }
             catch(Throwable t)
             {
@@ -112,9 +117,15 @@ int main(string[] args)
                 throw t;
             }
             app.shrinkTo(0);
+            debug stderr.writeln(i);
             //writeln(app.data);
         }
         writefln("Complete with %d exceptions caught", numExceptions);
+    }
+    else
+    {
+        usage();
+        return 1;
     }
     return 0;
 }
