@@ -17,6 +17,8 @@ unittest
     assert(match("wida",r2).empty);
     assert(tmatch("abcdef", r1).hit == "abc");
     assert(tmatch("wida", r2).empty);
+    assert(!match("abc", "abc".dup).empty);
+    assert(!tmatch("abc", "abc".dup).empty);
     //compile-time regex
     //enum ctr = regex("abc");
 }
@@ -318,7 +320,7 @@ unittest
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern #", a ,": ", tvd.pattern));
                     if (c == 'y')
                     {
-                        writeln(" Test #", a, " pattern: ", tvd.pattern);
+                        debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
                         //make stderr collect all mismatches
                         assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
@@ -410,12 +412,31 @@ unittest
     test_body!match();
     test_body!tmatch();
 }
+
 // tests for replace 
 unittest
 {
-    assert(replace("ark rapacity", regex("r"), "c") == "ack rapacity");
-    assert(replace("ark rapacity", regex("r", "g"), "c") == "ack capacity");
-    assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
+    void test(String, alias matchFn)()
+    {
+        assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c")) == to!String("ack rapacity"));
+        assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c")) == to!String("ack capacity"));
+        assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]")) == to!String("[n]oon"));
+    
+        string baz(RegexMatch!(string) m)
+        {
+            return std.string.toUpper(m.hit);
+        }
+        auto s = fred.replace!(baz)("Strap a rocket engine on a chicken.",
+                regex("[ar]", "g"));
+        assert(s == "StRAp A Rocket engine on A chicken.");
+        writeln("!!! Replace test done "~matchFn.stringof~" on "~String.stringof~" !!!");
+    }
+    test!(string,   match)();
+    test!(wstring,  match)();
+    test!(dstring,  match)();
+    test!(string,   tmatch)();
+    test!(wstring,  tmatch)();
+    test!(dstring,  tmatch)();
 }
 
 // tests for splitter
@@ -425,15 +446,14 @@ unittest
     auto sp1 = splitter(s1, regex(", *"));
     auto w1 = ["", "abc", "de", "fg", "hi", ""];
     assert(equal(sp1, w1));
-    auto a = match(s1, regex(", *", "g"));
-
+    
     auto s2 = ", abc, de,  fg, hi";
     auto sp2 = splitter(s2, regex(", *"));
     auto w2 = ["", "abc", "de", "fg", "hi"];
 
     uint cnt;
     foreach(e; sp2) {
-        
+        assert(w2[cnt++] == e);
     }
     assert(equal(sp2, w2));
 }

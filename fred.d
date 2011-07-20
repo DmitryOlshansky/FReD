@@ -342,7 +342,7 @@ uint checkedMulAdd(uint f1, uint f2, uint add)
 
 /// test if a given string starts with hex number of maxDigit that's a valid codepoint
 /// returns it's value and skips these maxDigit chars on success, throws on failure
-dchar parseUniHex(Char)(ref immutable(Char)[] str, uint maxDigit)
+dchar parseUniHex(Char)(ref Char[] str, uint maxDigit)
 {
     enforce(str.length >= maxDigit,"incomplete escape sequence");        
     uint val;
@@ -2013,24 +2013,24 @@ if( is(Char : dchar) )
     dchar front;
     bool exhausted;
     bool seenCr;
+    ///
     @property bool atStart(){ return index == 0; }
+    ///
     @property bool atEnd(){ return index == s.lastIndex; }
+    ///
     void next()
     {    
         seenCr = front == '\r';
         if(!s.nextChar(front, index))
             index = s.lastIndex;
     }
+    ///
     this(Program program, String input)
     {
         re = program;
         s = Input!Char(input);
         exhausted = false;
-    }
-    //
-    this(this)
-    {
-        //writeln("*");
+        next();
     }
     ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
@@ -2049,7 +2049,7 @@ if( is(Char : dchar) )
         scope(exit) free(mainGroups.ptr);
         for(;;)
         {
-            next();
+            
             size_t start = index;
             if(matchImpl(re.ir, matches[1..$], mainStates, mainGroups))
             {//stream is updated here
@@ -2057,12 +2057,15 @@ if( is(Char : dchar) )
                 matches[0].end = index;
                 if(!(re.flags & RegexOption.global) || atEnd)
                     exhausted = true;
+                if(start == index)//empty match advances input
+                    next();
                 return true;
             }
             else
                 next();
             if(atEnd)
                 break;
+            next();
         }
         exhausted = true;
         return false;
@@ -2555,6 +2558,17 @@ struct ThompsonMatcher(Char)
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
     @property bool atEnd(){  return index == s.lastIndex; }
+    //
+    bool next()
+    {
+        seenCr = front == '\r';
+        if(!s.nextChar(front, index))
+        {
+            index =  s.lastIndex;
+            return false;
+        }
+        return true;
+    }
     ///
     this(Program program, String input)
     {
@@ -2569,8 +2583,7 @@ struct ThompsonMatcher(Char)
     ///
     this(this)
     {
-        if(re.hotspotTableSize)
-            merge[] = 0;
+        merge = merge.dup;
         genCounter = 0;
         //free list is  efectively shared ATM
     }
@@ -2585,45 +2598,44 @@ struct ThompsonMatcher(Char)
         }
         if(matched && !(re.flags & RegexOption.global))
            return false;
-        matched = false; //reset match flag
+        if(!matched)
+            next();
+        else//char in question is  fetched in prev call to match
+            matched = false;
         Bytecode[] prog = re.ir;
-
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
-        for(;;)
-        {
-            seenCr = front == '\r';
-            if(!s.nextChar(front, index))
+        if(!atEnd)// if no cahr 
+            for(;;)
             {
-                index =  s.lastIndex;
-                break;
-            }
-            genCounter++;
-            debug(fred_matching)
-            {
-                writefln("Threaded matching %d threads at index %s", clist.length, index);
-                foreach(t; clist[])
+                genCounter++;
+                debug(fred_matching)
                 {
-                    assert(t);
-                    writef("pc=%s ",t.pc);
-                    write(t.matches);
-                    writeln();
+                    writefln("Threaded matching %d threads at index %s", clist.length, index);
+                    foreach(t; clist[])
+                    {
+                        assert(t);
+                        writef("pc=%s ",t.pc);
+                        write(t.matches);
+                        writeln();
+                    }
                 }
+                for(Thread* t = clist.fetch(); t; t = clist.fetch())
+                {
+                    eval!true(t, matches);
+                }
+                if(!matched)//if we already have match no need to push the engine
+                    eval!true(createStart(index), matches);// new thread staring at this position
+                else if(nlist.empty)
+                {
+                    debug(fred_matching) writeln("Stopped  matching before consuming full input");
+                    break;//not a partial match for sure
+                }
+                clist = nlist;
+                nlist = ThreadList.init;
+                if(!next())
+                    break;
             }
-            for(Thread* t = clist.fetch(); t; t = clist.fetch())
-            {
-                eval!true(t, matches);
-            }
-            if(!matched)//if we already have match no need to push the engine
-                eval!true(createStart(index), matches);// new thread staring at this position
-            else if(nlist.empty)
-            {
-                debug(fred_matching) writeln("Stopped  matching before consuming full input");
-                break;//not a partial match for sure
-            }
-            clist = nlist;
-            nlist = ThreadList.init;
-        }
         genCounter++; //increment also on each end
         debug(fred_matching) writefln("Threaded matching %d threads at end", clist.length);
         //try out all zero-width posibilities
@@ -3224,22 +3236,35 @@ auto match(R)(R input, Program re)
 {
     return RegexMatch!(Unqual!(typeof(input)))(re, input);
 }
+///ditto
+auto match(R, String)(R input, String pat)
+    if(isSomeString!String)
+{
+    return RegexMatch!(Unqual!(typeof(input)))(regex(pat), input);
+}
 
 ///
 auto tmatch(R)(R input, Program re)
 {
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
+///ditto
+auto tmatch(R, String)(R input, String pat)
+    if(isSomeString!String)
+{
+    return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(regex(pat), input);
+}
 
-R replace(R)(R input, Program re, R format)
+///
+R replace(R, alias scheme=match)(R input, Program re, R format)
+    if(isSomeString!R)
 {
     auto app = appender!(R)();
-    auto matches = match(input, re);
+    auto matches = scheme(input, re);
     size_t offset = 0;
     foreach(m; matches)
     {
         app.put(m.pre[offset .. $]);
-        //writeln(app.data);
         replaceFmt(format, m.captures, app);
         offset = m.pre.length + m.hit.length;
     }
@@ -3247,6 +3272,24 @@ R replace(R)(R input, Program re, R format)
     return app.data;
 }
 
+///
+R replace(alias fun, R,alias scheme=match)(R input, Program re)
+    if(isSomeString!R)
+{
+    auto app = appender!(R)();
+    auto matches = scheme(input, re);
+    size_t offset = 0;
+    foreach(m; matches)
+    {
+        app.put(m.pre[offset .. $]);
+        app.put(fun(m));
+        offset = m.pre.length + m.hit.length;
+    }
+    app.put(input[offset .. $]);
+    return app.data;
+}
+
+///produce replacement string from format using captures for substitue
 void replaceFmt(R, OutR)(R format, Captures!R captures, OutR sink, bool ignoreBadSubs=false)
     if(isOutputRange!(OutR, ElementEncodingType!R[]))
 {
@@ -3396,9 +3439,7 @@ Splitter!(Range) splitter(Range)(Range r, Program pat)
 {
     return Splitter!(Range)(r, pat);
 }
-
-
-
+///
 String[] split(String)(String input, Program rx)
     if(isSomeString!String)
 {
@@ -3407,7 +3448,6 @@ String[] split(String)(String input, Program rx)
         a.put(e);
     return a.data;
 }
-
 
 /// Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception
