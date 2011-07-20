@@ -925,7 +925,8 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
     immutable(Charset)[] charsets;
-    this(R pattern, R flags)
+    this(S)(R pattern, S flags)
+        if(isSomeString!S)
     {
         pat = origin = pattern;
         index = [ 0 ]; //map first to start-end of the whole match
@@ -988,7 +989,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     /**
 
     */
-    void parseFlags(R flags)
+    void parseFlags(S)(S flags)
     {
         foreach(dchar ch; flags)
             switch(ch)
@@ -1146,26 +1147,24 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             case '|':
                 next();
                 fix = fixupStack.top;
-                switch(ir[fix].code)
+                if(ir.length > fix && ir[fix].code == IR.Option)
                 {
-                case IR.Option:
                     ir[fix] = Bytecode(ir[fix].code, ir.length - fix);
                     put(Bytecode(IR.GotoEndOr, 0));
                     fixupStack.top = ir.length; // replace latest fixup for Option
                     put(Bytecode(IR.Option, 0));
                     break;
-                default:    //start a new option
-                    if(fixupStack.length == 1)//only root entry
-                        fix = -1;
-                    uint len = ir.length - fix;
-                    insertInPlace(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
-                    assert(ir[fix+1].code == IR.OrStart);
-                    put(Bytecode(IR.GotoEndOr, 0));
-                    fixupStack.push(fix+1); // fixup for StartOR
-                    fixupStack.push(ir.length); //for Option
-                    put(Bytecode(IR.Option, 0));
                 }
-
+                //start a new option
+                if(fixupStack.length == 1)//only root entry
+                    fix = -1;
+                uint len = ir.length - fix;
+                insertInPlace(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
+                assert(ir[fix+1].code == IR.OrStart);
+                put(Bytecode(IR.GotoEndOr, 0));
+                fixupStack.push(fix+1); // fixup for StartOR
+                fixupStack.push(ir.length); //for Option
+                put(Bytecode(IR.Option, 0));
                 /*uint maxSub = 0; //maximum number of captures out of each code path
 
                 ngroup = maxSub;*/
@@ -3224,7 +3223,8 @@ public:
 }
 
 ///
-auto regex(S)(S pattern, S flags=[])
+auto regex(S, S2=string)(S pattern, S2 flags=[])
+    if(isSomeString!S && isSomeString!S2)
 {
     auto parser = Parser!(typeof(pattern))(pattern, flags);
     Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
