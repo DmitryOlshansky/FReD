@@ -1,9 +1,15 @@
 /// core of the streaming/decoding/caching engine
+enum QC { Yes, No, Maybe, Invalid };
 
+/// quick check if ch is allowed in NFC
+QC quickCheck(dchar ch)
+{
+    return QC.Yes;
+}
 
 /// Simple UTF-string stream abstraction with caching
 struct StreamCBuf(Char)
-    if(is(Char == char) || is(Char == wchar))
+    if(is(Char : dchar))//any char
 {
     alias const(Char)[] String;
     /// current chunk of the string
@@ -63,20 +69,22 @@ struct StreamCBuf(Char)
         assert(charBuf.length==indexBuf.length,"length of buffers have to be equal");
         assert(((charBuf.length-1)&charBuf.length)==0,"the length has to be a power of two");
         indexes[0]=ulong.max;
-        
     }
     /// adds a new chunck to evaluate
-    void addChunk(String chunk){
+    void addChunk(String chunk, bool lastOne=false){
         assert(chunkPos==chunkAtt.length);
-        chunkStart+=chunkAtt.length;
+        chunkStart += chunkAtt.length;
         maybeCompleteBuf(chunkStart); // should have been done before. Actually assert that it was done to make sure that updating the chunk directly is ok???
-        chunkAtt=chunk;
+        chunkAtt = chunk;
+        chunkPos = 0;
+        hasEnd = lastOne;
     }
     
     /// returns the next codepoint and position (start) if possible
-    bool nextChar(ref dchar res,ref long pos){
+    bool nextChar(ref dchar res,ref ulong pos){
         if (status==Status.DirectCharOne){ // normal case
-            if (chunkAtt.length>chunkPos){
+            if (chunkAtt.length>chunkPos)
+            {
                 dchar newC=chunkAtt[chunkPos];
                 ulong newPos=chunkPos+chunkStart;
                 ++chunkPos;
@@ -90,15 +98,18 @@ struct StreamCBuf(Char)
                     decodedChar=newC;
                     decodedPos=newPos;
                     return true;
-                case QC.No,QC.Maybe: // could try harder with maybe to quickly recover
+                case QC.No, QC.Maybe: // could try harder with maybe to quickly recover
                     maybeCompleteBuf(decodedPos);
                     bufPushNonNormal(decodedChar,decodedPos);
-                    bufPushNonNormal(newChar,newPos);
+                    bufPushNonNormal(newC,newPos);
                     status=Status.BufChar;
                     break;
-                default: assert(0);
+                default: 
+                    assert(0);
                 }
-            } else {
+            }
+            else
+            {
                 if (hasEnd) {
                     res=decodedChar;
                     pos=decodedPos;
@@ -107,7 +118,7 @@ struct StreamCBuf(Char)
                 }
                 maybeCompleteBuf(decodedChar);
                 bufPushNonNormal(decodedChar,decodedPos);
-                status=BufChar;
+                status = Status.BufChar;
                 return false; // we could automatically try to load more
             }
         }
@@ -124,7 +135,7 @@ struct StreamCBuf(Char)
             if (bufHistorySize<historyWindow) ++bufHistorySize;
             if (bufSize!=0){
                 return true;
-            } else if (quickCheck(res)==QuickCheck.Yes){ // could avoid if we cache the qc value (below in decoding)
+            } else if (quickCheck(res)==QC.Yes){ // could avoid if we cache the qc value (below in decoding)
                 status=Status.DirectCharOne;
                 decodedChar=res;
                 decodedPos=pos;
@@ -159,9 +170,9 @@ struct StreamCBuf(Char)
             }
         }
         if (status==Status.End) return false;
-        assert (status==Status.BufChar || status==Status.CharNone);
+        assert (status==Status.BufChar || status==Status.DirectCharNone);
         // decode until quickCheck==yes
-        QuickCheck qc=QuickCheck.Invalid;
+        QC qc=QC.Invalid;
         while (1){
             if (chunkAtt.length>chunkPos){
                 dchar newC=chunkAtt[chunkPos];
@@ -172,7 +183,7 @@ struct StreamCBuf(Char)
                 }
                 qc=quickCheck(newC);
                 if (Status.DirectCharNone || bufReadSize==0){
-                    if (qc==QuickCheck.Yes){
+                    if (qc==QC.Yes){
                         decodedChar=newC;
                         decodedPos=newPos;
                         status=Status.DirectCharOne;
@@ -182,7 +193,7 @@ struct StreamCBuf(Char)
                     }
                 }
                 bufPushNonNormal(newC,newPos);
-                if (qc==QuickCheck.Yes || bufReadSize==maxRead) break;
+                if (qc==QC.Yes || bufReadSize==maxRead) break;
             } else {
                 if (hasEnd){
                     break;
@@ -220,6 +231,7 @@ struct StreamCBuf(Char)
             indexes[bufPos]+=(1UL<<48)+1;
         }+/
         // even if qc!=Yes we keep the last char index as it is for the "next" decoding run
+        return true;
     }
     /// return the start of the grapheme that contains this the char at this index (if decodeing is needed)
     ulong decodeStart(ulong i){
@@ -236,6 +248,7 @@ struct StreamCBuf(Char)
         int mp=(bufPos+bufReadSize+bufSize)%bufAtt.length;
         bufAtt[mp]=c;
         indexes[mp]=pos;
+        bufSize++;
     }
     /// the next position (mostly given for informative purposes, normally you should not use this)
     ulong nextPos(){
@@ -274,15 +287,15 @@ struct StreamCBuf(Char)
     ulong bufEnd(){
         ulong res=indexes[(bufPos+bufSize+bufReadSize)%indexes.length];
         /// this value should *never* have high bits set
-        assert((res & (255UL<<48))==0 || res=ulong.max);
+        assert((res & (255UL<<48))==0 || res == ulong.max);
         return indexes[(bufPos+bufSize+bufReadSize)%indexes.length];
     }
     /// possibly completes the buffer checking the history window
     /// always moves the current position to the end of the read region
-    bool maybeCompleteBuf(ulong upTo){
+    void maybeCompleteBuf(ulong upTo){
         assert((upTo  & (255UL<<48))==0); // check what happens if we start with a 0 length chunk...
         assert(bufReadSize==0);
-        ulong finalHistoryWindowStart=chunkStart+chunk.length;
+        ulong finalHistoryWindowStart=chunkStart+bufAtt.length;
         if (!hasEnd){
             if (historyWindow>finalHistoryWindowStart)
                 finalHistoryWindowStart=0;
@@ -290,7 +303,7 @@ struct StreamCBuf(Char)
                 finalHistoryWindowStart-=historyWindow;
         }
         ulong bEnd=bufEnd();
-        assert(((bufAtt.lenth-1)&bufAtt.lenth)==0,"bufAtt.lenth must be a power of two");
+        assert(((bufAtt.length-1)&bufAtt.length)==0, "bufAtt.lenth must be a power of two");
         if (bEnd==ulong.max){ // start up
             if (finalHistoryWindowStart<upTo){
                 assert(chunkStart<=finalHistoryWindowStart);
@@ -316,7 +329,7 @@ struct StreamCBuf(Char)
             }
             if (finalHistoryWindowStart<upTo){
                 assert(chunkStart<=finalHistoryWindowStart);
-                size_t start=cast(size_t)(finalHistoryWindowStart-chunkStart);
+                ulong start= finalHistoryWindowStart-chunkStart;
                 bool skipFirst=false;
                 if (start<bEnd) {
                     start=bEnd;
@@ -325,7 +338,7 @@ struct StreamCBuf(Char)
                 // with char/wchar we might need to adjust start
                 size_t end=cast(size_t)(upTo-chunkStart);
                 assert(end<=chunkAtt.length);
-                size_t i=start;
+                size_t i = cast(size_t)start;
                 while (i<end){
                     dchar newC=cast(dchar)chunkAtt[i];
                     indexes[bufPos]=chunkStart+i;
@@ -364,22 +377,22 @@ struct StreamCBuf(Char)
             auto bufStart=streamBuf.bufStart();
             auto bufEnd=streamBuf.bufEnd();
             if (status==Access.InBuf && iPos+streamBuf.bufHistorySize==streamBuf.bufPos){
-                posAtt=decodeStart(streamBuf.indexes[bufStart]);
+                posAtt = streamBuf.decodeStart(streamBuf.indexes[cast(size_t)bufStart]);
                 // if we allow increasing the history window one should do something here
                 if (streamBuf.nextPos()-posAtt>=streamBuf.historyWindow) return false;
             }
-            if (bufEnd==ulong.max){
-                if (posAtt<=streamBuf.chunkStart) return false;
-                this.status=Access.PostBuf;
+            if (bufEnd == ulong.max){
+                if (posAtt <= streamBuf.chunkStart) return false;
+                this.status = Access.PostBuf;
                 bound=streamBuf.chunkStart;
             }
             if (posAtt>bufEnd){
-                this.status=Access.PreBuf;
+                this.status = Access.PreBuf;
                 bound=bufEnd;
             } else if (posAtt>bufStart){
-                this.status=Access.InBuf,
-                bound=bufStart;
-                iPos=bufPos+cast(int)(posAtt-indexes[bufPos]);
+                this.status = Access.InBuf,
+                bound = streamBuf.bufStart;
+                iPos=streamBuf.bufPos+cast(int)(posAtt-streamBuf.indexes[streamBuf.bufPos]);
             } else if (posAtt>streamBuf.chunkStart){
                 this.status=Access.PostBuf;
                 bound=streamBuf.chunkStart;
@@ -401,9 +414,9 @@ struct StreamCBuf(Char)
                 pos=streamBuf.indexes[iPos];
                 res=streamBuf.bufAtt[iPos];
                 return true;
-            case Access.PreBuf||Access.PostBuf:
+            case Access.PreBuf, Access.PostBuf:
                 --posAtt;
-                dchar newC=streamBuf[cast(size_t)(posAtt-bound)];
+                dchar newC=streamBuf.bufAtt[cast(size_t)(posAtt-bound)];
                 /// maybe decode more into newC for char/wchar, and update posAtt
                 res=newC;
                 pos=posAtt;
@@ -424,10 +437,52 @@ struct StreamCBuf(Char)
         return BackLooper(this);
     }
     
-    const(Char)[] opIndex(ulong from,ulong to,char[] buf=null){
+    const(Char)[] opIndex()(ulong from,ulong to,char[] buf=null){
         
     }
-    const(Char)[] opIndex(Group)(Group g,char[] buf=null){
+    const(Char)[] opIndex(G)(G g,char[] buf=null){
         return opIndex(g.start,g.end,buf);
     }
+}
+
+
+
+unittest
+{
+    import std.stdio;
+    dchar[] charBuf = new dchar[1024];
+    ulong[] indexes = new ulong[1024];
+    auto stream = StreamCBuf!dchar(charBuf, indexes);
+    dchar ch;
+    ulong index;
+    dstring hello = "Hello,";
+    stream.addChunk(hello);
+    size_t i=0;
+    while(stream.nextChar(ch, index))
+    {
+        //writeln(ch, " at ", index);
+        assert(ch == hello[i]);
+        assert(index == i);
+        i++;
+    }
+    assert(i == hello.length - 1);//last one waits possible normalization
+    dstring another = "another chunk";
+    stream.addChunk(another, true);
+    stream.nextChar(ch, index);
+    assert(index == hello.length - 1);
+    i++;
+    size_t j=0;
+    while(stream.nextChar(ch, index))
+    {
+        //writeln(ch, " at ", index);
+        assert(ch == another[j]);
+        assert(index == i+j);
+        j++;
+    }
+    assert(i == hello.length  && j == another.length);
+}
+
+version(StreamTest)
+{
+    void main(){}
 }
