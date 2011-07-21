@@ -62,7 +62,7 @@ struct StreamCBuf(Char)
     
     /// constructor, charBuf and indexBuf need to have the same size, which must be a power of two
     /// historyWindow can be at most charBuf.length-256
-    this(dchar[]charBuf,ulong[]indexBuf){
+    this(dchar[]charBuf,ulong[]indexBuf){// maybe pack them in single array of (dcahr,ulong) pairs ?? removes check, could improve cache locality
         indexes=indexBuf;
         bufAtt=charBuf;
         assert(charBuf.length>255,"length has to be larger than 255");
@@ -251,6 +251,8 @@ struct StreamCBuf(Char)
         bufSize++;
     }
     /// the next position (mostly given for informative purposes, normally you should not use this)
+    /// Q: the actual propose is still unclear for me, seems like it should return very different indexes depending on situation?
+    /// then 'informative' part is unclear to me, maybe(?) better add that it's a special thing to use in BackLooper
     ulong nextPos(){
         switch (status){
         case Status.DirectCharOne:
@@ -265,7 +267,7 @@ struct StreamCBuf(Char)
             assert(bufSize!=0 || bufReadSize!=0);
             return indexes[bufPos];
         case Status.End:
-            return ulong.max;
+            return chunkAtt.length;
         default:
             assert(0);
         }
@@ -416,7 +418,7 @@ struct StreamCBuf(Char)
                 return true;
             case Access.PreBuf, Access.PostBuf:
                 --posAtt;
-                dchar newC=streamBuf.bufAtt[cast(size_t)(posAtt-bound)];
+                dchar newC=streamBuf.chunkAtt[cast(size_t)(posAtt-bound)];
                 /// maybe decode more into newC for char/wchar, and update posAtt
                 res=newC;
                 pos=posAtt;
@@ -429,6 +431,7 @@ struct StreamCBuf(Char)
         this(ref StreamCBuf streamBuf){
             this.streamBuf=&streamBuf;
             this.posAtt=streamBuf.nextPos();
+            setupBound();
         }
         
     }
@@ -465,22 +468,60 @@ unittest
         assert(index == i);
         i++;
     }
-    assert(i == hello.length - 1);//last one waits possible normalization
+    assert(i == hello.length - 1);// OK, last one waits possible normalization
+    auto firstPass = stream.loopBack();
+    while(firstPass.nextChar(ch, index))
+    {
+        i--;
+        assert(ch == hello[i]);
+        assert(i == index);
+    }
     dstring another = "another chunk";
     stream.addChunk(another, true);
     stream.nextChar(ch, index);
+    assert(ch == ',');
     assert(index == hello.length - 1);
-    i++;
     size_t j=0;
     while(stream.nextChar(ch, index))
     {
         //writeln(ch, " at ", index);
         assert(ch == another[j]);
-        assert(index == i+j);
+        assert(index == hello.length + j);
         j++;
     }
-    assert(i == hello.length  && j == another.length);
+    assert(j == another.length);
+//BUG: history for the first chunk is still missing
+    auto back = stream.loopBack();
+    while(back.nextChar(ch, index))
+    {
+        //writeln(ch, " at ", index);
+        j--;
+        assert(ch == another[j]);
+        assert(index == j);
+    }
 }
+
+unittest// a very simple loopBack use (by one char)
+{
+    import std.stdio;
+    dchar[] charBuf = new dchar[512];
+    ulong[] indexes = new ulong[512];
+    dchar ch;
+    ulong index;
+    auto s2 = StreamCBuf!dchar(charBuf, indexes);
+    dstring chunk = "test history";
+    s2.addChunk(chunk);
+    s2.nextChar(ch, index);
+    //writeln(ch, " ", index);
+    auto back2 = s2.loopBack();
+    dchar ch2;
+    ulong index2;
+    back2.nextChar(ch2, index2);
+    //writeln(ch2, " ", index2);
+    assert(ch == ch2);
+    assert(index == index2);
+}
+
 
 version(StreamTest)
 {
