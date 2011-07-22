@@ -120,7 +120,11 @@ struct StreamCBuf(Char)
             size_t ii=(bufPos+bufSize+i)%bufAtt.length;
             formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
         }
-        formattedWrite(sink,",\n hasEnd:%d,\n",hasEnd);
+        formattedWrite(sink,",\n");
+        formattedWrite(sink," bufStart:%d,\n",bufStart());
+        formattedWrite(sink," bufEnd:%d\n",bufEnd());
+        formattedWrite(sink," nextPos:%d\n",nextPos());
+        formattedWrite(sink," hasEnd:%d,\n",hasEnd);
         formattedWrite(sink," decodedChar:%s,\n",to!(Char[])([decodedChar]));
         formattedWrite(sink," decodedPos:%d,\n",decodedPos);
         formattedWrite(sink," status:%s,\n",to!string(status));
@@ -165,6 +169,7 @@ struct StreamCBuf(Char)
                     maybeCompleteBuf(decodedPos);
                     bufPushNonNormal(decodedChar,decodedPos);
                     bufPushNonNormal(newC,newPos);
+                    bufPushPosNext(chunkPos+chunkStart); // avoidable?
                     status=Status.BufChar;
                     break;
                 default: 
@@ -181,6 +186,7 @@ struct StreamCBuf(Char)
                 }
                 maybeCompleteBuf(decodedPos);
                 bufPushNonNormal(decodedChar,decodedPos);
+                bufPushPosNext(chunkStart+chunkPos);
                 status = Status.BufChar;
                 return false; // we could automatically try to load more
             }
@@ -265,6 +271,7 @@ struct StreamCBuf(Char)
                 }
             }
         }
+        bufPushPosNext(chunkPos+chunkStart);
         // normalize the range bufPos..bufPos+bufReadSize-1 (bufSize==0)
         // and declare it as normalized updating bufSize
         //
@@ -303,6 +310,11 @@ struct StreamCBuf(Char)
     /// if we are at the end of the stream
     bool atEnd(){
         return status==Status.End;
+    }
+    /// adds the position of the next char (i.e. buffer end)
+    void bufPushPosNext(ulong pos){
+        int mp=(bufPos+bufReadSize+bufSize)%bufAtt.length;
+        indexes[mp]=pos;
     }
     /// adds a not yet normalized character c
     void bufPushNonNormal(dchar c,ulong pos){
@@ -343,7 +355,7 @@ struct StreamCBuf(Char)
             else
                 return chunkStart+chunkPos;
         }
-        return indexes[(bufPos-bufHistorySize)%indexes.length];
+        return indexes[(bufPos-bufHistorySize+indexes.length)%indexes.length];
     }
     /// last char read in the buffer (not necessarily decoded)
     /// returns a normal index (no high bits), or ulong.max if nothing was read
@@ -390,6 +402,7 @@ struct StreamCBuf(Char)
                     if (bufHistorySize<historyWindow) ++bufHistorySize;
                     if (bufPos>=bufAtt.length) bufPos-=bufAtt.length;
                 }
+                bufPushPosNext(chunkStart+upTo);
             }
         } else {
             if (bEnd+historyWindow>upTo) { // avoid holes
@@ -421,6 +434,7 @@ struct StreamCBuf(Char)
                     if (bufHistorySize<historyWindow) ++bufHistorySize;
                     if (bufPos>=bufAtt.length) bufPos-=bufAtt.length;
                 }
+                bufPushPosNext(chunkStart+upTo);
             } else if (bEnd+historyWindow<upTo){
                 // clear buf
                 bufHistorySize=0;
