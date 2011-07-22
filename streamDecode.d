@@ -68,7 +68,7 @@ struct StreamCBuf(Char)
     this(dchar[]charBuf,ulong[]indexBuf,size_t historyWindow=2){// maybe pack them in single array of (dcahr,ulong) pairs ?? removes check, could improve cache locality
         indexes=indexBuf;
         bufAtt=charBuf;
-        this.historyWindow=historyWindow;
+        this.historyWindow=historyWindow;   
         assert(charBuf.length>=historyWindow+256,"historyWindow can be at most charBuf.length-256");
         assert(charBuf.length>255,"length has to be larger than 255");
         assert(charBuf.length==indexBuf.length,"length of buffers have to be equal");
@@ -179,7 +179,7 @@ struct StreamCBuf(Char)
                     status=Status.End;
                     return true;
                 }
-                maybeCompleteBuf(decodedChar);
+                maybeCompleteBuf(decodedPos);
                 bufPushNonNormal(decodedChar,decodedPos);
                 status = Status.BufChar;
                 return false; // we could automatically try to load more
@@ -363,7 +363,7 @@ struct StreamCBuf(Char)
         assert((upTo  & (255UL<<48))==0); // check what happens if we start with a 0 length chunk...
         assert(bufReadSize==0);
         // calculate where we must start keeping history for the switch
-        ulong finalHistoryWindowStart=chunkStart+bufAtt.length;
+        ulong finalHistoryWindowStart=chunkStart+chunkAtt.length;
         if (!hasEnd){
             if (historyWindow>finalHistoryWindowStart)
                 finalHistoryWindowStart=0;
