@@ -65,10 +65,11 @@ struct StreamCBuf(Char)
     Status status;
     
     /// constructor, charBuf and indexBuf need to have the same size, which must be a power of two
-    /// historyWindow can be at most charBuf.length-256
-    this(dchar[]charBuf,ulong[]indexBuf){// maybe pack them in single array of (dcahr,ulong) pairs ?? removes check, could improve cache locality
+    this(dchar[]charBuf,ulong[]indexBuf,size_t historyWindow=2){// maybe pack them in single array of (dcahr,ulong) pairs ?? removes check, could improve cache locality
         indexes=indexBuf;
         bufAtt=charBuf;
+        this.historyWindow=historyWindow;
+        assert(charBuf.length>=historyWindow+256,"historyWindow can be at most charBuf.length-256");
         assert(charBuf.length>255,"length has to be larger than 255");
         assert(charBuf.length==indexBuf.length,"length of buffers have to be equal");
         assert(((charBuf.length-1)&charBuf.length)==0,"the length has to be a power of two");
