@@ -2085,15 +2085,19 @@ if( is(Char : dchar) )
         uint pc, counter;
         uint lastState;          //top of state stack
         uint lastGroup;       //ditto for matches
-        bool matchesDirty = true;
+        bool matchesDirty = false; //flag, true if there are unsaved changes to matches
         //TODO: it's smaller, make parser count nested infinite loops
         size_t[] trackers = new uint[matches.length+1];
         uint infiniteNesting = -1;// intentional
+        //setup first frame for incremental match storage
+        assert(groupStack.length >= matches.length);
+        groupStack[0 .. matches.length] = Group.init;
+        lastGroup += matches.length;
         /*
             helper function saves engine state
         */
         void pushState(uint pc, uint counter)
-        {                       
+        {
             if(matchesDirty)
             {
                 if(lastGroup >= groupStack.length)
@@ -2138,6 +2142,11 @@ if( is(Char : dchar) )
                     foreach(i, m; matches)
                         writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
                 }
+            }
+            else if(matchesDirty)// since last save there were changes not saved onces
+            {
+                matches[] = groupStack[lastGroup-matches.length .. lastGroup];//take from previous save point
+                matchesDirty = false;
             }
             s.reset(index);
             next();

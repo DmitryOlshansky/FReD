@@ -10,6 +10,7 @@ uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
 uint[] highIrreg; //so we check that ;)
 Charset[string] props;
 string[string] aliases;
+Charset[string] normalization;
 string[] blacklist = [ "Lu", "Ll" ];
 uint[] globalIndex;
 
@@ -43,9 +44,11 @@ import fred;");
     loadProperties("DerivedGeneralCategory.txt");
     loadProperties("DerivedCoreProperties.txt");
     loadProperties("Scripts.txt");
+    loadNormalization("DerivedNormalizationProps.txt");
     testCasingIrregular();
     writeCaseFolding();
     writeProperties();
+    writeNormalization();
 }
 
 void testCasingIrregular()
@@ -89,7 +92,8 @@ void loadCaseFolding(string name)
 {
 	uint[uint] hash;
 	auto r = regex("([^;]*); [CS];\\s*([^;]*);");
-	foreach(line; File(name).byLine)
+    auto f = File(name);
+	foreach(line; f.byLine)
 	{
 		auto m = match(line, r);
 		if(!m.empty)
@@ -174,6 +178,36 @@ void loadProperties(string inp)
             }
         }
 	})(inp, r);
+}
+
+void loadNormalization(string inp)
+{
+    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(NFC_QC)\s*;\s*([NM])|#\s*[\w|_]+=([\w_]+)`);
+    string aliasStr;
+	scanUniData!((m){
+        auto name = to!string(m.captures[4]) ~ to!string(m.captures[5]);
+        /*if(!m.captures[6].empty)
+            aliasStr = to!string(m.captures[6]);
+		else*/ if(!m.captures[1].empty)
+        {
+            auto sa = m.captures[1];
+            auto sb = m.captures[2];
+            uint a = parse!uint(sa, 16);
+            uint b = parse!uint(sb, 16);
+            if(name !in normalization)
+                normalization[name] = Charset.init;
+            normalization[name].add(Interval(a,b));
+        }
+        else if(!m.captures[3].empty)
+        {
+            auto sx = m.captures[3];
+            uint x = parse!uint(sx, 16);
+            if(name !in normalization)
+                normalization[name] = Charset.init;
+            normalization[name].add(x);
+        }
+        //stderr.writeln(m.hit);
+    })(inp, r);
 }
 
 string charsetString(in Charset set, string sep=";\n")
@@ -328,4 +362,13 @@ void writeProperties()
     }
         
     writeln("];");
+}
+
+
+void writeNormalization()
+{
+    foreach(key, value; normalization)
+    {
+        writef("immutable %s = %s",key, charsetString(value));
+    }
 }

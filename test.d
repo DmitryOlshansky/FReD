@@ -273,6 +273,9 @@ unittest
         TestVectors(    `\b\w+\b`,  "abde4 ",   "y", "$&", "abde4"),
 // no newline inside \r\n :
         TestVectors(    `\r.*?$`,    "abc\r\nxy", "y",    "$&", "\r\nxy"),
+// luckily obtained regression on incremental matching in backtracker
+        TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
+            "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
         ];
 
     int i;
