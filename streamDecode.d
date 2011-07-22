@@ -1,3 +1,7 @@
+import std.range:put;
+import std.stdio: formattedWrite,writefln,writef;
+import std.conv:to;
+
 /// core of the streaming/decoding/caching engine
 enum QC { Yes, No, Maybe, Invalid };
 
@@ -70,6 +74,64 @@ struct StreamCBuf(Char)
         assert(((charBuf.length-1)&charBuf.length)==0,"the length has to be a power of two");
         indexes[0]=ulong.max;
     }
+    
+    /// prints a description of the internal state of the StreamCBuf
+    void desc(Sink,Char=const(char))(Sink sink,bool detailed=false){
+        formattedWrite(sink,"StreamCBuf{\n");
+        size_t mPos=chunkPos;
+        if (mPos>chunkAtt.length) {
+            formattedWrite(sink," chunkPos=%d (>chunkAtt.length=%d),\n",chunkPos,chunkAtt.length);
+            mPos=chunkAtt.length;
+        }
+        formattedWrite(sink," chunkAtt: %x '",chunkStart);
+        put(sink,to!(Char[])(chunkAtt[0..mPos])); // this should be made utf safe
+        formattedWrite(sink,"'^^^@%x+%d=%x^^^'",chunkStart,chunkPos,chunkStart+chunkPos);
+        put(sink,to!(Char[])(chunkAtt[mPos..$])); // this should be made utf safe
+        formattedWrite(sink,"' %x,\n",chunkStart+chunkAtt.length);
+        formattedWrite(sink," historyWindow:%d,",historyWindow);
+        mPos=bufPos;
+        if (mPos>bufAtt.length){
+            formattedWrite(sink," bufPos=%d (>bufAtt.length=%d),\n",bufPos,bufAtt.length);
+            mPos=bufAtt.length;
+        }
+        if (detailed){
+            formattedWrite(sink," bufAtt: ");
+            foreach(i,c;bufAtt[0..mPos]){
+                formattedWrite(sink,"%x'%s'",indexes[i],to!(Char[])([c]));
+            }
+            formattedWrite(sink,"^^^@%d^^^",bufPos);
+            foreach(i,c;bufAtt[mPos..$]){
+                formattedWrite(sink,"%x'%s'",indexes[i],to!(Char[])([c]));
+            }
+        }
+        formattedWrite(sink," bufferedHistory:");
+        for (size_t i=bufHistorySize;i!=0;--i){
+            size_t ii=(bufPos-i+bufAtt.length)%bufAtt.length;
+            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+        }
+        formattedWrite(sink,",\n normalizedBuf:");
+        for (size_t i=0;i<bufSize;++i){
+            size_t ii=(bufPos+i)%bufAtt.length;
+            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+        }
+        formattedWrite(sink,",\n readBuf:");
+        for (size_t i=0;i<bufReadSize;++i){
+            size_t ii=(bufPos+bufSize+i)%bufAtt.length;
+            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+        }
+        formattedWrite(sink,",\n hasEnd:%d,\n",hasEnd);
+        formattedWrite(sink," decodedChar:%s,\n",to!(Char[])([decodedChar]));
+        formattedWrite(sink," decodedPos:%d,\n",decodedPos);
+        formattedWrite(sink," status:%s,\n",to!string(status));
+        formattedWrite(sink,"}\n");
+    }
+    /// ditto
+    string toString(){
+        char[] res;
+        desc(delegate void(const(char[])s){ res~=s; });
+        return res.idup;
+    }
+    
     /// adds a new chunck to evaluate
     void addChunk(String chunk, bool lastOne=false){
         assert(chunkPos==chunkAtt.length);
@@ -295,8 +357,11 @@ struct StreamCBuf(Char)
     /// possibly completes the buffer checking the history window
     /// always moves the current position to the end of the read region
     void maybeCompleteBuf(ulong upTo){
+        writefln("pre maybeCompleteBuf(%d)",upTo);
+        desc(delegate void(const(char[])s){ writef(s); });
         assert((upTo  & (255UL<<48))==0); // check what happens if we start with a 0 length chunk...
         assert(bufReadSize==0);
+        // calculate where we must start keeping history for the switch
         ulong finalHistoryWindowStart=chunkStart+bufAtt.length;
         if (!hasEnd){
             if (historyWindow>finalHistoryWindowStart)
@@ -360,6 +425,8 @@ struct StreamCBuf(Char)
                 bufHistorySize=0;
             }
         }
+        writefln("post maybeCompleteBuf(%d)",upTo);
+        desc(delegate void(const(char[])s){ writef(s); });
     }
     /// an iterator that goes back in history.
     /// is invalidated by nextPos or addChunk
