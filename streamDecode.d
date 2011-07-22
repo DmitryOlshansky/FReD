@@ -368,7 +368,7 @@ struct StreamCBuf(Char)
             if (historyWindow>finalHistoryWindowStart)
                 finalHistoryWindowStart=0;
             else
-                finalHistoryWindowStart-=historyWindow;
+                finalHistoryWindowStart-=historyWindow+1;
         }
         ulong bEnd=bufEnd();
         assert(((bufAtt.length-1)&bufAtt.length)==0, "bufAtt.lenth must be a power of two");
