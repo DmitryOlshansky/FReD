@@ -1,5 +1,6 @@
 import std.range:put;
-import std.stdio: formattedWrite,writefln,writef;
+import std.stdio, std.format;
+import std.range;
 import std.conv:to;
 
 /// core of the streaming/decoding/caching engine
@@ -308,9 +309,7 @@ struct StreamCBuf(Char)
         return (i&~(255UL<<48))-(i>>48);
     }
     /// if we are at the end of the stream
-    bool atEnd(){
-        return status==Status.End;
-    }
+    @property bool atEnd(){ return status==Status.End; }
     /// adds the position of the next char (i.e. buffer end)
     void bufPushPosNext(ulong pos){
         int mp=(bufPos+bufReadSize+bufSize)%bufAtt.length;
@@ -448,8 +447,7 @@ struct StreamCBuf(Char)
     static struct BackLooper{
         StreamCBuf *streamBuf;
         ulong bound;
-        ulong posAtt;
-        int iPos;
+        ulong pos;
         enum Access{
             PreBuf,
             InBuf,
@@ -457,63 +455,80 @@ struct StreamCBuf(Char)
         }
         Access status;
         
-        bool setupBound(){
-            auto bufStart=streamBuf.bufStart();
-            auto bufEnd=streamBuf.bufEnd();
-            if (status==Access.InBuf && iPos+streamBuf.bufHistorySize==streamBuf.bufPos){
-                posAtt = streamBuf.decodeStart(streamBuf.indexes[cast(size_t)bufStart]);
-                // if we allow increasing the history window one should do something here
-                if (streamBuf.nextPos()-posAtt>=streamBuf.historyWindow) return false;
-            }
-            if (bufEnd == ulong.max){
-                if (posAtt <= streamBuf.chunkStart) return false;
-                this.status = Access.PostBuf;
-                bound=streamBuf.chunkStart;
-            }
-            if (posAtt>bufEnd){
-                this.status = Access.PreBuf;
-                bound=bufEnd;
-            } else if (posAtt>bufStart){
-                this.status = Access.InBuf,
-                bound = streamBuf.bufStart;
-                iPos=streamBuf.bufPos+cast(int)(posAtt-streamBuf.indexes[streamBuf.bufPos]);
-            } else if (posAtt>streamBuf.chunkStart){
-                this.status=Access.PostBuf;
-                bound=streamBuf.chunkStart;
-            } else {
-                bound=ulong.max;
-                return false;
-            }
-            return true;
-        }
-
         /// returns the next char going back from the current position
-        bool nextChar(ref dchar res,ref ulong pos){
-            if (bound>=posAtt){
-                if (!setupBound()) return false;
-            }
-            switch (status){
+        bool nextChar(ref dchar res,ref ulong rpos)
+        {
+            switch (status)
+            {
             case Access.InBuf:
-                --iPos;
-                pos=streamBuf.indexes[iPos];
-                res=streamBuf.bufAtt[iPos];
+                if(pos <= bound)
+                {
+                    pos = streamBuf.bufStart;
+                    bound = streamBuf.chunkStart;
+                    status = Access.PostBuf;
+                    if(pos < bound)
+                        return false;
+                    else
+                        return nextChar(res, rpos);
+                }
+                --pos;
+                rpos=streamBuf.indexes[cast(size_t)pos];
+                res=streamBuf.bufAtt[cast(size_t)pos];
                 return true;
-            case Access.PreBuf, Access.PostBuf:
-                --posAtt;
-                dchar newC=streamBuf.chunkAtt[cast(size_t)(posAtt-bound)];
-                /// maybe decode more into newC for char/wchar, and update posAtt
+            case Access.PreBuf: 
+                if(pos <= bound)
+                {
+                    assert(bound == streamBuf.bufEnd);
+                    status = Access.InBuf;
+                    pos = streamBuf.bufPos;
+                    bound = streamBuf.bufPos - streamBuf.bufHistorySize;
+                    return nextChar(res, rpos);
+                }
+                --pos;
+                dchar newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
+                /// maybe decode more into newC for char/wchar, and update pos
                 res=newC;
-                pos=posAtt;
+                rpos=pos;
+                return true;
+            case Access.PostBuf:
+                if(pos <= bound)
+                    return false;
+                --pos;
+                dchar newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
+                /// maybe decode more into newC for char/wchar, and update pos
+                res=newC;
+                rpos=pos;
                 return true;
             default:
                 assert(0);
             }
         }
         
-        this(ref StreamCBuf streamBuf){
-            this.streamBuf=&streamBuf;
-            this.posAtt=streamBuf.nextPos();
-            setupBound();
+        this(ref StreamCBuf streamBuf)
+        {
+            this.streamBuf = &streamBuf;
+            ulong bStart = streamBuf.bufStart();
+            ulong bEnd = streamBuf.bufEnd();
+            //get absolute position in stream
+            pos = streamBuf.atEnd ?  streamBuf.chunkStart+streamBuf.chunkAtt.length : streamBuf.decodedPos;
+            //now set proper status, adjust pos if in buffer
+            if(bEnd == ulong.max || streamBuf.decodedPos < bStart){
+                status = Access.PostBuf;
+                bound = streamBuf.chunkStart;
+            }
+            else if(streamBuf.decodedPos > bEnd)
+            {
+                status = Access.PreBuf;
+                bound = streamBuf.indexes[cast(size_t)(bEnd)];
+            }
+            else if(streamBuf.decodedPos >= bStart)
+            {
+                pos = streamBuf.bufPos;
+                status = Access.InBuf;
+                bound = streamBuf.bufPos - streamBuf.bufHistorySize;
+            }
+            else
+                assert(0);
         }
         
     }
@@ -537,7 +552,7 @@ unittest
     import std.stdio;
     dchar[] charBuf = new dchar[1024];
     ulong[] indexes = new ulong[1024];
-    auto stream = StreamCBuf!dchar(charBuf, indexes);
+    auto stream = StreamCBuf!dchar(charBuf, indexes, 8);
     dchar ch;
     ulong index;
     dstring hello = "Hello,";
@@ -566,19 +581,21 @@ unittest
     size_t j=0;
     while(stream.nextChar(ch, index))
     {
-        //writeln(ch, " at ", index);
+        //stderr.writeln(ch, " at ", index);
         assert(ch == another[j]);
         assert(index == hello.length + j);
         j++;
     }
     assert(j == another.length);
+    auto full = chain(hello, another);
+    j = full.length;
 //BUG: history for the first chunk is still missing
     auto back = stream.loopBack();
     while(back.nextChar(ch, index))
     {
-        //writeln(ch, " at ", index);
+        stderr.writeln(ch, " at ", index);
         j--;
-        assert(ch == another[j]);
+        assert(ch == full[j]);
         assert(index == j);
     }
 }
