@@ -15,6 +15,7 @@ import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception;
+import core.bitop;
 import ascii = std.ascii;
 
 //uncomment to get a barrage of debug info
@@ -639,9 +640,120 @@ struct Charset
     @property Charset dup()const
     {
         return Charset(intervals.dup);
-    }
-    
+    }   
 }
+
+struct Trie(uint prefixBits)
+    if(prefixBits > 4)
+{
+    enum prefixWordBits = prefixBits-2, prefixSize=1<<prefixBits,
+        prefixWordSize = 1<<(prefixBits-2),  
+        bitTestShift = prefixBits+3, prefixMask = (1<<prefixBits)-1;
+    static assert(prefixBits > uint.sizeof);
+    uint[] data;
+    ushort[] indexes;
+    //
+    static void printBlock(uint[] block)
+    {
+        for(uint k=0; k<prefixWordSize*uint.sizeof; k++)
+        {
+            if((k & 15) == 0)
+                write(" ");
+            if((k & 63) == 0)
+                writeln();
+            writef("%d", bt(block.ptr, k) != 0);
+        }
+        writeln();
+    }
+    /// create a trie from charset set
+    this(in Charset set)
+    {
+        uint bound = 0;//set up on first iteration
+        uint[] ivals  = cast(uint[])set.intervals;
+        uint[prefixWordSize] page;
+        bool negated = false;
+        indexes.length = 0x110000/prefixSize;
+        for(uint i=0; i<0x110000; i+= prefixSize, page[] = 0)
+        {
+L_Prefix_Loop:
+            for(uint j=0; j<prefixSize; j++)
+            {
+                while(i+j >= bound)
+                {
+                    if(ivals.empty)
+                    {
+                        bound = uint.max;
+                        break L_Prefix_Loop;// no more '1' in the whole set, but need to add last one
+                    }
+                    else
+                    {
+                        bound = ivals.front + (ivals.length&1);
+                        ivals.popFront();
+                    }
+                    negated = !negated;
+                }
+                if(!negated) // < and !even
+                    bts(page.ptr, j);
+            }
+            debug(fred_trie)
+            {
+               printBlock(page);
+            }
+            //writeln("Iteration ", i>>prefixBits);
+            uint npos;
+            for(npos=0;npos<data.length;npos+=prefixWordSize)
+                if(equal(page[], data[npos .. npos+prefixWordSize]))
+                {
+                    indexes[i>>prefixBits] = 
+                        cast(ushort)(npos>>prefixWordBits);
+                    break;
+                }
+            if(npos == data.length)
+            {
+                indexes[i>>prefixBits]  = 
+                    cast(ushort)(data.length>>prefixWordBits);
+                data ~= page;
+            }
+            if(bound == uint.max)
+                break;
+        }
+    }
+    ///debugging tool
+    void desc()
+    {
+        writeln(indexes);
+        writeln("***Blocks***");
+        for(uint i=0; i<data.length; i+=prefixWordSize)
+        {
+            printBlock(data[i .. i+prefixWordSize]);
+            writeln("---");
+        }
+    }
+    /// != 0 if contains char ch
+    int opIndex(uint ch)
+    {
+        assert(ch < 0x110000);
+        return bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask));
+    }
+}
+
+unittest
+{
+    uint max_char, max_data;
+    Trie!8 t;
+    foreach(up; unicodeProperties)
+    {
+        t = Trie!8(up.set);
+        uint num = 0;
+        foreach(ival; up.set.intervals)
+        {
+            num += ival.end - ival.begin + 1;
+            for(uint ch=ival.begin;ch<=ival.end;ch++)
+                assert(t[ch], text("on ch ==", ch));
+        }
+    }
+}
+
 /// fussy compare for unicode property names as per UTS-18
 int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
