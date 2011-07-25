@@ -196,6 +196,8 @@ struct StreamCBuf(Char)
         if ((status==Status.BufChar || status==Status.BufCharPartial)&&
             bufSize>0)
         {
+            if(chunkPos == chunkAtt.length && !hasEnd)//empty chunk or trottling at end
+                return false;
             res=bufAtt[bufPos];
             pos=indexes[bufPos];
             ++bufPos;
@@ -326,8 +328,6 @@ struct StreamCBuf(Char)
         bufSize++;
     }
     /// the next position (mostly given for informative purposes, normally you should not use this)
-    /// Q: the actual propose is still unclear for me, seems like it should return very different indexes depending on situation?
-    /// then 'informative' part is unclear to me, maybe(?) better add that it's a special thing to use in BackLooper
     ulong nextPos(){
         switch (status){
         case Status.DirectCharOne:
@@ -342,7 +342,7 @@ struct StreamCBuf(Char)
             assert(bufSize!=0 || bufReadSize!=0);
             return indexes[bufPos];
         case Status.End:
-            return chunkAtt.length;
+            return chunkStart+chunkAtt.length;
         default:
             assert(0);
         }
@@ -549,7 +549,6 @@ struct StreamCBuf(Char)
 }
 
 
-
 unittest
 {
     import std.stdio;
@@ -562,7 +561,8 @@ unittest
     dstring hello = fullStr[0..6];
     dstring another = fullStr[6..$];
     size_t ii=0;
-    foreach(ichunk,chunk;[""d,hello,""d,another,""d]){
+    auto chunks = [""d,hello,""d,another,""d];
+    foreach(ichunk,chunk;chunks){
         writefln("pippo pre addChunk(%s)",chunk);
         stream.desc(delegate void(const(char[])s){ writef(s); });
         stream.addChunk(chunk);
@@ -587,12 +587,14 @@ unittest
             }
             assert(j<=((i>stream.historyWindow)?(i-stream.historyWindow):0));
         }
+        writefln("--- post stream.nextChar()");
+        stream.desc(delegate void(const(char[])s){ writef(s); });
         writefln("i:%s ii:%s chunk.length:%s",i,ii,chunk.length);
         assert(((ichunk==1)?(i == ii+chunk.length-1):(i ==  ii+chunk.length)));// OK, last one waits possible normalization
         ii=i;
     }
     stream.addChunk(""d, true);
-    assert(index == hello.length - 1);
+    assert(index == fullStr.length - 1);
     {
         size_t i=ii;
         while(stream.nextChar(ch, index))
@@ -615,6 +617,17 @@ unittest
     }
     assert(ii == fullStr.length);
 }
+
+dstring fromStream(S)(S stream)
+{
+    auto a = appender!(dstring)();
+    dchar ch;
+    ulong i;
+    while(stream.nextChar(ch, i))
+        a.put(ch);
+    return a.data;
+}
+
 
 unittest// a very simple loopBack use (by one char)
 {

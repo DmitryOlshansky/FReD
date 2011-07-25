@@ -655,7 +655,7 @@ struct Trie(uint prefixBits)
     //
     static void printBlock(uint[] block)
     {
-        for(uint k=0; k<prefixWordSize*uint.sizeof; k++)
+        for(uint k=0; k<prefixSize; k++)
         {
             if((k & 15) == 0)
                 write(" ");
