@@ -2,6 +2,7 @@ import std.range:put;
 import std.stdio, std.format;
 import std.range;
 import std.conv:to;
+import std.math;
 
 /// core of the streaming/decoding/caching engine
 enum QC { Yes, No, Maybe, Invalid };
@@ -369,8 +370,6 @@ struct StreamCBuf(Char)
     /// possibly completes the buffer checking the history window
     /// always moves the current position to the end of the read region
     void maybeCompleteBuf(ulong upTo){
-        writefln("pre maybeCompleteBuf(%d)",upTo);
-        desc(delegate void(const(char[])s){ writef(s); });
         assert((upTo  & (255UL<<48))==0); // check what happens if we start with a 0 length chunk...
         assert(bufReadSize==0);
         // calculate where we must start keeping history for the switch
@@ -439,8 +438,6 @@ struct StreamCBuf(Char)
                 bufHistorySize=0;
             }
         }
-        writefln("post maybeCompleteBuf(%d)",upTo);
-        desc(delegate void(const(char[])s){ writef(s); });
     }
     /// an iterator that goes back in history.
     /// is invalidated by nextPos or addChunk
@@ -465,6 +462,9 @@ struct StreamCBuf(Char)
                 {
                     pos = streamBuf.bufStart;
                     bound = streamBuf.chunkStart;
+                    if (streamBuf.nextPos>streamBuf.historyWindow+bound) {
+                        bound=streamBuf.nextPos-streamBuf.historyWindow;
+                    }
                     status = Access.PostBuf;
                     if(pos < bound)
                         return false;
@@ -478,11 +478,14 @@ struct StreamCBuf(Char)
             case Access.PreBuf: 
                 if(pos <= bound)
                 {
-                    assert(bound == streamBuf.bufEnd);
-                    status = Access.InBuf;
-                    pos = streamBuf.bufPos;
-                    bound = streamBuf.bufPos - streamBuf.bufHistorySize;
-                    return nextChar(res, rpos);
+                    if (bound == streamBuf.bufEnd){
+                        status = Access.InBuf;
+                        pos = streamBuf.bufPos;
+                        bound = streamBuf.bufPos - streamBuf.bufHistorySize;
+                        return nextChar(res, rpos);
+                    } else {
+                        return false;
+                    }
                 }
                 --pos;
                 dchar newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
@@ -553,51 +556,64 @@ unittest
     dchar[] charBuf = new dchar[1024];
     ulong[] indexes = new ulong[1024];
     auto stream = StreamCBuf!dchar(charBuf, indexes, 8);
-    dchar ch;
-    ulong index;
-    dstring hello = "Hello,";
-    stream.addChunk(hello);
-    size_t i=0;
-    while(stream.nextChar(ch, index))
-    {
-        //writeln(ch, " at ", index);
-        assert(ch == hello[i]);
-        assert(index == i);
-        i++;
+    dchar ch,ch2;
+    ulong index,index2;
+    dstring fullStr="Hello,another chunk";
+    dstring hello = fullStr[0..6];
+    dstring another = fullStr[6..$];
+    size_t ii=0;
+    foreach(ichunk,chunk;[""d,hello,""d,another,""d]){
+        writefln("pippo pre addChunk(%s)",chunk);
+        stream.desc(delegate void(const(char[])s){ writef(s); });
+        stream.addChunk(chunk);
+        writefln("pippo addChunk(%s)",chunk);
+        stream.desc(delegate void(const(char[])s){ writef(s); });
+        size_t i=ii;
+        while(stream.nextChar(ch, index))
+        {
+            assert(ch == fullStr[i]);
+            assert(index == i);
+            i++;
+            auto j=i;
+            writefln("pre Loopback");
+            stream.desc(delegate void(const(char[])s){ writef(s); });
+            auto firstPass = stream.loopBack();
+            while(firstPass.nextChar(ch2, index2))
+            {
+                writefln("loopBack, char:%s, index:%s",ch2,index2);
+                j--;
+                assert(ch2 == fullStr[j]);
+                assert(j == index2);
+            }
+            assert(j<=((i>stream.historyWindow)?(i-stream.historyWindow):0));
+        }
+        writefln("i:%s ii:%s chunk.length:%s",i,ii,chunk.length);
+        assert(((ichunk==1)?(i == ii+chunk.length-1):(i ==  ii+chunk.length)));// OK, last one waits possible normalization
+        ii=i;
     }
-    assert(i == hello.length - 1);// OK, last one waits possible normalization
-    auto firstPass = stream.loopBack();
-    while(firstPass.nextChar(ch, index))
-    {
-        i--;
-        assert(ch == hello[i]);
-        assert(i == index);
-    }
-    dstring another = "another chunk";
-    stream.addChunk(another, true);
-    stream.nextChar(ch, index);
-    assert(ch == ',');
+    stream.addChunk(""d, true);
     assert(index == hello.length - 1);
-    size_t j=0;
-    while(stream.nextChar(ch, index))
     {
-        //stderr.writeln(ch, " at ", index);
-        assert(ch == another[j]);
-        assert(index == hello.length + j);
-        j++;
+        size_t i=ii;
+        while(stream.nextChar(ch, index))
+        {
+            //writeln(ch, " at ", index);
+            assert(ch == fullStr[i]);
+            assert(index == i);
+            i++;
+            auto j=i;
+            auto firstPass = stream.loopBack();
+            while(firstPass.nextChar(ch2, index2))
+            {
+                j--;
+                assert(ch2 == fullStr[j]);
+                assert(j == index2);
+            }
+            assert(j<=((i>stream.historyWindow)?(i-stream.historyWindow):0));
+        }
+        ii=i;
     }
-    assert(j == another.length);
-    auto full = chain(hello, another);
-    j = full.length;
-//BUG: history for the first chunk is still missing
-    auto back = stream.loopBack();
-    while(back.nextChar(ch, index))
-    {
-        stderr.writeln(ch, " at ", index);
-        j--;
-        assert(ch == full[j]);
-        assert(index == j);
-    }
+    assert(ii == fullStr.length);
 }
 
 unittest// a very simple loopBack use (by one char)
