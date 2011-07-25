@@ -57,11 +57,12 @@ enum IR:uint {
     Option            = 0b1_01111_00, /// start of an option within an alternation x | y (length)
     GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
     Charset           = 0b1_10001_00, /// a most generic charset [...]
-    Nop               = 0b1_10010_00, /// no operation (padding)
+    Trie              = 0b1_10010_00, /// charset implemented as Trie
+    Nop               = 0b1_10011_00, /// no operation (padding)
     /// match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
     /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
     /// the drawback of this representation is that it is difficult to detect a jump in the middle of it
-    OrChar            = 0b1_10011_00,
+    OrChar            = 0b1_10100_00,
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
@@ -144,6 +145,7 @@ IR pairedIR(IR i)
 struct Bytecode
 {
     uint raw;
+    enum MaxSequence = 2+4;
     this(IR code, uint data)
     {
         assert(data < (1<<24) && code < 256);
@@ -152,7 +154,7 @@ struct Bytecode
     this(IR code, uint data, uint seq)
     {
         assert(data < (1<<22) && code < 256 );
-        assert(seq >= 2 && seq < 2+4);
+        assert(seq >= 2 && seq < MaxSequence);
         raw = code<<24 | ((seq-2)<<22) | data;
     }
     static Bytecode fromRaw(uint data)
@@ -164,7 +166,7 @@ struct Bytecode
     ///bit twiddling helpers
     @property uint data(){ return raw & 0x003f_ffff; }
     ///ditto
-    @property uint sequence(){ return 2+(raw >>22) & 0x3; }
+    @property uint sequence(){ return 2+((raw >>22) & 0x3); }
     ///ditto
     @property IR code(){ return cast(IR)(raw>>24); }
     ///ditto
@@ -218,6 +220,9 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
     case IR.Char:
         formattedWrite(output, " %s (0x%x)",cast(dchar)irb[pc].data, irb[pc].data);
         break;
+    case IR.OrChar:
+        formattedWrite(output, " %s (0x%x) seq=%d", cast(dchar)irb[pc].data, irb[pc].data, irb[pc].sequence);
+        break;
     case IR.RepeatStart, IR.InfiniteStart, IR.Option, IR.GotoEndOr, IR.OrStart:
         //forward-jump instructions
         uint len = irb[pc].data;
@@ -254,7 +259,7 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u", pc + len + 1);
         break;
-    case IR.Backref: case IR.Charset:
+    case IR.Backref: case IR.Charset: case IR.Trie:
         uint n = irb[pc].data;
         formattedWrite(output, " %u",  n);
         break;
@@ -613,7 +618,7 @@ struct Charset
         return this;
     }
     /// test if ch is present in this set
-    bool contains(dchar ch) const
+    bool opIndex(dchar ch) const
     {
         //debug(fred_charset) writeln(intervals);
         for(uint i=0; i<intervals.length; i++) // could use binary search (lower bound) on (cast(uint*)intervals.ptr)[0..2*intervals.length], and then check if it is even or odd...
@@ -635,12 +640,22 @@ struct Charset
                 formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
         sink("]");
     }
-    
     /// deep copy this Charset
-    @property Charset dup()const
+    @property Charset dup() const
     {
         return Charset(intervals.dup);
-    }   
+    } 
+    /// full range from start to end
+    @property uint extent() const 
+    {
+        return intervals.empty ? 0 : intervals.back.end - intervals.front.begin + 1;
+    }
+    /// number of codepoints in this charset
+    @property uint chars() const
+    {
+        return reduce!"a+b"(map!"a.end-a.begin+1"(intervals));
+    }
+        
 }
 
 struct Trie(uint prefixBits)
@@ -669,53 +684,65 @@ struct Trie(uint prefixBits)
     this(in Charset set)
     {
         uint bound = 0;//set up on first iteration
-        uint[] ivals  = cast(uint[])set.intervals;
+        ushort emptyBlock = ushort.max;
+        const(Interval)[] ivals  = set.intervals;
+        if(ivals.empty)
+            return;
         uint[prefixWordSize] page;
-        bool negated = false;
-        indexes.length = 0x110000/prefixSize;
-        for(uint i=0; i<0x110000; i+= prefixSize, page[] = 0)
+        bool negative = false;
+        for(uint i=0; i<0x110000; i+= prefixSize)
         {
-L_Prefix_Loop:
-            for(uint j=0; j<prefixSize; j++)
+            if(i+prefixSize > ivals[bound].begin || emptyBlock == ushort.max)//avoid empty blocks if we have one already
             {
-                while(i+j >= bound)
+                bool flag = true;
+            L_Prefix_Loop:
+                for(uint j=0; j<prefixSize; j++)
                 {
-                    if(ivals.empty)
+                    while(i+j > ivals[bound].end)
                     {
-                        bound = uint.max;
-                        break L_Prefix_Loop;// no more '1' in the whole set, but need to add last one
+                        if(++bound == ivals.length)
+                        {
+                            bound = uint.max;
+                            if(flag)//not a single one set so far
+                                return;
+                            // no more bits in the whole set, but need to add the last bucket
+                            break L_Prefix_Loop;
+                        }
                     }
-                    else
+                    if(i+j >= ivals[bound].begin)
                     {
-                        bound = ivals.front + (ivals.length&1);
-                        ivals.popFront();
+                        bts(page.ptr, j);
+                        flag = false;
                     }
-                    negated = !negated;
                 }
-                if(!negated) // < and !even
-                    bts(page.ptr, j);
-            }
-            debug(fred_trie)
-            {
-               printBlock(page);
-            }
-            //writeln("Iteration ", i>>prefixBits);
-            uint npos;
-            for(npos=0;npos<data.length;npos+=prefixWordSize)
-                if(equal(page[], data[npos .. npos+prefixWordSize]))
+                
+                debug(fred_trie)
                 {
-                    indexes[i>>prefixBits] = 
-                        cast(ushort)(npos>>prefixWordBits);
+                   printBlock(page);
+                }
+                //writeln("Iteration ", i>>prefixBits);
+                uint npos;
+                for(npos=0;npos<data.length;npos+=prefixWordSize)
+                    if(equal(page[], data[npos .. npos+prefixWordSize]))
+                    {
+                        indexes ~= cast(ushort)(npos>>prefixWordBits);
+                        break;
+                    }
+                if(npos == data.length)
+                {
+                    indexes ~= cast(ushort)(data.length>>prefixWordBits);
+                    data ~= page;
+                    if(flag)
+                        emptyBlock = indexes[$-1];
+                }
+                if(bound == uint.max)
                     break;
-                }
-            if(npos == data.length)
-            {
-                indexes[i>>prefixBits]  = 
-                    cast(ushort)(data.length>>prefixWordBits);
-                data ~= page;
+                page[] = 0;
             }
-            if(bound == uint.max)
-                break;
+            else//fast reroute whole blocks to empty one
+            {
+                indexes ~= emptyBlock;
+            }
         }
     }
     ///debugging tool
@@ -730,26 +757,35 @@ L_Prefix_Loop:
         }
     }
     /// != 0 if contains char ch
-    int opIndex(uint ch)
+    int opIndex(dchar ch) const
     {
         assert(ch < 0x110000);
+        uint ind = ch>>prefixBits;
+        if(ind >= indexes.length)
+            return 0;
         return bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask));
     }
 }
+alias Trie!8 DefaultTrie;
 
-unittest
+unittest//a very sloow test
 {
     uint max_char, max_data;
     Trie!8 t;
     foreach(up; unicodeProperties)
     {
         t = Trie!8(up.set);
-        uint num = 0;
         foreach(ival; up.set.intervals)
         {
-            num += ival.end - ival.begin + 1;
             for(uint ch=ival.begin;ch<=ival.end;ch++)
                 assert(t[ch], text("on ch ==", ch));
+        }
+        auto s = up.set.dup.negate.negate;
+        assert(equal(cast(immutable(Interval)[])s.intervals, cast(immutable(Interval)[])up.set.intervals));
+        foreach(ival; up.set.dup.negate.intervals)
+        {
+            for(uint ch=ival.begin;ch<=ival.end;ch++)
+                assert(!t[ch], text("negative on ch ==", ch));
         }
     }
 }
@@ -798,7 +834,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
 {
     assert(range.length >= 5);
     range[0] = ch;
-    if(evenUpper.contains(ch))//simple version
+    if(evenUpper[ch])//simple version
     {
         range[1] = ch ^ 1;
         return range[0..2];
@@ -807,7 +843,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
     for(s=0;s < n; s++)
     {
         foreach(i, v; commonCaseTable)
-            if(v.set.contains(range[s]) && !canFind(range[0..n], range[s]+cast(int)v.delta))
+            if(v.set[range[s]] && !canFind(range[0..n], range[s]+cast(int)v.delta))
             {
 
                 range[n++] = range[s]+v.delta;
@@ -1011,7 +1047,7 @@ struct Stack(T)//TODO: redo with TmpAlloc
 }
 
 struct Parser(R)
-if (isForwardRange!R && is(ElementType!R : dchar))
+    if (isForwardRange!R && is(ElementType!R : dchar))
 {
     enum infinite = ~0u;
     dchar _current;
@@ -1025,7 +1061,9 @@ if (isForwardRange!R && is(ElementType!R : dchar))
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
-    immutable(Charset)[] charsets;
+    immutable(Charset)[] charsets;  //
+    immutable(DefaultTrie)[] tries; //
+    
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
@@ -1429,7 +1467,7 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             break;
         case '\\':
             next() || error("Unfinished escape sequence");
-            put(escape());
+            escape();
             break;
         case '^':
             put(Bytecode(IR.Bol, 0));
@@ -1818,48 +1856,81 @@ if (isForwardRange!R && is(ElementType!R : dchar))
         while(!opstack.empty)
             apply(opstack.pop(),vstack);
         assert(vstack.length == 1);
-        put(Bytecode(IR.Charset, charsets.length));
-        charsets ~= cast(immutable(Charset))(vstack.top);//unique
+        charsetToIr(cast(immutable)vstack.top);
+    }
+    //try to generate optimal IR code for this charset
+    void charsetToIr(immutable Charset set)
+    {
+        uint chars = set.chars();
+        if(chars < Bytecode.MaxSequence)
+        {
+            switch(chars)
+            {
+                case 1:
+                    put(Bytecode(IR.Char, set.intervals[0].begin));
+                    break;
+                case 0:
+                    break;
+                default:
+                    foreach(ival; set.intervals)
+                        for(uint ch=ival.begin; ch<=ival.end;ch++)
+                            put(Bytecode(IR.OrChar, ch, chars));
+            }
+        }
+        else
+        {
+            //other heuristics
+            immutable t  = DefaultTrie(set);
+            put(Bytecode(IR.Trie, tries.length));
+            tries ~= t;
+            /*put(Bytecode(IR.Charset, charsets.length));
+            charsets ~= set;*/
+        }
     }
     ///parse and return IR for escape stand alone escape sequence
-    Bytecode escape()
+    void escape()
     {
 
         switch(current)
         {
-        case 'f':   next(); return Bytecode(IR.Char, '\f');
-        case 'n':   next(); return Bytecode(IR.Char, '\n');
-        case 'r':   next(); return Bytecode(IR.Char, '\r');
-        case 't':   next(); return Bytecode(IR.Char, '\t');
-        case 'v':   next(); return Bytecode(IR.Char, '\v');
+        case 'f':   next(); put(Bytecode(IR.Char, '\f')); break;
+        case 'n':   next(); put(Bytecode(IR.Char, '\n')); break;
+        case 'r':   next(); put(Bytecode(IR.Char, '\r')); break;
+        case 't':   next(); put(Bytecode(IR.Char, '\t')); break;
+        case 'v':   next(); put(Bytecode(IR.Char, '\v')); break;
 
-        case 'd':   next(); return Bytecode(IR.Digit, 0);
-        case 'D':   next(); return Bytecode(IR.Notdigit, 0);
-        case 'b':   next(); return Bytecode(IR.Wordboundary, 0);
-        case 'B':   next(); return Bytecode(IR.Notwordboundary, 0);
-        case 's':   next(); return Bytecode(IR.Space, 0);
-        case 'S':   next(); return Bytecode(IR.Notspace, 0);
-        case 'w':   next(); return Bytecode(IR.Word, 0);
-        case 'W':   next(); return Bytecode(IR.Notword, 0);
+        case 'd':   next(); put(Bytecode(IR.Digit, 0)); break;
+        case 'D':   next(); put(Bytecode(IR.Notdigit, 0)); break;
+        case 'b':   next(); put(Bytecode(IR.Wordboundary, 0)); break;
+        case 'B':   next(); put(Bytecode(IR.Notwordboundary, 0)); break;
+        case 's':   next(); put(Bytecode(IR.Space, 0)); break;
+        case 'S':   next(); put(Bytecode(IR.Notspace, 0)); break;
+        case 'w':   next(); put(Bytecode(IR.Word, 0)); break;
+        case 'W':   next(); put(Bytecode(IR.Notword, 0)); break;
 
         case 'p': case 'P':
-            charsets ~= parseUnicodePropertySpec(current == 'P');
-            return Bytecode(IR.Charset, charsets.length-1);
+            auto charset = parseUnicodePropertySpec(current == 'P');
+            charsetToIr(charset);
+            break;
         case 'x':
             uint code = parseUniHex(pat, 2);
             next();
-            return Bytecode(IR.Char,code);
+            put(Bytecode(IR.Char,code));
+            break;
         case 'u': case 'U':
             uint code = parseUniHex(pat, current == 'u' ? 4 : 8);
             next();
-            return Bytecode(IR.Char, code);
+            put(Bytecode(IR.Char, code));
+            break;
         case 'c': //control codes
             Bytecode code = Bytecode(IR.Char, parseControlCode());
             next();
-            return code;
+            put(code);
+            break;
         case '0':
             next();
-            return Bytecode(IR.Char, 0);//NUL character
+            put(Bytecode(IR.Char, 0));//NUL character
+            break;
         case '1': .. case '9': //TODO: use $ instead of \ for backreference
             uint nref = cast(uint)current - '0';
             nref <  index.length || error("Backref to unseen group");
@@ -1872,11 +1943,12 @@ if (isForwardRange!R && is(ElementType!R : dchar))
             if(nref > index.length)
                 nref /= 10;
             nref--;
-            return Bytecode(IR.Backref, nref);
+            put(Bytecode(IR.Backref, nref));
+            break;
         default:
             auto op = Bytecode(IR.Char, current);
             next();
-            return op;
+            put(op);
         }
     }
 	/// parse and return a Charset for \p{...Property...} and \P{...Property..},
@@ -1926,6 +1998,7 @@ struct Program
     uint hotspotTableSize; // number of entries in merge table
     uint flags;         //global regex flags
     immutable(Charset)[] charsets; //
+    immutable(DefaultTrie)[]  tries; //
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
@@ -2018,6 +2091,7 @@ struct Program
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
         charsets = p.charsets;
+        tries = p.tries;
         lightPostprocess();
         debug(fred_parser)
         {
@@ -2302,43 +2376,49 @@ if( is(Char : dchar) )
                 next();
                 break;
             case IR.Word:
-                if(atEnd || !wordCharacter.contains(front))
+                if(atEnd || !wordCharacter[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Notword:
-                if(atEnd|| wordCharacter.contains(front))
+                if(atEnd|| wordCharacter[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Digit:
-                if(atEnd || !unicodeNd.contains(front))
+                if(atEnd || !unicodeNd[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Word);
                 break;
             case IR.Notdigit:
-                if(atEnd || unicodeNd.contains(front))
+                if(atEnd || unicodeNd[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Notdigit);
                 break;
             case IR.Space:
-                if(atEnd || !unicodeWhite_Space.contains(front))
+                if(atEnd || !unicodeWhite_Space[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Space);
                 break;
             case IR.Notspace:
-                if(atEnd || unicodeWhite_Space.contains(front))
+                if(atEnd || unicodeWhite_Space[front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Notspace);
                 break;
             case IR.Charset:
-                if(atEnd || !re.charsets[prog[pc].data].contains(front))
+                if(atEnd || !re.charsets[prog[pc].data][front])
+                    goto L_backtrack;
+                next();
+                pc += IRL!(IR.Charset);
+                break;
+            case IR.Trie:
+                if(atEnd || !re.tries[prog[pc].data][front])
                     goto L_backtrack;
                 next();
                 pc += IRL!(IR.Charset);
@@ -2347,7 +2427,7 @@ if( is(Char : dchar) )
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && wordCharacter.contains(front))
+                if(atStart && wordCharacter[front])
                 {
                     pc += IRL!(IR.Wordboundary);
                     break;
@@ -2360,8 +2440,8 @@ if( is(Char : dchar) )
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter.contains(front);
-                    bool ab = wordCharacter.contains(back);
+                    bool af = wordCharacter[front];
+                    bool ab = wordCharacter[back];
                     if(af ^ ab)
                     {
                         pc += IRL!(IR.Wordboundary);
@@ -2374,15 +2454,15 @@ if( is(Char : dchar) )
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordCharacter.contains(front))
+                if(atStart && !wordCharacter[front])
                     goto L_backtrack;
                 else if(atEnd && s.loopBack.nextChar(back, bi)
                         && !isUniAlpha(back))
                     goto L_backtrack;
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter.contains(front);
-                    bool ab = wordCharacter.contains(back);
+                    bool af = wordCharacter[front];
+                    bool ab = wordCharacter[back];
                     if(af ^ ab)
                        goto L_backtrack;
                 }
@@ -2812,21 +2892,21 @@ struct ThompsonMatcher(Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && wordCharacter.contains(front))
+                    if(atStart && wordCharacter[front])
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && wordCharacter.contains(back))
+                            && wordCharacter[back])
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = wordCharacter.contains(front) != 0;
-                        bool ab = wordCharacter.contains(back) != 0;
+                        bool af = wordCharacter[front] != 0;
+                        bool ab = wordCharacter[back] != 0;
                         if(af ^ ab)
                         {
                             t.pc += IRL!(IR.Wordboundary);
@@ -2840,14 +2920,14 @@ struct ThompsonMatcher(Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && !wordCharacter.contains(front))
+                    if(atStart && !wordCharacter[front])
                     {
                         recycle(t);
                         t = worklist.fetch();
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !wordCharacter.contains(back))
+                            && !wordCharacter[back])
                     {
                         recycle(t);
                         t = worklist.fetch();
@@ -2855,8 +2935,8 @@ struct ThompsonMatcher(Char)
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = wordCharacter.contains(front) != 0;
-                        bool ab = wordCharacter.contains(back)  != 0;
+                        bool af = wordCharacter[front] != 0;
+                        bool ab = wordCharacter[back]  != 0;
                         if(af ^ ab)
                         {
                             recycle(t);
@@ -3084,7 +3164,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Word:
-                        if(wordCharacter.contains(front))
+                        if(wordCharacter[front])
                         {
                             t.pc += IRL!(IR.Word);
                             nlist.insertBack(t);
@@ -3094,7 +3174,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notword:
-                        if(!wordCharacter.contains(front))
+                        if(!wordCharacter[front])
                         {
                             t.pc += IRL!(IR.Notword);
                             nlist.insertBack(t);
@@ -3104,7 +3184,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Digit:
-                        if(unicodeNd.contains(front))
+                        if(unicodeNd[front])
                         {
                             t.pc += IRL!(IR.Digit);
                             nlist.insertBack(t);
@@ -3114,7 +3194,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notdigit:
-                        if(!unicodeNd.contains(front))
+                        if(!unicodeNd[front])
                         {
                             t.pc += IRL!(IR.Notdigit);
                             nlist.insertBack(t);
@@ -3124,7 +3204,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Space:
-                        if(unicodeWhite_Space.contains(front))
+                        if(unicodeWhite_Space[front])
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -3134,7 +3214,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Notspace:
-                        if(!unicodeWhite_Space.contains(front))
+                        if(!unicodeWhite_Space[front])
                         {
                             t.pc += IRL!(IR.Space);
                             nlist.insertBack(t);
@@ -3144,7 +3224,7 @@ struct ThompsonMatcher(Char)
                         t = worklist.fetch();
                         break;
                     case IR.Charset:
-                        if(re.charsets[prog[t.pc].data].contains(front))
+                        if(re.charsets[prog[t.pc].data][front])
                         {
                             debug(fred_matching) writeln("Charset passed");
                             t.pc += IRL!(IR.Charset);
@@ -3153,6 +3233,19 @@ struct ThompsonMatcher(Char)
                         else
                         {
                             debug(fred_matching) writeln("Charset notpassed");
+                            recycle(t);
+                        }
+                        t = worklist.fetch();
+                    case IR.Trie:
+                        if(re.tries[prog[t.pc].data][front])
+                        {
+                            debug(fred_matching) writeln("Trie passed");
+                            t.pc += IRL!(IR.Charset);
+                            nlist.insertBack(t);
+                        }
+                        else
+                        {
+                            debug(fred_matching) writeln("Trie notpassed");
                             recycle(t);
                         }
                         t = worklist.fetch();
