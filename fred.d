@@ -2665,17 +2665,16 @@ struct ThompsonMatcher(Char)
     ///State of VM thread
     struct Thread
     {
-        Group[] matches;
         Thread* next;    //intrusive linked list
         uint pc;
         uint counter;    // loop counter
         uint uopCounter; // counts micro operations inside one macro instruction (e.g. BackRef)
+        Group[1] matches;
     }
-    ///head-tail singly-linked list (optionally with cached length)
+    ///head-tail singly-linked list
     struct ThreadList
     {
         Thread* tip=null, toe=null;
-        uint length;
         /// add new thread to the start of list
         void insertFront(Thread* t)
         {
@@ -2689,7 +2688,6 @@ struct ThompsonMatcher(Char)
                 t.next = null;
                 tip = toe = t;
             }
-            length++;
         }
         //add new thread to the end of list
         void insertBack(Thread* t)
@@ -2702,7 +2700,6 @@ struct ThompsonMatcher(Char)
             else
                 tip = toe = t;
             toe.next = null;
-            length++;
         }
         ///move head element out of list
         Thread* fetch()
@@ -2712,7 +2709,6 @@ struct ThompsonMatcher(Char)
                 tip = toe = null;
             else
                 tip = tip.next;
-            if(t) length--;
             return t;
         }
         ///non-destructive iteration of ThreadList
@@ -2771,6 +2767,7 @@ struct ThompsonMatcher(Char)
         if(re.hotspotTableSize)
         {
             merge = new uint[re.hotspotTableSize];
+            reserve(re.hotspotTableSize+1);
         }
         genCounter = 0;
     }
@@ -2849,7 +2846,7 @@ struct ThompsonMatcher(Char)
     void finish(const(Thread)* t, Group[] matches)
     {
         //debug(fred_matching) writeln(t.matches);
-        matches[] = t.matches[];
+        matches.ptr[0..re.ngroup] = t.matches.ptr[0..re.ngroup];
         //end of the whole match happens after current symbol
         matches[0].end = index;
         debug(fred_matching) writefln("FOUND pc=%s prog_len=%s: %s..%s",
@@ -3078,30 +3075,30 @@ struct ThompsonMatcher(Char)
                     break;
                 case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].begin = cast(size_t)index;
+                    t.matches.ptr[re.index[n]+1].begin = cast(size_t)index;
                     t.pc += IRL!(IR.GroupStart);
                     //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                     break;
                 case IR.GroupEnd:   //TODO: ditto
                     uint n = prog[t.pc].data;
-                    t.matches[re.index[n]+1].end = cast(size_t)index;
+                    t.matches.ptr[re.index[n]+1].end = cast(size_t)index;
                     t.pc += IRL!(IR.GroupEnd);
                     //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                     break;
                 case IR.Backref:
                     uint n = prog[t.pc].data;
-                    if(t.matches[n+1].begin == t.matches[n+1].end)//zero-width Backref!
+                    if(t.matches.ptr[n+1].begin == t.matches.ptr[n+1].end)//zero-width Backref!
                     {
                         t.pc += IRL!(IR.Backref);
                     }
                     else static if(withInput)
                     {
-                        uint idx = t.matches[n+1].begin + t.uopCounter;
-                        uint end = t.matches[n+1].end;
+                        uint idx = t.matches.ptr[n+1].begin + t.uopCounter;
+                        uint end = t.matches.ptr[n+1].end;
                         if(s[idx..end].front == front)
                         {
                            t.uopCounter += std.utf.stride(s[idx..end], 0);
-                           if(t.uopCounter + t.matches[n+1].begin == t.matches[n+1].end)
+                           if(t.uopCounter + t.matches.ptr[n+1].begin == t.matches.ptr[n+1].end)
                            {//last codepoint
                                 t.pc += IRL!(IR.Backref);
                                 t.uopCounter = 0;
@@ -3275,14 +3272,22 @@ struct ThompsonMatcher(Char)
         }
         else
         {
-            Thread[] block = new Thread[threadAllocSize];
-            freelist = &block[0];
-            for(size_t i=1; i<block.length; i++)
-                block[i-1].next = &block[i];
-            block[$-1].next = null;
+            reserve(threadAllocSize);
             debug(fred_matching) writefln("Allocated space for another %d threads", threadAllocSize);
             return allocate();
         }
+    }
+    ///
+    void reserve(uint size)
+    {
+        const tSize = (Thread.sizeof+(re.ngroup-1)*Group.sizeof);
+        ubyte[] mem = new ubyte[tSize*size];
+        
+        freelist = cast(Thread*)&mem[0];
+        size_t i;
+        for(i=tSize; i<tSize*size; i+=tSize)
+            (cast(Thread*)&mem[i-tSize]).next = cast(Thread*)&mem[i];
+        (cast(Thread*)&mem[i-tSize]).next = null;
     }
     ///dispose a thread
     void recycle(Thread* t)
@@ -3306,7 +3311,7 @@ struct ThompsonMatcher(Char)
     Thread* fork(Thread* master, uint pc, size_t counter)
     {
         auto t = allocate();
-        t.matches = master.matches.dup; //TODO: Small array optimization and/or COW
+        t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup]; //TODO: Small array optimization and/or COW
         t.pc = pc;
         t.counter = counter;
         t.uopCounter = 0;
@@ -3316,7 +3321,7 @@ struct ThompsonMatcher(Char)
     Thread*  createStart(size_t index)
     {
         auto t = allocate();
-        t.matches = new Group[re.ngroup]; //TODO: ditto
+        t.matches.ptr[0..re.ngroup] = Group.init; //TODO: ditto
         t.matches[0].begin = index;
         t.pc = 0;
         t.counter = 0;
