@@ -594,7 +594,7 @@ unittest
         ii=i;
     }
     stream.addChunk(""d, true);
-    assert(index == fullStr.length - 1);
+    assert(index == fullStr.length - 2); //one char awaits normalization
     {
         size_t i=ii;
         while(stream.nextChar(ch, index))
@@ -607,6 +607,7 @@ unittest
             auto firstPass = stream.loopBack();
             while(firstPass.nextChar(ch2, index2))
             {
+                writefln("last loopBack, char:%s, index:%s",ch2,index2);
                 j--;
                 assert(ch2 == fullStr[j]);
                 assert(j == index2);
@@ -615,7 +616,7 @@ unittest
         }
         ii=i;
     }
-    assert(ii == fullStr.length);
+    assert(ii == fullStr.length - 1); //index of last char
 }
 
 dstring fromStream(S)(S stream)
