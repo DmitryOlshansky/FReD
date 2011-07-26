@@ -1018,9 +1018,20 @@ immutable(Charset) getUnicodeSet(in char[] name, bool negated)
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
-struct Stack(T)//TODO: redo with TmpAlloc
+struct Stack(T, bool CTFE=false)
 {
-    Appender!(T[]) stack;
+    static if(!CTFE)
+        Appender!(T[]) stack;
+    else
+    {
+        struct Proxy
+        { 
+            T[] data;
+            void put(T val){ return data ~=val; }
+            void shrinkTo(size_t sz){   data = data[0..sz]; }
+        }
+        Proxy stack;
+    }
     @property bool empty(){ return stack.data.empty; }
     void push(T item)
     {
@@ -1036,7 +1047,7 @@ struct Stack(T)//TODO: redo with TmpAlloc
         assert(!empty);
         stack.data[$-1] = val;
     }
-    @property size_t length(){  return stack.data.length; }
+    @property size_t length() {  return stack.data.length; }
     T pop()
     {
         assert(!empty);
@@ -1046,7 +1057,7 @@ struct Stack(T)//TODO: redo with TmpAlloc
     }
 }
 
-struct Parser(R)
+struct Parser(R, bool CTFE=false)
     if (isForwardRange!R && is(ElementType!R : dchar))
 {
     enum infinite = ~0u;
@@ -1056,7 +1067,7 @@ struct Parser(R)
     Bytecode[] ir;       //resulting bytecode
     uint[] index;        //user group number -> internal number
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
-    Stack!uint fixupStack;  //stack of opened start instructions
+    Stack!(uint,CTFE) fixupStack;  //stack of opened start instructions
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
@@ -1069,16 +1080,22 @@ struct Parser(R)
     {
         pat = origin = pattern;
         index = [ 0 ]; //map first to start-end of the whole match
-        ir.reserve(pat.length);
+        if(!__ctfe)
+            ir.reserve(pat.length);
         next();
         parseFlags(flags);
-        try
-        {    
+        if(__ctfe)
             parseRegex();
-        }
-        catch(Exception e)
+        else
         {
-            error(e.msg);//also adds pattern location
+            try
+            {    
+                parseRegex();
+            }
+            catch(Exception e)
+            {
+                error(e.msg);//also adds pattern location
+            }
         }
     }
     @property dchar current(){ return _current; }
@@ -1089,8 +1106,17 @@ struct Parser(R)
             empty =  true;
             return false;
         }
-        _current = pat.front;
-        pat.popFront();
+        if(__ctfe)
+        {
+            size_t idx=0;
+            _current = decode(pat, idx);
+            pat = pat[idx..$];
+        }
+        else
+        {
+            _current = pat.front;
+            pat.popFront();
+        }
         return true;
     }
     void skipSpace()
@@ -1103,7 +1129,15 @@ struct Parser(R)
         empty = false;
         next();
     }
-    void put(Bytecode code){  ir ~= code; }
+    void put(Bytecode code)
+    {  
+        if(__ctfe)
+        {
+            ir = ir ~ code;
+        }
+        else
+            ir ~= code; 
+    }
     void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
     uint parseDecimal()
     {
@@ -1131,7 +1165,7 @@ struct Parser(R)
     */
     void parseFlags(S)(S flags)
     {
-        foreach(dchar ch; flags)
+        foreach(ch; flags)//flags are ASCII anyway
             switch(ch)
             {
                 alias TypeTuple!('g', 'i', 'x', 'U') switches;
@@ -1316,7 +1350,8 @@ struct Parser(R)
             }
         }
         //unwind fixup stack, check for errors
-        if(fixupStack.length != 1)
+        //.stack.data. is a workaround for CTFE
+        if(fixupStack.stack.data.length != 1)
         {
             fix = fixupStack.pop();
             if(ir[fix].code == IR.Option)
@@ -1740,7 +1775,7 @@ struct Parser(R)
                 state = State.Start;
                 break;
             }
-            next() || error("unexpected end of charset");
+            enforce(next(), "unexpected end of charset");
         }
         return tuple(set, op);
     }
@@ -1749,10 +1784,10 @@ struct Parser(R)
     */
     void parseCharset()
     {
-        Stack!Charset vstack;
-        Stack!Operator opstack;
+        Stack!(Charset, CTFE) vstack;
+        Stack!(Operator, CTFE) opstack;
         //
-        static bool apply(Operator op, ref Stack!Charset stack)
+        static bool apply(Operator op, ref Stack!(Charset,CTFE) stack)
         {
             switch(op)
             {
@@ -1784,7 +1819,7 @@ struct Parser(R)
             }
             return true;
         }
-        static bool unrollWhile(alias cond)(ref Stack!Charset vstack, ref Stack!Operator opstack)
+        static bool unrollWhile(alias cond)(ref Stack!(Charset, CTFE) vstack, ref Stack!(Operator, CTFE) opstack)
         {
             while(cond(opstack.top))
             {
@@ -1808,18 +1843,19 @@ struct Parser(R)
             {
             case '[':
                 opstack.push(Operator.Open);
-                next() || error("unexpected end of charset");
+                enforce(next(), "unexpected end of charset");
                 if(current == '^')
                 {
                     opstack.push(Operator.Negate);
                     next() || error("unexpected end of charset");
                 }
                 //[] is prohibited
-                current != ']' || error("wrong charset");
+                enforce(current != ']', "wrong charset");
                 goto default;
             case ']':
-                unrollWhile!(unaryFun!"a != a.Open")(vstack, opstack) || error("charset syntax error");
-                !opstack.empty || error("unmatched ']'");
+                enforce(unrollWhile!(unaryFun!"a != a.Open")(vstack, opstack),
+                        "charset syntax error");
+                enforce(!opstack.empty, "unmatched ']'");
                 opstack.pop();
                 next();
               /*  writeln("After ] ", current, pat);
@@ -2009,8 +2045,8 @@ struct Program
         uint hotspotIndex = 0;
         uint top = 0;
         counterRange[0] = 1;
-
-        for(size_t i=0; i<ir.length; i+=ir[i].length)
+        //CTFE workaround
+        for(size_t i=0; i<ir.length; i+=lengthOfIR(ir[i].code))
         {
             if(ir[i].code == IR.RepeatStart)
             {
@@ -3439,9 +3475,18 @@ public:
 auto regex(S, S2=string)(S pattern, S2 flags=[])
     if(isSomeString!S && isSomeString!S2)
 {
-    auto parser = Parser!(typeof(pattern))(pattern, flags);
-    Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
-    return r;
+    if(!__ctfe)
+    {
+        auto parser = Parser!(typeof(pattern))(pattern, flags);
+        Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
+        return r;
+    }
+    else
+    {
+        auto parser = Parser!(typeof(pattern), true)(pattern, flags);
+        Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
+        return r;
+    }
 }
 
 ///

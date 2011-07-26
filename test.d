@@ -19,11 +19,19 @@ unittest
     assert(tmatch("wida", r2).empty);
     assert(!match("abc", "abc".dup).empty);
     assert(!tmatch("abc", "abc".dup).empty);
-    //compile-time regex
-    //enum ctr = regex("abc");
 }
 
-
+//CTFE parsing
+unittest
+{
+    //compile-time regex
+    enum ctr = regex("abc");
+    assert(!match("abc",ctr).empty);
+    //no charsets yet
+    //enum ctr = regex("[abc]");
+    //no insertInPlace
+    //enum ctr2 = regex("a*bc");
+}
 /* The test vectors in this file are altered from Henry Spencer's regexp
    test code. His copyright notice is:
 
