@@ -381,7 +381,7 @@ struct StreamCBuf(Char)
                 finalHistoryWindowStart-=historyWindow+1;
         }
         ulong bEnd=bufEnd();
-        assert(((bufAtt.length-1)&bufAtt.length)==0, "bufAtt.lenth must be a power of two");
+        assert(((bufAtt.length-1)&bufAtt.length)==0, "bufAtt.length must be a power of two");
         if (bEnd==ulong.max){ // start up
             if (finalHistoryWindowStart<upTo){
                 assert(chunkStart<=finalHistoryWindowStart);
@@ -409,11 +409,6 @@ struct StreamCBuf(Char)
             if (finalHistoryWindowStart<upTo){
                 assert(chunkStart<=finalHistoryWindowStart);
                 ulong start= finalHistoryWindowStart-chunkStart;
-                bool skipFirst=false;
-                if (start<bEnd) {
-                    start=bEnd;
-                    skipFirst=true;
-                }
                 // with char/wchar we might need to adjust start
                 size_t end=cast(size_t)(upTo-chunkStart);
                 assert(end<=chunkAtt.length);
@@ -424,10 +419,6 @@ struct StreamCBuf(Char)
                     ++i;
                     // with char/wchar we should maybe decode more chars into newC...
                     bufAtt[bufPos]=newC;
-                    if (skipFirst) {
-                        skipFirst=false;
-                        continue;
-                    }
                     ++bufPos;
                     if (bufHistorySize<historyWindow) ++bufHistorySize;
                     if (bufPos>=bufAtt.length) bufPos-=bufAtt.length;
@@ -595,6 +586,7 @@ unittest
     }
     stream.addChunk(""d, true);
     assert(index == fullStr.length - 2); //one char awaits normalization
+    assert(ii == fullStr.length - 1); //note the difference
     {
         size_t i=ii;
         while(stream.nextChar(ch, index))
@@ -607,6 +599,8 @@ unittest
             auto firstPass = stream.loopBack();
             while(firstPass.nextChar(ch2, index2))
             {
+                writefln("--- inside last loopback");
+                stream.desc(delegate void(const(char[])s){ writef(s); });
                 writefln("last loopBack, char:%s, index:%s",ch2,index2);
                 j--;
                 assert(ch2 == fullStr[j]);
@@ -616,7 +610,8 @@ unittest
         }
         ii=i;
     }
-    assert(ii == fullStr.length - 1); //index of last char
+    assert(index == fullStr.length-1); 
+    assert(ii == fullStr.length); 
 }
 
 dstring fromStream(S)(S stream)
