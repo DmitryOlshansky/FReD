@@ -21,17 +21,13 @@ unittest
     assert(!tmatch("abc", "abc".dup).empty);
 }
 
-//CTFE parsing
 unittest
 {
-    //compile-time regex
+    //simple compile-time regex
     enum ctr = regex("abc");
-    assert(!match("abc",ctr).empty);
-    //no charsets yet
-    //enum ctr = regex("[abc]");
-    //no insertInPlace
-    //enum ctr2 = regex("a*bc");
+    assert(match("abc",ctr).hit == "abc");
 }
+
 /* The test vectors in this file are altered from Henry Spencer's regexp
    test code. His copyright notice is:
 
@@ -67,7 +63,7 @@ unittest
         string flags;
     };
 
-    static TestVectors tv[] = [
+    enum TestVectors tv[] = [
         TestVectors(  "(a)b\\1",   "abaab","y",    "$&",    "aba" ),
         TestVectors(  "()b\\1",     "aaab", "y",    "$&",    "b" ),
         TestVectors(  "abc",       "abc",  "y",    "$&",    "abc" ),
@@ -285,16 +281,16 @@ unittest
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
         ];
-
-    int i;
-    sizediff_t a;
-    uint c;
-    sizediff_t start;
-    sizediff_t end;
-    TestVectors tvd;
+    string produceExpected(M,Range)(M m, Range fmt)
+    {
+        auto app = appender!(String)();
+        replaceFmt(fmt, m.captures, app, true);
+        return app.data;
+    }
     void run_tests(alias matchFn)()
     {
-        foreach (Char; TypeTuple!(char, wchar, dchar))
+        int i;
+        foreach(Char; TypeTuple!(char, wchar, dchar))
         {
             alias immutable(Char)[] String;
             String produceExpected(M,Range)(M m, Range fmt)
@@ -304,13 +300,9 @@ unittest
                 return app.data;
             }
             Regex!(Char) r;
-            start = 0;
-            end = tv.length;
-
-            for (a = start; a < end; a++)
+            foreach(a, tvd; tv)
             {
-                tvd = tv[a];
-                c = tvd.result[0];
+                uint c = tvd.result[0];
                 try
                 {
                     i = 1;
@@ -322,28 +314,61 @@ unittest
                     //debug writeln(e.msg);
                 }
 
-                assert((c == 'c') ? !i : i, "failed to match pattern "~tvd.pattern);
+                assert((c == 'c') ? !i : i, "failed to compile pattern "~tvd.pattern);
 
-                if (c != 'c')
+                if(c != 'c')
                 {
                     auto m = matchFn(to!(String)(tvd.input), r);
                     i = !m.empty;
-                    assert((c == 'y') ? i : !i, text(matchFn.stringof ~": match failed pattern #", a ,": ", tvd.pattern));
-                    if (c == 'y')
+                    assert((c == 'y') ? i : !i, text(matchFn.stringof ~": failed to match pattern #", a ,": ", tvd.pattern));
+                    if(c == 'y')
                     {
-                        debug writeln(" Test #", a, " pattern: ", tvd.pattern);
+                        //debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
-                        //make stderr collect all mismatches
                         assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
                                     tvd.replace, " vs ", result));
                     }
                 }
             }
         }
-        writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
+        debug writeln("!!! FReD bulk test done "~matchFn.stringof~" !!!");
     }
+    static string generate(uint n,uint[] black_list...)
+    {
+        string s = "TypeTuple!(";
+        for(uint i=0; i<n; i++)
+        {
+            uint j;
+            for(j =0; j<black_list.length; j++)
+                if(i == black_list[j])
+                    break;
+            if(j == black_list.length)
+            {
+                s ~= to!string(i);
+                s ~= ",";
+            }
+        }
+        s ~= ")";
+        return s;
+    }
+    //writeln(generate(100,38,39,40,52,55,57,62,63,67,80,190,191,192));
+    //CTFE parsing
+    void ct_tests(alias matchFn)()
+    {
+        foreach(a, v; mixin(generate(40,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        {
+            enum tvd = tv[v];
+            enum r = regex(tvd.pattern, tvd.flags);
+            debug r.print();
+        }
+        debug writeln("!!! FReD C-T test done "~matchFn.stringof~" !!!");
+    }
+    foreach(i, tvd; tv)
+        if(tvd.result[0] == 'c')
+            writeln(i);
     run_tests!match(); //backtracker
     run_tests!tmatch(); //thompson VM
+    //ct_tests!match();
 }
 
 unittest
@@ -357,7 +382,7 @@ unittest
         foreach(m; matchFn(s, r1))
             test ~= m.hit;
         assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
-        writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
+        debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
     }
     test_body!match();
     test_body!tmatch();
@@ -418,7 +443,7 @@ unittest
         auto re = regex("c.*|d");
         auto m = match("mm", re);
         assert(m.empty);
-        writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
+        debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
     }
     test_body!match();
     test_body!tmatch();
@@ -440,7 +465,7 @@ unittest
         auto s = fred.replace!(baz)("Strap a rocket engine on a chicken.",
                 regex("[ar]", "g"));
         assert(s == "StRAp A Rocket engine on A chicken.");
-        writeln("!!! Replace test done "~matchFn.stringof~" on "~String.stringof~" !!!");
+        debug writeln("!!! Replace test done "~matchFn.stringof~" on "~String.stringof~" !!!");
     }
     test!(string,   match)();
     test!(wstring,  match)();

@@ -330,6 +330,21 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
         put(sink,"\n");
     }
 }
+
+static void insertInPlaceCtfe(T)(ref T[] arr, size_t idx, T[] items...)
+{
+    auto oldLen = arr.length;
+    auto iLen = items.length;
+    arr.length += iLen;
+    for(size_t i = iLen-1; i<iLen;i--)//count on overflow
+        arr[idx+iLen+i] = arr[idx+i];
+    arr[idx .. idx+iLen] = items[];
+}
+static void replaceInPlaceCtfe(T)(ref T[] arr, size_t from, size_t to, T[] items...)
+{
+    arr = arr[0..from]~items~arr[to..$];
+}
+
 //do not reorder this list
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
@@ -417,8 +432,17 @@ struct Interval
 /// basic internal data structure for [...] sets
 struct Charset
 {
+private:
     Interval[] intervals;
+    static charsetReplace(T)(ref T[]  arr, size_t from, size_t to, T[] stuff...)
+    {
+        if(__ctfe)
+            replaceInPlaceCtfe(arr, from, to, stuff);
+        else
+            replaceInPlace(arr, from, to, stuff);
+    }
     ///
+public:
     ref add(Interval inter)
     {
         //TODO: This all could use an improvment
@@ -444,18 +468,18 @@ struct Charset
                 inter.begin = intervals[beg].begin;
             if(end && inter.end < intervals[end-1].end)
                 inter.end = intervals[end-1].end;
-            replaceInPlace(intervals, beg, end, [inter]);
+            charsetReplace(intervals, beg, end, [inter]);
         }
 
         if(beg > 0 && intervals[beg].begin == intervals[beg-1].end+1)
         {
             intervals[beg-1].end = intervals[beg].end;
-            replaceInPlace(intervals, beg, beg+1, cast(Interval[])[]);
+            charsetReplace(intervals, beg, beg+1, cast(Interval[])[]);
         }
         if(end > 0 && end < intervals.length && intervals[end-1].end+1 == intervals[end].begin)
         {
             intervals[end-1].end = intervals[end].begin;
-            replaceInPlace(intervals, end, end+1, cast(Interval[])[]);
+            charsetReplace(intervals, end, end+1, cast(Interval[])[]);
         }
         //debug(fred_parser) writeln("Charset after add: ", intervals);
         return this;
@@ -653,7 +677,12 @@ struct Charset
     /// number of codepoints in this charset
     @property uint chars() const
     {
-        return reduce!"a+b"(map!"a.end-a.begin+1"(intervals));
+        //CTFE workaround
+        //return reduce!"a+b"(map!"a.end-a.begin+1"(intervals));
+        uint ret;
+        for(uint i=0; i<intervals.length; i++)
+            ret += intervals[i].end-intervals[i].begin+1;
+        return ret;
     }
         
 }
@@ -739,7 +768,7 @@ struct Trie(uint prefixBits)
                     break;
                 page[] = 0;
             }
-            else//fast reroute whole blocks to empty one
+            else//fast reroute whole blocks to an empty one
             {
                 indexes ~= emptyBlock;
             }
@@ -1027,7 +1056,10 @@ struct Stack(T, bool CTFE=false)
         struct Proxy
         { 
             T[] data;
-            void put(T val){ return data ~=val; }
+            void put(T val)
+            { 
+                data ~= val;
+            }
             void shrinkTo(size_t sz){   data = data[0..sz]; }
         }
         Proxy stack;
@@ -1074,7 +1106,8 @@ struct Parser(R, bool CTFE=false)
     uint counterDepth = 0; //current depth of nested counted repetitions
     immutable(Charset)[] charsets;  //
     immutable(DefaultTrie)[] tries; //
-    
+    static if(CTFE)
+        alias insertInPlaceCtfe insertInPlace;
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
@@ -1279,7 +1312,7 @@ struct Parser(R, bool CTFE=false)
                 }
                 break;
             case ')':
-                nesting || error("Unmatched ')'");
+                enforce(nesting, "Unmatched ')'");
                 nesting--;
                 next();
                 fix = fixupStack.pop();
@@ -1330,7 +1363,8 @@ struct Parser(R, bool CTFE=false)
                     break;
                 }
                 //start a new option
-                if(fixupStack.length == 1)//only root entry
+                //CTFE workaround
+                if(fixupStack.stack.data.length == 1)//only root entry
                     fix = -1;
                 uint len = ir.length - fix;
                 insertInPlace(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
@@ -1357,7 +1391,7 @@ struct Parser(R, bool CTFE=false)
             if(ir[fix].code == IR.Option)
             {
                 finishAlternation();
-                fixupStack.length == 1 || error(" LR syntax error");
+                enforce(fixupStack.length == 1, " LR syntax error");
             }
             else
                 error(" LR syntax error");
@@ -1501,7 +1535,7 @@ struct Parser(R, bool CTFE=false)
             parseCharset();
             break;
         case '\\':
-            next() || error("Unfinished escape sequence");
+            enforce(next(), "Unfinished escape sequence");
             escape();
             break;
         case '^':
@@ -1847,7 +1881,7 @@ struct Parser(R, bool CTFE=false)
                 if(current == '^')
                 {
                     opstack.push(Operator.Negate);
-                    next() || error("unexpected end of charset");
+                    enforce(next(), "unexpected end of charset");
                 }
                 //[] is prohibited
                 enforce(current != ']', "wrong charset");
@@ -1891,7 +1925,8 @@ struct Parser(R, bool CTFE=false)
         }while(!empty || !opstack.empty);
         while(!opstack.empty)
             apply(opstack.pop(),vstack);
-        assert(vstack.length == 1);
+        //CTFE workaround
+        assert(vstack.stack.data.length == 1);
         charsetToIr(cast(immutable)vstack.top);
     }
     //try to generate optimal IR code for this charset
@@ -1969,7 +2004,7 @@ struct Parser(R, bool CTFE=false)
             break;
         case '1': .. case '9': //TODO: use $ instead of \ for backreference
             uint nref = cast(uint)current - '0';
-            nref <  index.length || error("Backref to unseen group");
+            enforce(nref <  index.length, "Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
             while(nref <= index.length && next() && ascii.isDigit(current))
@@ -2457,7 +2492,7 @@ if( is(Char : dchar) )
                 if(atEnd || !re.tries[prog[pc].data][front])
                     goto L_backtrack;
                 next();
-                pc += IRL!(IR.Charset);
+                pc += IRL!(IR.Trie);
                 break;
             case IR.Wordboundary:
                 dchar back;
@@ -2838,7 +2873,7 @@ struct ThompsonMatcher(Char)
                 genCounter++;
                 debug(fred_matching)
                 {
-                    writefln("Threaded matching %d threads at index %s", clist.length, index);
+                    writefln("Threaded matching threads at index %s", index);
                     foreach(t; clist[])
                     {
                         assert(t);
@@ -2864,7 +2899,7 @@ struct ThompsonMatcher(Char)
                     break;
             }
         genCounter++; //increment also on each end
-        debug(fred_matching) writefln("Threaded matching %d threads at end", clist.length);
+        debug(fred_matching) writefln("Threaded matching hreads at end");
         //try out all zero-width posibilities
         if(!matched)
             eval!false(createStart(index), matches);// new thread starting at end of input
@@ -3273,7 +3308,7 @@ struct ThompsonMatcher(Char)
                         if(re.tries[prog[t.pc].data][front])
                         {
                             debug(fred_matching) writeln("Trie passed");
-                            t.pc += IRL!(IR.Charset);
+                            t.pc += IRL!(IR.Trie);
                             nlist.insertBack(t);
                         }
                         else
