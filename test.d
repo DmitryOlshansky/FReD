@@ -281,7 +281,7 @@ unittest
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
         ];
-    string produceExpected(M,Range)(M m, Range fmt)
+    string produceExpected(M,String)(M m, String fmt)
     {
         auto app = appender!(String)();
         replaceFmt(fmt, m.captures, app, true);
@@ -355,20 +355,26 @@ unittest
     //CTFE parsing
     void ct_tests(alias matchFn)()
     {
-        foreach(a, v; mixin(generate(40,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
             debug r.print();
+            auto m = matchFn(to!(string)(tvd.input), r);
+            auto c = tvd.result[0];
+            assert((c == 'y') ^ m.empty, text(matchFn.stringof ~": !C-T regex! failed to match pattern #", a ,": ", tvd.pattern));
+            if(c == 'y')
+            {
+                auto result = produceExpected(m, to!(string)(tvd.format));
+                assert(result == to!string(tvd.replace), text(matchFn.stringof ~": !C-T regex! mismatch pattern #", a, ": ", tvd.pattern," expected: ",
+                            tvd.replace, " vs ", result));
+            }
         }
         debug writeln("!!! FReD C-T test done "~matchFn.stringof~" !!!");
     }
-    foreach(i, tvd; tv)
-        if(tvd.result[0] == 'c')
-            writeln(i);
     run_tests!match(); //backtracker
-    run_tests!tmatch(); //thompson VM
-    //ct_tests!match();
+    //run_tests!tmatch(); //thompson VM
+    ct_tests!match();
 }
 
 unittest
@@ -385,7 +391,7 @@ unittest
         debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
     }
     test_body!match();
-    test_body!tmatch();
+    //test_body!tmatch();
 }
 
 //tests for accomulated std.regex issues
@@ -448,31 +454,33 @@ unittest
     test_body!match();
     test_body!tmatch();
 }
+//@@@BUG@@@ template functions doesn't work inside unittest block
+version(unittest)
+String baz(String)(RegexMatch!(String) m)
+{
+    return std.string.toUpper(m.hit);
+}
 
 // tests for replace 
 unittest
 {
-    void test(String, alias matchFn)()
+    void test(alias matchFn)()
     {
-        assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c")) == to!String("ack rapacity"));
-        assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c")) == to!String("ack capacity"));
-        assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]")) == to!String("[n]oon"));
-    
-        string baz(RegexMatch!(string) m)
+        foreach(i, v; TypeTuple!(string, wstring, dstring))
         {
-            return std.string.toUpper(m.hit);
+            alias v String;
+            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c")) == to!String("ack rapacity"));
+            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c")) == to!String("ack capacity"));
+            assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]")) == to!String("[n]oon"));
+            
+            auto s = fred.replace!(baz)(to!String("Strap a rocket engine on a chicken."),
+                    regex("[ar]", "g"));
+            assert(s == "StRAp A Rocket engine on A chicken.");
         }
-        auto s = fred.replace!(baz)("Strap a rocket engine on a chicken.",
-                regex("[ar]", "g"));
-        assert(s == "StRAp A Rocket engine on A chicken.");
-        debug writeln("!!! Replace test done "~matchFn.stringof~" on "~String.stringof~" !!!");
+        debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");
     }
-    test!(string,   match)();
-    test!(wstring,  match)();
-    test!(dstring,  match)();
-    test!(string,   tmatch)();
-    test!(wstring,  tmatch)();
-    test!(dstring,  tmatch)();
+    test!(match)();
+    test!(tmatch)();
 }
 
 // tests for splitter

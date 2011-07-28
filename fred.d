@@ -333,12 +333,7 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.m
 
 static void insertInPlaceCtfe(T)(ref T[] arr, size_t idx, T[] items...)
 {
-    auto oldLen = arr.length;
-    auto iLen = items.length;
-    arr.length += iLen;
-    for(size_t i = iLen-1; i<iLen;i--)//count on overflow
-        arr[idx+iLen+i] = arr[idx+i];
-    arr[idx .. idx+iLen] = items[];
+   arr = arr[0..idx] ~ items ~ arr[idx..$];
 }
 static void replaceInPlaceCtfe(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
@@ -1188,9 +1183,9 @@ struct Parser(R, bool CTFE=false)
     // parse control code of form \cXXX, c assumed to be the current symbol
     dchar parseControlCode()
     {
-        next() || error("Unfinished escape sequence");
-        ('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z')
-            || error("Only letters are allowed after \\c");
+        enforce(next(), "Unfinished escape sequence");
+        enforce(('a' <= current && current <= 'z') || ('A' <= current && current <= 'Z'),
+            "Only letters are allowed after \\c");
         return current & 0x1f;
     }
     /**
@@ -1223,25 +1218,7 @@ struct Parser(R, bool CTFE=false)
         auto subSave = ngroup;
         auto maxCounterDepth = counterDepth;
         uint fix;//fixup pointer
-        void finishAlternation()
-        {
-            ir[fix].code == IR.Option || error("LR syntax error");
-            ir[fix] = Bytecode(ir[fix].code, ir.length - fix - IRL!(IR.OrStart));
-            fix = fixupStack.pop();
-            ir[fix].code == IR.OrStart || error("LR syntax error");
-            ir[fix] = Bytecode(IR.OrStart, ir.length - fix - IRL!(IR.OrStart));
-            put(Bytecode(IR.OrEnd, ir.length - fix - IRL!(IR.OrStart)));
-            uint pc = fix + IRL!(IR.OrStart);
-            while(ir[pc].code == IR.Option)
-            {
-                pc = pc + ir[pc].data;
-                if(ir[pc].code != IR.GotoEndOr)
-                    break;
-                ir[pc] = Bytecode(IR.GotoEndOr,cast(uint)(ir.length - pc - IRL!(IR.OrEnd)));
-                pc += IRL!(IR.GotoEndOr);
-            }
-            put(Bytecode.fromRaw(0));
-        }
+        
         while(!empty)
         {
             debug(fred_parser) writeln("*LR*\nSource: ", pat, "\nStack: ",fixupStack.stack.data);
@@ -1285,9 +1262,21 @@ struct Parser(R, bool CTFE=false)
                         nglob = cast(uint)index.length-1;//not counting whole match
                         index ~= ngroup++;
                         auto t = NamedGroup(name,nglob+1);
-                        auto d = assumeSorted!"a.name < b.name"(dict);
-                        auto ind = d.lowerBound(t).length;
-                        insertInPlace(dict, ind, t);
+                        
+                        if(__ctfe)
+                        {
+                            size_t ind;
+                            for(ind=0; ind <dict.length; ind++)
+                                if(t.name >= dict[ind].name)
+                                    break;
+                            insertInPlace(dict, ind, t);
+                        }
+                        else
+                        {
+                            auto d = assumeSorted!"a.name < b.name"(dict);
+                            auto ind = d.lowerBound(t).length;
+                            insertInPlace(dict, ind, t);
+                        }
                         put(Bytecode(IR.GroupStart, nglob));
                         break;
                     case '<':
@@ -1328,7 +1317,7 @@ struct Parser(R, bool CTFE=false)
                     break;
                 case IR.Option: // | xxx )
                     // two fixups: last option + full OR
-                    finishAlternation();
+                    finishAlternation(fix);
                     fix = fixupStack.top;
                     switch(ir[fix].code)
                     {
@@ -1390,12 +1379,33 @@ struct Parser(R, bool CTFE=false)
             fix = fixupStack.pop();
             if(ir[fix].code == IR.Option)
             {
-                finishAlternation();
-                enforce(fixupStack.length == 1, " LR syntax error");
+                finishAlternation(fix);
+                //CTFE workaround
+                enforce(fixupStack.stack.data.length == 1, " LR syntax error");
             }
             else
                 error(" LR syntax error");
         }
+    }
+    //helper function, finilizes IR.Option, fix points to the first option of sequence
+    void finishAlternation(uint fix)
+    {
+        enforce(ir[fix].code == IR.Option, "LR syntax error");
+        ir[fix] = Bytecode(ir[fix].code, ir.length - fix - IRL!(IR.OrStart));
+        fix = fixupStack.pop();
+        enforce(ir[fix].code == IR.OrStart, "LR syntax error");
+        ir[fix] = Bytecode(IR.OrStart, ir.length - fix - IRL!(IR.OrStart));
+        put(Bytecode(IR.OrEnd, ir.length - fix - IRL!(IR.OrStart)));
+        uint pc = fix + IRL!(IR.OrStart);
+        while(ir[pc].code == IR.Option)
+        {
+            pc = pc + ir[pc].data;
+            if(ir[pc].code != IR.GotoEndOr)
+                break;
+            ir[pc] = Bytecode(IR.GotoEndOr,cast(uint)(ir.length - pc - IRL!(IR.OrEnd)));
+            pc += IRL!(IR.GotoEndOr);
+        }
+        put(Bytecode.fromRaw(0));
     }
     /*
         Parse and store IR for atom-quantifier pair
@@ -1421,8 +1431,8 @@ struct Parser(R, bool CTFE=false)
             max = infinite;
             break;
         case '{':
-            next() || error("Unexpected end of regex pattern");
-            ascii.isDigit(current) || error("First number required in repetition");
+            enforce(next(), "Unexpected end of regex pattern");
+            enforce(ascii.isDigit(current), "First number required in repetition");
             min = parseDecimal();
             //skipSpace();
             if(current == '}')
@@ -1493,8 +1503,15 @@ struct Parser(R, bool CTFE=false)
             }
             else if(replace)
             {
-                moveAll(ir[offset+1..$],ir[offset..$-1]);
-                ir.length -= 1;
+                if(__ctfe)//CTFE woraround: no moveAll and length -= x;
+                {
+                    ir = ir[0..offset] ~ ir[offset+1..$];
+                }
+                else
+                {
+                    moveAll(ir[offset+1 .. $],ir[offset .. $-1]);
+                    ir.length -= 1;
+                }
             }
             put(Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
             ir ~= ir[offset .. offset+len];
@@ -1951,11 +1968,11 @@ struct Parser(R, bool CTFE=false)
         else
         {
             //other heuristics
-            immutable t  = DefaultTrie(set);
+            /*immutable t  = DefaultTrie(set);
             put(Bytecode(IR.Trie, tries.length));
-            tries ~= t;
-            /*put(Bytecode(IR.Charset, charsets.length));
-            charsets ~= set;*/
+            tries ~= t;*/
+            put(Bytecode(IR.Charset, charsets.length));
+            charsets ~= set;
         }
     }
     ///parse and return IR for escape stand alone escape sequence
@@ -2028,7 +2045,7 @@ struct Parser(R, bool CTFE=false)
 	{
         alias comparePropertyName ucmp;
         enum MAX_PROPERTY = 128;
-		next() && current == '{' || error("{ expected ");
+		enforce(next() && current == '{', "{ expected ");
         char[MAX_PROPERTY] result;
         uint k=0;
         while(k<MAX_PROPERTY && next() && current !='}' && current !=':')

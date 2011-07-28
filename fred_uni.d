@@ -5428,7 +5428,7 @@ immutable(Charset) unicodeBalinese = Charset([
     Interval(0x01b50,0x01b7c),
 ]);
 
-immutable(UnicodeProperty)[] unicodeProperties = [
+immutable unicodeProperties = [
 UnicodeProperty("Alphabetic", unicodeAlphabetic),
 UnicodeProperty("Arabic", unicodeArabic),
 UnicodeProperty("Armenian", unicodeArmenian),
