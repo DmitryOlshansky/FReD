@@ -351,24 +351,22 @@ unittest
         s ~= ")";
         return s;
     }
-    //writeln(generate(100,38,39,40,52,55,57,62,63,67,80,190,191,192));
     //CTFE parsing
     void ct_tests(alias matchFn)()
     {
-        foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        foreach(a, v; mixin(generate(70,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
-            debug r.print();
-            auto m = matchFn(to!(string)(tvd.input), r);
-            auto c = tvd.result[0];
-            assert((c == 'y') ^ m.empty, text(matchFn.stringof ~": !C-T regex! failed to match pattern #", a ,": ", tvd.pattern));
-            if(c == 'y')
+            auto nr = regex(tvd.pattern, tvd.flags);
+            debug
             {
-                auto result = produceExpected(m, to!(string)(tvd.format));
-                assert(result == to!string(tvd.replace), text(matchFn.stringof ~": !C-T regex! mismatch pattern #", a, ": ", tvd.pattern," expected: ",
-                            tvd.replace, " vs ", result));
+                writeln("C-T version :");
+                r.print();
+                writeln("R-T version :");
+                nr.print();
             }
+            assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
         }
         debug writeln("!!! FReD C-T test done "~matchFn.stringof~" !!!");
     }

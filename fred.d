@@ -335,6 +335,7 @@ static void insertInPlaceCtfe(T)(ref T[] arr, size_t idx, T[] items...)
 {
    arr = arr[0..idx] ~ items ~ arr[idx..$];
 }
+
 static void replaceInPlaceCtfe(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
     arr = arr[0..from]~items~arr[to..$];
@@ -449,7 +450,7 @@ public:
         for(beg=0; beg<intervals.length;beg++)
             if(intervals[beg].end >= inter.begin)
                 break;
-        for(end=0; end<intervals.length;end++)
+        for(end=beg; end<intervals.length;end++)
             if(intervals[end].begin >= inter.end)
                 break;
         //debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
@@ -473,10 +474,16 @@ public:
         }
         if(end > 0 && end < intervals.length && intervals[end-1].end+1 == intervals[end].begin)
         {
-            intervals[end-1].end = intervals[end].begin;
+            intervals[end-1].end = intervals[end].end;
             charsetReplace(intervals, end, end+1, cast(Interval[])[]);
         }
         //debug(fred_parser) writeln("Charset after add: ", intervals);
+        debug(fred_charset)
+        {
+            uint[] vals = cast(uint[]) intervals;
+            for(size_t i=0; i<vals.length-1; i++)
+                assert(vals[i] <= vals[i+1]);
+        }
         return this;
     }
     ///
@@ -643,8 +650,8 @@ public:
         for(uint i=0; i<intervals.length; i++) // could use binary search (lower bound) on (cast(uint*)intervals.ptr)[0..2*intervals.length], and then check if it is even or odd...
             if(ch >= intervals[i].begin && ch <= intervals[i].end)
                 return true;
-        return false;
         //debug(fred_charset) writeln("Test at ", fnd);
+        return false;
     }
     /// true if set is empty
     @property bool empty() const {   return intervals.empty; }
@@ -679,7 +686,6 @@ public:
             ret += intervals[i].end-intervals[i].begin+1;
         return ret;
     }
-        
 }
 
 struct Trie(uint prefixBits)
@@ -1377,14 +1383,10 @@ struct Parser(R, bool CTFE=false)
         if(fixupStack.stack.data.length != 1)
         {
             fix = fixupStack.pop();
-            if(ir[fix].code == IR.Option)
-            {
-                finishAlternation(fix);
-                //CTFE workaround
-                enforce(fixupStack.stack.data.length == 1, " LR syntax error");
-            }
-            else
-                error(" LR syntax error");
+            enforce(ir[fix].code == IR.Option,"LR syntax error");
+            finishAlternation(fix);
+            //CTFE workaround
+            enforce(fixupStack.stack.data.length == 1, "LR syntax error");
         }
     }
     //helper function, finilizes IR.Option, fix points to the first option of sequence
@@ -1503,7 +1505,7 @@ struct Parser(R, bool CTFE=false)
             }
             else if(replace)
             {
-                if(__ctfe)//CTFE woraround: no moveAll and length -= x;
+                if(__ctfe)//CTFE workaround: no moveAll and length -= x;
                 {
                     ir = ir[0..offset] ~ ir[offset+1..$];
                 }
@@ -1877,7 +1879,7 @@ struct Parser(R, bool CTFE=false)
                 debug(fred_charset)
                 {
                     writeln(opstack.stack.data);
-                    writeln(map!"a.intervals"(vstack.stack.data));
+                    //writeln(map!"a.intervals"(vstack.stack.data));
                 }
                 if(!apply(opstack.pop(),vstack))
                     return false;//syntax error
@@ -2855,7 +2857,7 @@ struct ThompsonMatcher(Char)
         if(re.hotspotTableSize)
         {
             merge = new uint[re.hotspotTableSize];
-            reserve(re.hotspotTableSize+1);
+            reserve(re.hotspotTableSize+2);
         }
         genCounter = 0;
     }
@@ -3107,13 +3109,14 @@ struct ThompsonMatcher(Char)
                     if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, index, genCounter, merge[prog[t.pc + 1].raw+t.counter] );
                         merge[prog[t.pc + 1].raw+t.counter] = genCounter;
                     }
                     else
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                        t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                        t.pc, index, genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                        recycle(t);
                         t = worklist.fetch();
                         break;
                     }
@@ -3143,6 +3146,7 @@ struct ThompsonMatcher(Char)
                     {
                         debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
                                         t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                        recycle(t);
                         t = worklist.fetch();
                     }
                     break;
@@ -3321,6 +3325,7 @@ struct ThompsonMatcher(Char)
                             recycle(t);
                         }
                         t = worklist.fetch();
+                        break;
                     case IR.Trie:
                         if(re.tries[prog[t.pc].data][front])
                         {
@@ -3361,16 +3366,16 @@ struct ThompsonMatcher(Char)
         else
         {
             reserve(threadAllocSize);
-            debug(fred_matching) writefln("Allocated space for another %d threads", threadAllocSize);
+            debug(fred_allocation) writefln("Allocated space for another %d threads", threadAllocSize);
             return allocate();
         }
     }
     ///
     void reserve(uint size)
     {
+        assert(re.ngroup);
         const tSize = (Thread.sizeof+(re.ngroup-1)*Group.sizeof);
-        ubyte[] mem = new ubyte[tSize*size];
-        
+        void[] mem = new void[tSize*size];
         freelist = cast(Thread*)&mem[0];
         size_t i;
         for(i=tSize; i<tSize*size; i+=tSize)
