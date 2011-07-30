@@ -352,7 +352,7 @@ unittest
         return s;
     }
     //CTFE parsing
-    void ct_tests(alias matchFn)()
+    void ct_tests()
     {
         foreach(a, v; mixin(generate(70,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
@@ -368,11 +368,11 @@ unittest
             }
             assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
         }
-        debug writeln("!!! FReD C-T test done "~matchFn.stringof~" !!!");
+        debug writeln("!!! FReD C-T test done !!!");
     }
     run_tests!match(); //backtracker
-    //run_tests!tmatch(); //thompson VM
-    ct_tests!match();
+    run_tests!tmatch(); //thompson VM
+    ct_tests();
 }
 
 unittest
@@ -389,7 +389,7 @@ unittest
         debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
     }
     test_body!match();
-    //test_body!tmatch();
+    test_body!tmatch();
 }
 
 //tests for accomulated std.regex issues
