@@ -354,7 +354,7 @@ unittest
     //CTFE parsing
     void ct_tests()
     {
-        foreach(a, v; mixin(generate(70,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
@@ -367,14 +367,37 @@ unittest
                 nr.print();
             }
             assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
+            
         }
         debug writeln("!!! FReD C-T test done !!!");
     }
-    run_tests!match(); //backtracker
-    run_tests!tmatch(); //thompson VM
+    version(fred_ct_only)
+    {
+        enum x = regex("(a*)+");
+        foreach(v; x.ir)
+            writef("%s,", v.raw);
+        writeln();
+        writeln("max depth = ", x.maxCounterDepth);
+        auto y = regex("(a*)+");
+        foreach(v; y.ir)
+            writef("%s,", v.raw);
+        writeln();
+        writeln("max depth = ", y.maxCounterDepth);
+        
+    }
+    else
+    {
+        run_tests!match(); //backtracker
+        run_tests!tmatch(); //thompson VM
+    }
+    
     ct_tests();
 }
-
+version(fred_ct_only)
+{
+}
+else
+{
 unittest
 {
 //global matching
@@ -513,6 +536,7 @@ unittest
     assert(equal(split(s1, regex(", *")), w1[]));
 }
 
+}
 version(unittest){
 void main(){}
 }

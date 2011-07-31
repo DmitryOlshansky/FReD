@@ -1034,9 +1034,12 @@ immutable(Charset) getUnicodeSet(in char[] name, bool negated)
         else
         {
             auto range = assumeSorted!((x,y){ return ucmp(x.name, y.name) < 0; })(unicodeProperties); 
-            auto eq = range.equalRange(UnicodeProperty(cast(string)name,Charset.init));//TODO: hackish
-            enforce(!eq.empty,"invalid property name");
-            s = cast(Charset)eq.front.set;
+            auto eq = range.lowerBound(UnicodeProperty(cast(string)name,Charset.init)).length;//TODO: hackish
+            enforce(eq!=range.length && ucmp(name,range[eq].name)==0,"invalid property name");
+            s = cast(Charset)range[eq].set;
+            /*auto idx = bsearch(unicodeProperties, immutable(UnicodeProperty)(cast(string)name,Charset.init));
+            enforce(idx != uint.max,"invalid property name");
+            s = cast(Charset)unicodeProperties[idx].set;*/
         }
     }
     if(negated)
@@ -1417,7 +1420,7 @@ struct Parser(R, bool CTFE=false)
     */
     void parseQuantifier(uint offset)
     {
-        bool replace = ir[offset].code == IR.Nop;
+        uint replace = ir[offset].code == IR.Nop;
         if(empty && !replace)
             return;
         uint min, max;
@@ -1466,7 +1469,7 @@ struct Parser(R, bool CTFE=false)
             }
             return;
         }
-        uint len = cast(uint)ir.length - offset - cast(uint)replace;
+        uint len = cast(uint)ir.length - offset - replace;
         bool greedy = true;
         //check only if we managed to get new symbol
         if(next() && current == '?')
@@ -2129,7 +2132,7 @@ struct Program
             if(ir[i].hotspot)
             {
                 assert(i + 1 < ir.length, "unexpected end of IR while looking for hotspot");
-                ir[i+1].raw = hotspotIndex;
+                ir[i+1] = Bytecode.fromRaw(hotspotIndex);
                 hotspotIndex += counterRange[top];
             }
         }
@@ -2181,9 +2184,12 @@ struct Program
 		return dict[fnd].group;
 	}
 	///
-    this(Parser)(Parser p)
+    this(S,bool x)(Parser!(S,x) p)
     {
-        ir = p.ir;
+        if(__ctfe)//CTFE something funky going on with array
+            ir = p.ir.dup;
+        else
+            ir = p.ir;
         index = p.index;
         dict = p.dict;
         ngroup = p.ngroup;
@@ -2191,7 +2197,10 @@ struct Program
         flags = p.re_flags;
         charsets = p.charsets;
         tries = p.tries;
-        lightPostprocess();
+        /*version(fred_ct)
+        {}
+        else*/
+            lightPostprocess();
         debug(fred_parser)
         {
             print();
