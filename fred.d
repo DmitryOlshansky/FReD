@@ -21,6 +21,7 @@ import ascii = std.ascii;
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
 //debug = fred_matching;
+//debug = fred_charset;
 
 /// [TODO: format for doc]
 ///  IR bit pattern: 0b1_xxxxx_yy
@@ -41,28 +42,25 @@ enum IR:uint {
 
     Char              = 0b1_00000_00, /// a character
     Any               = 0b1_00001_00, /// any character
-    Digit             = 0b1_00010_00, /// a digit
-    Notdigit          = 0b1_00011_00, /// not a digit
-    Space             = 0b1_00100_00, /// a space
-    Notspace          = 0b1_00101_00, /// not a space
-    Word              = 0b1_00110_00, /// a word
-    Notword           = 0b1_00111_00, /// not a word
-    Bol               = 0b1_01000_00, /// beginning of a string ^
-    Eol               = 0b1_01001_00, /// end of a string $
-    Wordboundary      = 0b1_01010_00, /// boundary of a word
-    Notwordboundary   = 0b1_01011_00, /// not a word boundary
-    Backref           = 0b1_01100_00, /// backreference to a group (that has to be pinned, i.e. locally unique) (group index)
-    GroupStart        = 0b1_01101_00, /// start of a group (x) (groupIndex+groupPinning(1bit))
-    GroupEnd          = 0b1_01110_00, /// end of a group (x) (groupIndex+groupPinning(1bit))
-    Option            = 0b1_01111_00, /// start of an option within an alternation x | y (length)
-    GotoEndOr         = 0b1_10000_00, /// end of an option (length of the rest)
-    Charset           = 0b1_10001_00, /// a most generic charset [...]
-    Trie              = 0b1_10010_00, /// charset implemented as Trie
-    Nop               = 0b1_10011_00, /// no operation (padding)
+    Charset           = 0b1_00010_00, /// a most generic charset [...]
+    Trie              = 0b1_00011_00, /// charset implemented as Trie
+    //place for two more atoms 
+    Bol               = 0b1_00111_00, /// beginning of a string ^
+    Eol               = 0b1_01000_00, /// end of a string $
+    Wordboundary      = 0b1_01001_00, /// boundary of a word
+    Notwordboundary   = 0b1_01010_00, /// not a word boundary
+    Backref           = 0b1_01011_00, /// backreference to a group (that has to be pinned, i.e. locally unique) (group index)
+    GroupStart        = 0b1_01100_00, /// start of a group (x) (groupIndex+groupPinning(1bit))
+    GroupEnd          = 0b1_01101_00, /// end of a group (x) (groupIndex+groupPinning(1bit))
+    Option            = 0b1_01110_00, /// start of an option within an alternation x | y (length)
+    GotoEndOr         = 0b1_01111_00, /// end of an option (length of the rest)
+    //... any additional atoms here    
+    OrChar            = 0b1_11110_00,
+    Nop               = 0b1_11111_00, /// no operation (padding)
     /// match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
     /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
     /// the drawback of this representation is that it is difficult to detect a jump in the middle of it
-    OrChar            = 0b1_10100_00,
+    
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
     OrEnd             = 0b1_00000_10, /// end of the or group (length,mergeIndex)
@@ -211,7 +209,7 @@ struct Bytecode
 static assert(Bytecode.sizeof == 4);
 
 /// debugging tool, prints out instruction along with opcodes
-string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
+string disassemble(Bytecode[] irb, uint pc, NamedGroup[] dict=[])
 {
     auto output = appender!string();
     formattedWrite(output,"%s", irb[pc].mnemonic);
@@ -252,8 +250,8 @@ string disassemble(Bytecode[] irb, uint pc, uint[] index, NamedGroup[] dict=[])
                 name = "'"~v.name~"'";
                 break;
             }
-        formattedWrite(output, " %s #%u (internal %u)",
-                name, n,  index[n]);
+        formattedWrite(output, " %s #%u ",
+                name, n);
         break;
     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
         uint len = irb[pc].data;
@@ -697,6 +695,7 @@ struct Trie(uint prefixBits)
     static assert(prefixBits > uint.sizeof);
     uint[] data;
     ushort[] indexes;
+    bool negative;
     //
     static void printBlock(in uint[] block)
     {
@@ -713,13 +712,13 @@ struct Trie(uint prefixBits)
     /// create a trie from charset set
     this(in Charset s)
     {
+        if(s.intervals.empty)
+            return;
+        const(Charset) set = s.chars > 500_000 ? (negative=true, s.dup.negate) : s;
         uint bound = 0;//set up on first iteration
         ushort emptyBlock = ushort.max;
-        const(Interval)[] ivals  = s.intervals;
-        if(ivals.empty)
-            return;
+        const(Interval)[] ivals  = set.intervals;
         uint[prefixWordSize] page;
-        bool negative = false;
         for(uint i=0; i<0x110000; i+= prefixSize)
         {
             if(i+prefixSize > ivals[bound].begin || emptyBlock == ushort.max)//avoid empty blocks if we have one already
@@ -792,16 +791,27 @@ struct Trie(uint prefixBits)
         assert(ch < 0x110000);
         uint ind = ch>>prefixBits;
         if(ind >= indexes.length)
-            return 0;
-        return bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask));
+            return negative;
+        return cast(bool)bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask)) ^ negative;
+    }
+    ///get a negative copy
+    Trie negated() const
+    {
+        Trie t = cast(Trie)this;//shallow copy, need to subvert type system?
+        t.negative = !negative; 
+        return t;
     }
 }
 alias Trie!8 DefaultTrie;
 
+//version(fred_trie_test)
 unittest//a very sloow test
 {
     uint max_char, max_data;
     Trie!8 t;
+    t = wordTrie.negated;
+    assert(!t['a']);
+    assert(t[' ']);
     foreach(up; unicodeProperties)
     {
         t = Trie!8(up.set);
@@ -905,18 +915,14 @@ unittest
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
 //property for \w character class
-Charset wordCharacter;
-
-static this()
-{
-    wordCharacter.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
-        .add(unicodeMe).add(unicodeNd).add(unicodePc); 
-}
+immutable Charset wordCharacter = Charset.init.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
+        .add(unicodeMe).add(unicodeNd).add(unicodePc);
+immutable DefaultTrie wordTrie = DefaultTrie(wordCharacter);
 
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
-immutable(Charset) getUnicodeSet(in char[] name, bool negated)
+const(Charset) getUnicodeSet(in char[] name, bool negated)
 {
     alias comparePropertyName ucmp;
     Charset s;
@@ -1047,7 +1053,7 @@ immutable(Charset) getUnicodeSet(in char[] name, bool negated)
 		s = s.dup;//tables are immutable
         s.negate();
     }
-    return cast(immutable(Charset))s;
+    return cast(const Charset)s;
 }
 
 /// basic stack, just in case it gets used anywhere else then Parser
@@ -1101,22 +1107,20 @@ struct Parser(R, bool CTFE=false)
     bool empty;
     R pat, origin;       //keep full pattern for pretty printing error messages
     Bytecode[] ir;       //resulting bytecode
-    uint[] index;        //user group number -> internal number
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
     Stack!(uint,CTFE) fixupStack;  //stack of opened start instructions
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
-    immutable(Charset)[] charsets;  //
-    immutable(DefaultTrie)[] tries; //
+    const(Charset)[] charsets;  //
+    const(DefaultTrie)[] tries; //
     static if(CTFE)
         alias insertInPlaceCtfe insertInPlace;
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
         pat = origin = pattern;
-        index = [ 0 ]; //map first to start-end of the whole match
         if(!__ctfe)
             ir.reserve(pat.length);
         next();
@@ -1134,6 +1138,7 @@ struct Parser(R, bool CTFE=false)
                 error(e.msg);//also adds pattern location
             }
         }
+
     }
     @property dchar current(){ return _current; }
     bool next()
@@ -1271,9 +1276,8 @@ struct Parser(R, bool CTFE=false)
                         if(current != '>')
                             error("Expected '>' closing named group");
                         next();
-                        nglob = cast(uint)index.length-1;//not counting whole match
-                        index ~= ngroup++;
-                        auto t = NamedGroup(name,nglob+1);
+                        nglob = ngroup++;
+                        auto t = NamedGroup(name, nglob);
                         
                         if(__ctfe)
                         {
@@ -1307,8 +1311,7 @@ struct Parser(R, bool CTFE=false)
                 }
                 else
                 {
-                    nglob = cast(uint)index.length-1;//not counting whole match
-                    index ~= ngroup++; //put local index
+                    nglob = ngroup++; //put local index
                     put(Bytecode(IR.GroupStart, nglob));
                 }
                 break;
@@ -1374,9 +1377,6 @@ struct Parser(R, bool CTFE=false)
                 fixupStack.push(fix+1); // fixup for StartOR
                 fixupStack.push(ir.length); //for Option
                 put(Bytecode(IR.Option, 0));
-                /*uint maxSub = 0; //maximum number of captures out of each code path
-
-                ngroup = maxSub;*/
                 break;
             default://no groups or whatever
                 uint start = cast(uint)ir.length;
@@ -1561,7 +1561,7 @@ struct Parser(R, bool CTFE=false)
             break;
         case '\\':
             enforce(next(), "Unfinished escape sequence");
-            escape();
+            parseEscape();
             break;
         case '^':
             put(Bytecode(IR.Bol, 0));
@@ -1952,10 +1952,10 @@ struct Parser(R, bool CTFE=false)
             apply(opstack.pop(),vstack);
         //CTFE workaround
         assert(vstack.stack.data.length == 1);
-        charsetToIr(cast(immutable)vstack.top);
+        charsetToIr(vstack.top);
     }
     //try to generate optimal IR code for this charset
-    void charsetToIr(immutable Charset set)
+    void charsetToIr(in Charset set)
     {
         uint chars = set.chars();
         if(chars < Bytecode.MaxSequence)
@@ -1989,8 +1989,8 @@ struct Parser(R, bool CTFE=false)
             }
         }
     }
-    ///parse and return IR for escape stand alone escape sequence
-    void escape()
+    ///parse and generate IR for escape stand alone escape sequence
+    void parseEscape()
     {
 
         switch(current)
@@ -2001,15 +2001,37 @@ struct Parser(R, bool CTFE=false)
         case 't':   next(); put(Bytecode(IR.Char, '\t')); break;
         case 'v':   next(); put(Bytecode(IR.Char, '\v')); break;
 
-        case 'd':   next(); put(Bytecode(IR.Digit, 0)); break;
-        case 'D':   next(); put(Bytecode(IR.Notdigit, 0)); break;
+        case 'd':   
+            next(); 
+            put(Bytecode(IR.Charset, charsets.length)); 
+            charsets ~= unicodeNd;
+            break;
+        case 'D':   
+            next(); 
+            put(Bytecode(IR.Charset, charsets.length)); 
+            charsets ~= unicodeNd.dup.negate;//TODO: non-allocating  method
+            break;
         case 'b':   next(); put(Bytecode(IR.Wordboundary, 0)); break;
         case 'B':   next(); put(Bytecode(IR.Notwordboundary, 0)); break;
-        case 's':   next(); put(Bytecode(IR.Space, 0)); break;
-        case 'S':   next(); put(Bytecode(IR.Notspace, 0)); break;
-        case 'w':   next(); put(Bytecode(IR.Word, 0)); break;
-        case 'W':   next(); put(Bytecode(IR.Notword, 0)); break;
-
+        case 's':
+            next();  
+            charsetToIr(unicodeWhite_Space);
+            break;
+        case 'S':
+            next();
+            charsetToIr(unicodeWhite_Space.dup.negate);//TODO: non-allocating  method
+            break;
+        case 'w':
+            next();
+            put(Bytecode(IR.Trie, tries.length)); 
+            tries ~= wordTrie;
+            break;
+        case 'W':   
+            next(); 
+            DefaultTrie t = wordTrie.negated;
+            put(Bytecode(IR.Trie, tries.length)); 
+            tries ~= t;
+            break;
         case 'p': case 'P':
             auto charset = parseUnicodePropertySpec(current == 'P');
             charsetToIr(charset);
@@ -2035,16 +2057,15 @@ struct Parser(R, bool CTFE=false)
             break;
         case '1': .. case '9': //TODO: use $ instead of \ for backreference
             uint nref = cast(uint)current - '0';
-            enforce(nref <  index.length, "Backref to unseen group");
+            enforce(nref <  ngroup, "Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
-            while(nref <= index.length && next() && ascii.isDigit(current))
+            while(nref < ngroup && next() && ascii.isDigit(current))
             {
                 nref = nref * 10 + current - '0';
             }
-            if(nref > index.length)
+            if(nref >= ngroup)
                 nref /= 10;
-            nref--;
             put(Bytecode(IR.Backref, nref));
             break;
         default:
@@ -2067,9 +2088,8 @@ struct Parser(R, bool CTFE=false)
                 result[k++] = cast(char)ascii.toLower(current);
         enforce(k != MAX_PROPERTY, "invalid property name");
 		auto s = getUnicodeSet(result[0..k], negated);
-		if(s.empty)
-            error("unrecognized unicode property spec");
-		current == '}' || error("} expected ");
+		enforce(!s.empty, "unrecognized unicode property spec");
+		enforce(current == '}', "} expected ");
 		next();
 		return cast(immutable Charset)(s);
 	}
@@ -2093,14 +2113,13 @@ struct Parser(R, bool CTFE=false)
 struct Program
 {
     Bytecode[] ir;      // compiled bytecode of pattern
-    uint[] index;       //user group number -> internal number
     NamedGroup[] dict;  //maps name -> user group number
     uint ngroup;        //number of internal groups
     uint maxCounterDepth; //max depth of nested {n,m} repetitions
     uint hotspotTableSize; // number of entries in merge table
     uint flags;         //global regex flags
-    immutable(Charset)[] charsets; //
-    immutable(DefaultTrie)[]  tries; //
+    const(Charset)[] charsets; //
+    const(DefaultTrie)[]  tries; //
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
@@ -2111,7 +2130,7 @@ struct Program
         uint hotspotIndex = 0;
         uint top = 0;
         counterRange[0] = 1;
-        //CTFE workaround
+        //CTFE workaround for .length
         for(size_t i=0; i<ir.length; i+=lengthOfIR(ir[i].code))
         {
             if(ir[i].code == IR.RepeatStart)
@@ -2166,7 +2185,7 @@ struct Program
         writefln("\n");
         for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
-            writefln("%d\t%s ", i, disassemble(ir, i, index, dict));
+            writefln("%d\t%s ", i, disassemble(ir, i, dict));
         }
         writeln("Total merge table size: ", hotspotTableSize);
         writeln("Max counter nesting depth: ", maxCounterDepth);
@@ -2190,17 +2209,13 @@ struct Program
             ir = p.ir.dup;
         else
             ir = p.ir;
-        index = p.index;
         dict = p.dict;
         ngroup = p.ngroup;
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
         charsets = p.charsets;
         tries = p.tries;
-        /*version(fred_ct)
-        {}
-        else*/
-            lightPostprocess();
+        lightPostprocess();
         debug(fred_parser)
         {
             print();
@@ -2232,10 +2247,10 @@ struct Input(Char)
     String _origin;
     size_t _index;
     /// constructs Input object out of plain string
-    this(String input)
+    this(String input, size_t idx=0)
     {
         _origin = input;
-        _index = 0;
+        _index = idx;
     }
     /// codepoint at current stream position
     bool nextChar(ref dchar res,ref size_t pos)
@@ -2246,7 +2261,7 @@ struct Input(Char)
         res = std.utf.decode(_origin, _index);
         return true;
     }
-    ///index of at End position, useful for slicing
+    ///index of at End position
     @property size_t lastIndex(){   return _origin.length; }
     
     ///support for backtracker engine, might not be present
@@ -2270,9 +2285,18 @@ struct Input(Char)
             _index -= std.utf.strideBack(_origin, _index);
             if(_index == 0)
                 return false;
+            pos = _index;
             res = _origin[0.._index].back;
             return true;
         }
+        @property auto loopBack(){   return Input(_origin, _index); }
+        
+        ///support for backtracker engine, might not be present
+        void reset(size_t index){   _index = index;  }
+        
+        String opSlice(size_t start, size_t end){   return _origin[start..end]; }
+        ///index of at End position
+        @property size_t lastIndex(){   return 0; }
     }
     @property auto loopBack(){   return BackLooper(this); }
 }
@@ -2323,10 +2347,6 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
             index = s.lastIndex;
     }
     ///
-    this(Program program, String input)
-    {
-        this(program, Stream(input));
-    }
     this(Program program, Stream stream)
     {
         re = program;
@@ -2341,8 +2361,8 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
     }
     ~this()
     {
-        free(states.ptr);
-        free(groupStack.ptr);
+        //free(states.ptr);
+        //free(groupStack.ptr);
     }
     ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
@@ -2396,7 +2416,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
         while(pc<re.ir.length)
         {
-            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.index, re.dict), front, s[s._index..s.lastIndex]);
+            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, s._index);
             switch(re.ir[pc].code)
             {
             case IR.OrChar://assumes IRL!(OrChar) == 1
@@ -2426,42 +2446,6 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                     goto L_backtrack;
                 pc += IRL!(IR.Any);
                 next();
-                break;
-            case IR.Word:
-                if(atEnd || !wordCharacter[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Word);
-                break;
-            case IR.Notword:
-                if(atEnd|| wordCharacter[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Word);
-                break;
-            case IR.Digit:
-                if(atEnd || !unicodeNd[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Word);
-                break;
-            case IR.Notdigit:
-                if(atEnd || unicodeNd[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Notdigit);
-                break;
-            case IR.Space:
-                if(atEnd || !unicodeWhite_Space[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Space);
-                break;
-            case IR.Notspace:
-                if(atEnd || unicodeWhite_Space[front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Notspace);
                 break;
             case IR.Charset:
                 if(atEnd || !re.charsets[re.ir[pc].data][front])
@@ -2645,16 +2629,16 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
             case IR.GotoEndOr:
                 pc = pc + re.ir[pc].data + IRL!(IR.GotoEndOr);
                 break;
-            case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
+            case IR.GroupStart:
                 uint n = re.ir[pc].data;
-                matches[re.index[n]].begin = index;
+                matches[n-1].begin = index;//the first is sliced out
                 matchesDirty = true;
                 debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                 pc += IRL!(IR.GroupStart);
                 break;
-            case IR.GroupEnd:   //TODO: ditto
+            case IR.GroupEnd:   
                 uint n = re.ir[pc].data;
-                matches[re.index[n]].end = index;
+                matches[n-1].end = index;//the first is sliced out
                 matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                 pc += IRL!(IR.GroupEnd);
@@ -2672,12 +2656,21 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + len;
                 break;*/
             case IR.LookbehindStart:
-                assert(0, "No impl!");
             case IR.NeglookbehindStart:
-                assert(0, "No impl!");
+                uint len = re.ir[pc].data;
+                auto prog = re;
+                prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
+                auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack);
+                backMatcher.matches = matches;
+                bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
+                if(!match)
+                    goto L_backtrack;
+                else
+                    pc += IRL!(IR.LookbehindStart)+len+IRL!(IR.LookbehindEnd);
+                break;
             case IR.Backref:
-                uint n = re.index[re.ir[pc].data];
-                auto referenced = s[matches[n].begin .. matches[n].end];
+                uint n = re.ir[pc].data;
+                auto referenced = s[matches[n-1].begin .. matches[n-1].end];
                 while(!atEnd && !referenced.empty && front == referenced.front)
                 {
                     next();
@@ -2778,14 +2771,11 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         assert(groupStack.length >= matches.length);
         groupStack[0 .. matches.length] = Group.init;
         lastGroup += matches.length;
-        /*
-            helper function saves engine state
-        */
         auto start = index;
-        debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
+        debug(fred_matching) writeln("Try matchBack at ",retro(s[s.lastIndex..s._index]));        
         for(;;)
         {
-            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.index, re.dict), front, s[s._index..s.lastIndex]);
+            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, retro(s[s.lastIndex..s._index]));
             switch(re.ir[pc].code)
             {
             case IR.OrChar://assumes IRL!(OrChar) == 1
@@ -2816,42 +2806,6 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 pc -= IRL!(IR.Any);
                 next();
                 break;
-            case IR.Word:
-                if(atEnd || !wordCharacter[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Word);
-                break;
-            case IR.Notword:
-                if(atEnd|| wordCharacter[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Word);
-                break;
-            case IR.Digit:
-                if(atEnd || !unicodeNd[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Word);
-                break;
-            case IR.Notdigit:
-                if(atEnd || unicodeNd[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Notdigit);
-                break;
-            case IR.Space:
-                if(atEnd || !unicodeWhite_Space[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Space);
-                break;
-            case IR.Notspace:
-                if(atEnd || unicodeWhite_Space[front])
-                    goto L_backtrack;
-                next();
-                pc -= IRL!(IR.Notspace);
-                break;
             case IR.Charset:
                 if(atEnd || !re.charsets[re.ir[pc].data][front])
                     goto L_backtrack;
@@ -2874,7 +2828,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && isUniAlpha(back))
+                        && wordCharacter[back])
                 {
                     pc -= IRL!(IR.Wordboundary);
                     break;
@@ -2898,7 +2852,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 if(atStart && !wordCharacter[front])
                     goto L_backtrack;
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !isUniAlpha(back))
+                        && !wordCharacter[back])
                     goto L_backtrack;
                 else if(s.loopBack.nextChar(back, index))
                 {
@@ -3038,27 +2992,29 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
             case IR.GotoEndOr:
                 pc = pc + re.ir[pc].data + IRL!(IR.GotoEndOr);
                 break;*/
-            case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
+            case IR.GroupStart: 
                 uint n = re.ir[pc].data;
-                matches[re.index[n]].begin = index;
+                matches[n-1].begin = index;
                 matchesDirty = true;
                 debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                 pc -= IRL!(IR.GroupStart);
                 break;
-            case IR.GroupEnd:   //TODO: ditto
+            case IR.GroupEnd:   
                 uint n = re.ir[pc].data;
-                matches[re.index[n]].end = index;
+                matches[n-1].end = index;
                 matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                 pc -= IRL!(IR.GroupEnd);
                 break;
             case IR.LookaheadStart:
             case IR.NeglookaheadStart:
-            case IR.LookbehindStart:
-            case IR.NeglookbehindStart:
+            case IR.LookaheadEnd:
+            case IR.NeglookaheadEnd:
+            case IR.LookbehindEnd:
+            case IR.NeglookbehindEnd:
                 assert(0, "Not supported");
             case IR.Backref:
-                uint n = re.index[re.ir[pc].data];
+                uint n = re.ir[pc].data;
                 auto referenced = s[matches[n].begin .. matches[n].end];
                 while(!atEnd && !referenced.empty && front == referenced.front)
                 {
@@ -3073,11 +3029,13 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
              case IR.Nop:
                 pc += IRL!(IR.Nop);
                 break;
-            case IR.LookaheadEnd:
-            case IR.NeglookaheadEnd:
+            case IR.LookbehindStart:
+            case IR.NeglookbehindStart:
                 return true;
             default:
-                assert(0);
+                assert(re.ir[pc].code < 0x80);
+                pc --; //data 
+                break;
             L_backtrack:
                 if(!popState())
                 {
@@ -3515,32 +3473,32 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.GotoEndOr:
                     t.pc = t.pc + prog[t.pc].data + IRL!(IR.GotoEndOr);
                     break;
-                case IR.GroupStart: //TODO: mark which global matched and do the other alternatives
+                case IR.GroupStart: 
                     uint n = prog[t.pc].data;
-                    t.matches.ptr[re.index[n]+1].begin = cast(size_t)index;
+                    t.matches.ptr[n].begin = cast(size_t)index;
                     t.pc += IRL!(IR.GroupStart);
                     //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                     break;
-                case IR.GroupEnd:   //TODO: ditto
+                case IR.GroupEnd:  
                     uint n = prog[t.pc].data;
-                    t.matches.ptr[re.index[n]+1].end = cast(size_t)index;
+                    t.matches.ptr[n].end = cast(size_t)index;
                     t.pc += IRL!(IR.GroupEnd);
                     //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                     break;
                 case IR.Backref:
                     uint n = prog[t.pc].data;
-                    if(t.matches.ptr[n+1].begin == t.matches.ptr[n+1].end)//zero-width Backref!
+                    if(t.matches.ptr[n].begin == t.matches.ptr[n].end)//zero-width Backref!
                     {
                         t.pc += IRL!(IR.Backref);
                     }
                     else static if(withInput)
                     {
-                        uint idx = t.matches.ptr[n+1].begin + t.uopCounter;
-                        uint end = t.matches.ptr[n+1].end;
+                        uint idx = t.matches.ptr[n].begin + t.uopCounter;
+                        uint end = t.matches.ptr[n].end;
                         if(s[idx..end].front == front)
                         {
                            t.uopCounter += std.utf.stride(s[idx..end], 0);
-                           if(t.uopCounter + t.matches.ptr[n+1].begin == t.matches.ptr[n+1].end)
+                           if(t.uopCounter + t.matches.ptr[n].begin == t.matches.ptr[n].end)
                            {//last codepoint
                                 t.pc += IRL!(IR.Backref);
                                 t.uopCounter = 0;
@@ -3600,66 +3558,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     case IR.Any:
                         t.pc += IRL!(IR.Any);
                         nlist.insertBack(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Word:
-                        if(wordCharacter[front])
-                        {
-                            t.pc += IRL!(IR.Word);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Notword:
-                        if(!wordCharacter[front])
-                        {
-                            t.pc += IRL!(IR.Notword);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Digit:
-                        if(unicodeNd[front])
-                        {
-                            t.pc += IRL!(IR.Digit);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Notdigit:
-                        if(!unicodeNd[front])
-                        {
-                            t.pc += IRL!(IR.Notdigit);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Space:
-                        if(unicodeWhite_Space[front])
-                        {
-                            t.pc += IRL!(IR.Space);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
-                        t = worklist.fetch();
-                        break;
-                    case IR.Notspace:
-                        if(!unicodeWhite_Space[front])
-                        {
-                            t.pc += IRL!(IR.Space);
-                            nlist.insertBack(t);
-                        }
-                        else
-                            recycle(t);
                         t = worklist.fetch();
                         break;
                     case IR.Charset:
@@ -3779,45 +3677,57 @@ struct Captures(R)
 {
     R input;
     Group[] groups;
-    uint[] index;
+    uint f, b;
     Program re;
     this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
     {
         input = rmatch.input;
-        index = rmatch.index;
         groups = rmatch.matches;
         re = rmatch.engine.re;
+        b = groups.length;
+        f = 0;
     }
+    ///iteration means
     @property R front()
     {
-        assert(!index.empty);
-        return input[groups[index[0]].begin .. groups[index[0]].end];
+        assert(!empty);
+        return input[groups[f].begin .. groups[f].end];
     }
+    ///ditto
     @property R back()
     {
-        assert(!index.empty);
-        return input[groups[index[$-1]].begin .. groups[index[$-1]].end];
+        assert(!empty);
+        return input[groups[b-1].begin .. groups[b-1].end];
     }
+    ///ditto
     void popFront()
-    {
-        index = index[1..$];
+    {   
+        assert(!empty);
+        ++f;   
     }
+    ///ditto
     void popBack()
     {
-        index = index[0..$-1];
+        assert(!empty);
+        --b;   
     }
-    @property bool empty(){ return index.empty; }
+    ///ditto
+    @property bool empty(){ return f >= b; }
+    
     R opIndex()(size_t i)
     {
-        return input[groups[index[i]].begin..groups[index[i]].end];
+        assert(f+i < b,"requested submatch number is out of range");
+        return input[groups[f+i].begin..groups[f+i].end];
     }
+    
     R opIndex(String)(String i)
         if(isSomeString!String)
     {
         size_t index = re.lookupNamedGroup(i);
         return opIndex(index);
     }
-    @property size_t length() const { return index.length; }
+    
+    @property size_t length() const { return b-f; }
 }
 
 /**
@@ -3829,10 +3739,10 @@ private:
     R input;
     Group[] matches;
     bool _empty;
-    uint[] index;
     uint flags;
     NamedGroup[] named;
-    alias Engine!(Unqual!(typeof(R.init[0]))) EngineType;
+    alias Unqual!(typeof(R.init[0])) Char;
+    alias Engine!Char EngineType;
     EngineType engine;
     
 public:
@@ -3840,9 +3750,8 @@ public:
     this(Program prog, R _input)
     {
         input = _input;
-        index = prog.index;
         matches = new Group[prog.ngroup];
-        engine = EngineType(prog, input);
+        engine = EngineType(prog, Input!Char(input));
         _empty = !engine.match(matches);
     }
     ///

@@ -229,8 +229,9 @@ unittest
         TestVectors(  "^(a)((b){0,1})(c*)", "acc",  "y", "$1 $2 $3", "a  " ),
         TestVectors(  "^(a)(b)?(c*)",       "acc",  "y", "$1 $2 $3", "a  cc" ),
         TestVectors(  "^(a)((b)?)(c*)",     "acc",  "y", "$1 $2 $3", "a  " ),
-        TestVectors(  "(?:ab){3}",       "_abababc",  "y","$&-$1","ababab-" ),
-        TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",     "y","$&-$1-$2","aaxax--" ),
+        TestVectors(  "(?:ab){3}",       "_abababc","y", "$&-$1",    "ababab-" ),
+        TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",  "y", "$&-$1-$2", "aaxax--" ),
+        TestVectors(  `\W\w\W`,         "aa b!ca",  "y", "$&",       " b!"),
         //no lookaround for Thompson VM
      /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
         TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
@@ -352,7 +353,7 @@ unittest
         return s;
     }
     //CTFE parsing
-    void ct_tests()
+   /* void ct_tests()
     {
         foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
@@ -370,8 +371,8 @@ unittest
             
         }
         debug writeln("!!! FReD C-T test done !!!");
-    }
-    version(fred_ct_only)
+    }*/
+    version(fred_ct_bug)
     {
         enum x = regex("(a*)+");
         foreach(v; x.ir)
@@ -390,14 +391,10 @@ unittest
         run_tests!match(); //backtracker
         run_tests!tmatch(); //thompson VM
     }
-    
-    ct_tests();
+    version(fred_ct_test)
+        ct_tests();
 }
-version(fred_ct_only)
-{
-}
-else
-{
+
 unittest
 {
 //global matching
@@ -415,6 +412,20 @@ unittest
     test_body!tmatch();
 }
 
+unittest
+{//hello look back world
+    void test_body(alias matchFn)()
+    {
+        string s = "12ba3ab4";
+        auto r = regex(`(?<=ab)\d`);
+        r.print();
+        auto m = match(s, r);
+        assert(!m.empty);
+        assert(m.hit == "4");
+    }
+    test_body!match();
+    
+}
 //tests for accomulated std.regex issues
 unittest
 {
@@ -536,7 +547,6 @@ unittest
     assert(equal(split(s1, regex(", *")), w1[]));
 }
 
-}
 version(unittest){
 void main(){}
 }
