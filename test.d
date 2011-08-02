@@ -365,7 +365,7 @@ unittest
         return s;
     }
     //CTFE parsing
-   /* void ct_tests()
+    /*void ct_tests()
     {
         foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
@@ -499,10 +499,14 @@ unittest
         foreach(i, v; TypeTuple!(string, wstring, dstring))
         {
             alias v String;
-            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c")) == to!String("ack rapacity"));
-            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c")) == to!String("ack capacity"));
-            assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]")) == to!String("[n]oon"));
-            
+            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c"))
+                   == to!String("ack rapacity"));
+            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c"))
+                   == to!String("ack capacity"));
+            assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]"))
+                   == to!String("[n]oon"));
+            assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
+                   == to!String(": test2 test1 :"));
             auto s = fred.replace!(baz)(to!String("Strap a rocket engine on a chicken."),
                     regex("[ar]", "g"));
             assert(s == "StRAp A Rocket engine on A chicken.");

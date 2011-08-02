@@ -3173,7 +3173,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     this(this)
     {
         merge = merge.dup;
-        genCounter = 0;
         //free list is  efectively shared ATM
     }
     /++
@@ -3190,11 +3189,13 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         if(!matched)
             next();
         else//char in question is  fetched in prev call to match
+        {
             matched = false;
+        }
         Bytecode[] prog = re.ir;
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
-        if(!atEnd)// if no cahr 
+        if(!atEnd)// if no char 
             for(;;)
             {
                 genCounter++;
@@ -3846,7 +3847,7 @@ R replace(R, alias scheme=match)(R input, Program re, R format)
     auto app = appender!(R)();
     auto matches = scheme(input, re);
     size_t offset = 0;
-    foreach(m; matches)
+    foreach(ref m; matches)
     {
         app.put(m.pre[offset .. $]);
         replaceFmt(format, m.captures, app);
@@ -3931,6 +3932,16 @@ L_Replace_Loop:
             else if(format[0] == '&')
             {
                 sink.put(captures[0]);
+                format = format[1 .. $];
+            }
+            else if(format[0] == '`')
+            {
+                sink.put(captures.pre);
+                format = format[1 .. $];
+            }
+            else if(format[0] == '\'')
+            {
+                sink.put(captures.post);
                 format = format[1 .. $];
             }
             else if(format[0] == '$')
