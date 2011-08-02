@@ -162,44 +162,44 @@ struct Bytecode
         return t;
     }
     ///bit twiddling helpers
-    @property uint data(){ return raw & 0x003f_ffff; }
+    @property uint data() const { return raw & 0x003f_ffff; }
     ///ditto
-    @property uint sequence(){ return 2+((raw >>22) & 0x3); }
+    @property uint sequence() const { return 2+((raw >>22) & 0x3); }
     ///ditto
-    @property IR code(){ return cast(IR)(raw>>24); }
+    @property IR code() const { return cast(IR)(raw>>24); }
     ///ditto
-    @property bool hotspot(){ return hasMerge(code); }
+    @property bool hotspot() const { return hasMerge(code); }
     ///test the class of this instruction
-    @property bool isAtom(){ return isAtomIR(code); }
+    @property bool isAtom() const { return isAtomIR(code); }
     ///ditto
-    @property bool isStart(){ return isStartIR(code); }
+    @property bool isStart() const { return isStartIR(code); }
     ///ditto
-    @property bool isEnd(){ return isEndIR(code); }
+    @property bool isEnd() const { return isEndIR(code); }
     /// number of arguments
-    @property int args(){ return immediateParamsIR(code); }
+    @property int args() const { return immediateParamsIR(code); }
     /// human readable name of instruction
-    @property string mnemonic()
+    @property string mnemonic() const
     {
         return to!string(code);
     }
     /// full length of instruction
-    @property uint length()
+    @property uint length() const
     {
         return lengthOfIR(code);
     }
     /// full length of respective start/end of this instruction
-    @property uint pairedLength()
+    @property uint pairedLength() const
     {
         return lengthOfPairedIR(code);
     }
     ///returns bytecode of paired instruction (assuming this one is start or end)
-    @property Bytecode paired()
+    @property Bytecode paired() const
     {//depends on bit and struct layout order
         assert(isStart || isEnd);
         return Bytecode.fromRaw(raw ^ (0b11<<24));
     }
     /// gets an index into IR block of the respective pair
-    uint indexOfPair(uint pc)
+    uint indexOfPair(uint pc) const
     {
         assert(isStart || isEnd);
         return isStart ? pc + data + length  : pc - data - lengthOfPairedIR(code);
@@ -209,7 +209,7 @@ struct Bytecode
 static assert(Bytecode.sizeof == 4);
 
 /// debugging tool, prints out instruction along with opcodes
-string disassemble(Bytecode[] irb, uint pc, NamedGroup[] dict=[])
+string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
 {
     auto output = appender!string();
     formattedWrite(output,"%s", irb[pc].mnemonic);
@@ -269,7 +269,7 @@ string disassemble(Bytecode[] irb, uint pc, NamedGroup[] dict=[])
 }
 
 /// another pretty printer, writes out the bytecode of a regex and where the pc is
-void prettyPrint(Sink,Char=const(char))(Sink sink,Bytecode[] irb, uint pc=uint.max,int indent=3,size_t index=0)
+void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc=uint.max,int indent=3,size_t index=0)
     if (isOutputRange!(Sink,Char))
 {
     while(irb.length>0){
@@ -2178,7 +2178,7 @@ struct Program
         }
     }
     /// print out disassembly a program's IR
-    void print()
+    void print() const
     {
         writefln("PC\tINST\n");
         prettyPrint(delegate void(const(char)[] s){ write(s); },ir);
@@ -2191,7 +2191,7 @@ struct Program
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
 	///
-	uint lookupNamedGroup(String)(String name)
+	uint lookupNamedGroup(String)(String name) 
 	{
 		//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
         uint fnd;
@@ -2636,7 +2636,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                 pc += IRL!(IR.GroupStart);
                 break;
-            case IR.GroupEnd:   
+            case IR.GroupEnd:
                 uint n = re.ir[pc].data;
                 matches[n-1].end = index;//the first is sliced out
                 matchesDirty = true;
@@ -2975,23 +2975,46 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 pc -= re.ir[pc].data+IRL!(IR.RepeatStart);
                 assert(re.ir[pc].code == IR.RepeatStart || re.ir[pc].code == IR.RepeatQStart);
                 goto case IR.RepeatStart;
-            /*case IR.OrEnd:
-                pc -= IRL!(IR.OrEnd);
-                goto case IR.Option;
-            case IR.OrStart:
-                pc += IRL!(IR.OrStart);
-                break;
-            case IR.Option:
+            case IR.OrEnd:
                 uint len = re.ir[pc].data;
-                if(re.ir[pc-len].code == IR.GotoEndOr)//not a last one
+                pc -= len;
+                assert(re.ir[pc].code == IR.Option);
+                len = re.ir[pc].data;
+                auto pc_save = pc+len-1;
+                pc = pc + len + IRL!(IR.Option);
+                while(re.ir[pc].code == IR.Option)
                 {
-                   pushState(pc + len + IRL!(IR.Option), counter); //remember 2nd branch
+                    pushState(pc-IRL!(IR.GotoEndOr)-1, counter);
+                    len = re.ir[pc].data;
+                    pc += len + IRL!(IR.Option);
                 }
-                pc += IRL!(IR.Option);
+                assert(re.ir[pc].code == IR.OrEnd);
+                pc--;
+                if(pc != pc_save)
+                {
+                    pushState(pc, counter);
+                    pc = pc_save;
+                }
+                break;
+            case IR.OrStart:
+                assert(0);
+            case IR.Option:
+                assert(re.ir[pc].code == IR.Option);
+                pc += re.ir[pc].data + IRL!(IR.Option);
+                if(re.ir[pc].code == IR.Option)
+                {
+                    pc--;//hackish, assumes size of IR.Option == 1
+                    if(re.ir[pc].code == IR.GotoEndOr)
+                    {
+                        pc += re.ir[pc].data + IRL!(IR.GotoEndOr);
+                    }
+                    
+                }
+                assert(re.ir[pc].code == IR.OrEnd);
+                pc -= re.ir[pc].data + IRL!(IR.OrStart)+1;
                 break;
             case IR.GotoEndOr:
-                pc = pc + re.ir[pc].data + IRL!(IR.GotoEndOr);
-                break;*/
+                assert(0);
             case IR.GroupStart:
                 uint n = re.ir[pc].data;
                 matches[n-1].begin = index;
@@ -3677,38 +3700,44 @@ struct Captures(R)
 //    if(isSomeString!R)
 {
     R input;
-    Group[] groups;
+    Group[] matches;
     uint f, b;
     Program re;
     this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
     {
         input = rmatch.input;
-        groups = rmatch.matches;
+        matches = rmatch.matches;
         re = rmatch.engine.re;
-        b = groups.length;
+        b = matches.length;
         f = 0;
     }
     ///
-    @property R pre()
+    @property R pre() 
     {
-        return empty ? input[] : input[0 .. groups[0].begin];
+        return empty ? input[] : input[0 .. matches[0].begin];
     }
     ///
-    @property R post()
+    @property R post() 
     {
-        return empty ? input[] : input[groups[0].end .. $];
+        return empty ? input[] : input[matches[0].end .. $];
+    }
+    ///
+    @property R hit() 
+    {
+        assert(!empty);
+        return input[matches[0].begin .. matches[0].end];
     }
     ///iteration means
-    @property R front()
+    @property R front() 
     {
         assert(!empty);
-        return input[groups[f].begin .. groups[f].end];
+        return input[matches[f].begin .. matches[f].end];
     }
     ///ditto
-    @property R back()
+    @property R back() 
     {
         assert(!empty);
-        return input[groups[b-1].begin .. groups[b-1].end];
+        return input[matches[b-1].begin .. matches[b-1].end];
     }
     ///ditto
     void popFront()
@@ -3723,22 +3752,21 @@ struct Captures(R)
         --b;   
     }
     ///ditto
-    @property bool empty(){ return f >= b; }
+    @property bool empty() const { return f >= b; }
     
-    R opIndex()(size_t i)
+    R opIndex()(size_t i) /*const*/ //@@@BUG@@@
     {
         assert(f+i < b,"requested submatch number is out of range");
-        return input[groups[f+i].begin..groups[f+i].end];
+        return input[matches[f+i].begin..matches[f+i].end];
     }
     
-    R opIndex(String)(String i)
+    R opIndex(String)(String i) /*const*/ //@@@BUG@@@
         if(isSomeString!String)
     {
         size_t index = re.lookupNamedGroup(i);
         return opIndex(index);
     }
-    
-    @property size_t length() const { return b-f; }
+    @property size_t length() const { return b-f;  }
 }
 
 /**

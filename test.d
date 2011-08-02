@@ -21,13 +21,6 @@ unittest
     assert(!tmatch("abc", "abc".dup).empty);
 }
 
-unittest
-{
-    //simple compile-time regex
-    enum ctr = regex("abc");
-    assert(match("abc",ctr).hit == "abc");
-}
-
 /* The test vectors in this file are altered from Henry Spencer's regexp
    test code. His copyright notice is:
 
@@ -293,6 +286,10 @@ unittest
         TestVectors(   `(?<=(a{2,4}b{1,3}))x`,   "yyaaaabx",  "y",   "$&-$1", "x-aaaab"),
         TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aabbbaaaab"),
         TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
+        TestVectors(   `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
+        TestVectors(   `(?<=(abc|def|aef))x`,    "aefx", "y",        "$&-$1",  "x-aef"),
+        TestVectors(   `(?<=(abc|dabc))x`,    "dabcx", "y",        "$&-$1",  "x-abc"),
+        TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
         ];
     string produceExpected(M,String)(M m, String fmt)
     {
@@ -365,7 +362,8 @@ unittest
         return s;
     }
     //CTFE parsing
-    /*void ct_tests()
+    version(fred_ct)
+    void ct_tests()
     {
         foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
@@ -383,7 +381,7 @@ unittest
             
         }
         debug writeln("!!! FReD C-T test done !!!");
-    }*/
+    }
     version(fred_ct_bug)
     {
         enum x = regex("(a*)+");
@@ -403,7 +401,7 @@ unittest
         run_tests!match(); //backtracker
         //run_tests!tmatch(); //thompson VM
     }
-    version(fred_ct_test)
+    version(fred_ct)
         ct_tests();
 }
 
