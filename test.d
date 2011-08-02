@@ -237,6 +237,7 @@ unittest
         TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
 //more repetitions:
         TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "$&", "aaabaaaabbb" ),
+        TestVectors(  "(?:a{2,4}b{1,3}){1,2}?", "aaabaaaabbbb", "y", "$&", "aaab" ),
 //groups:
         TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",             "y",   "$1-$2-$3","--xyz"),
         TestVectors(  "(?P<q>\\d+)/(?P<d>\\d+)",     "2/3",       "y",     "${d}/${q}",    "3/2"),
@@ -256,12 +257,13 @@ unittest
         TestVectors(  `\p{Common}\p{Thai}`            "!ฆ",       "y",  "$&",      "!ฆ"), 
         TestVectors(  `[\d\s]*\D`,     "12 \t3\U00001680\u0F20_2",        "y",  "$&", "12 \t3\U00001680\u0F20_"),
 //case insensitive:
-        TestVectors(   `^abcdEf$`,           "AbCdEF"                 "y",   "$&", "AbCdEF",      "i"),
-        TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",             "y",   "$&", "рУсскИй ЯзЫк",     "i"),
+        TestVectors(   `^abcdEf$`,           "AbCdEF"               "y",   "$&", "AbCdEF",      "i"),
+        TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",           "y",   "$&", "рУсскИй ЯзЫк",     "i"),
         TestVectors(   `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
-        TestVectors(   "\U00010400{2}",  "\U00010428\U00010400 ",    "y",   "$&", "\U00010428\U00010400", "i"),
-        TestVectors(   `[adzУ-Я]{4}`,    "DzюА"                      "y",   "$&", "DzЮа", "i"),
-        TestVectors(   `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",         "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(   "\U00010400{2}",  "\U00010428\U00010400 ",   "y",   "$&", "\U00010428\U00010400", "i"),
+        TestVectors(   `[adzУ-Я]{4}`,    "DzюА"                     "y",   "$&", "DzЮа", "i"),
+        TestVectors(   `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",        "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(   `(?:Dåb){3}`,  "DåbDÅBdÅb",                  "y",   "$&", "DåbDÅBdÅb", "i"),
 //escapes:
         TestVectors(    `\u0041\u005a\U00000065\u0001`,         "AZe\u0001",       "y",   "$&", "AZe\u0001"),  
         TestVectors(    `\u`,               "",   "c",   "-",  "-"),
@@ -281,6 +283,16 @@ unittest
 // luckily obtained regression on incremental matching in backtracker
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
+//lookback
+        TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
+        TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),
+        TestVectors(   `(?<=Dåb)x\w`,  "DåbDÅBxdÅb",  "y",   "$&", "xd", "i"),
+        TestVectors(   `(?<=(ab*c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
+        TestVectors(   `(?<=(ab*?c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
+        TestVectors(   `(?<=(a.*?c))x`,   "ababbcxac",  "y",   "$&-$1", "x-abbc"),
+        TestVectors(   `(?<=(a{2,4}b{1,3}))x`,   "yyaaaabx",  "y",   "$&-$1", "x-aaaab"),
+        TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aabbbaaaab"),
+        TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
         ];
     string produceExpected(M,String)(M m, String fmt)
     {
@@ -389,7 +401,7 @@ unittest
     else
     {
         run_tests!match(); //backtracker
-        run_tests!tmatch(); //thompson VM
+        //run_tests!tmatch(); //thompson VM
     }
     version(fred_ct_test)
         ct_tests();
@@ -412,20 +424,6 @@ unittest
     test_body!tmatch();
 }
 
-unittest
-{//hello look back world
-    void test_body(alias matchFn)()
-    {
-        string s = "12ba3ab4";
-        auto r = regex(`(?<=ab)\d`);
-        r.print();
-        auto m = match(s, r);
-        assert(!m.empty);
-        assert(m.hit == "4");
-    }
-    test_body!match();
-    
-}
 //tests for accomulated std.regex issues
 unittest
 {
