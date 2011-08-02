@@ -3879,39 +3879,51 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 assert(prog[t.pc].code == IR.RepeatStart || prog[t.pc].code == IR.RepeatQStart);
                 goto case IR.RepeatStart;
             case IR.OrEnd:
-                assert(0);
-                if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
+                uint len = re.ir[t.pc].data;
+                t.pc -= len;
+                assert(re.ir[t.pc].code == IR.Option);
+                len = re.ir[t.pc].data;
+                t.pc = t.pc + len; //to IR.GotoEndOr or just before IR.OrEnd
+                break;
+            case IR.OrStart:
+                uint len = prog[t.pc].data;
+                uint mIdx = t.pc + len + IRL!(IR.OrEnd); //should point to the end of OrEnd
+                if(merge[prog[mIdx].raw+t.counter] < genCounter)
                 {
-                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
-                    merge[prog[t.pc + 1].raw+t.counter] = genCounter;
-                    t.pc += IRL!(IR.OrEnd);
+                    debug(fred_matching) writefln("A thread(t.pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
+                    merge[prog[mIdx].raw+t.counter] = genCounter;
                 }
                 else
                 {
-                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                    debug(fred_matching) writefln("A thread(t.pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
                     recycle(t);
                     t = worklist.fetch();
+                    break;
                 }
+                t.pc--;
                 break;
-            case IR.OrStart:
-                assert(0);
-                t.pc += IRL!(IR.OrStart);
-                goto case;
             case IR.Option:
-                assert(0);
-                uint next = t.pc + prog[t.pc].data + IRL!(IR.Option);
-                //queue next Option
-                if(prog[next].code == IR.Option)
+                assert(re.ir[t.pc].code == IR.Option);
+                t.pc += re.ir[t.pc].data + IRL!(IR.Option);
+                if(re.ir[t.pc].code == IR.Option)
                 {
-                    worklist.insertFront(fork(t, next, t.counter));
+                    t.pc--;//hackish, assumes size of IR.Option == 1
+                    if(re.ir[t.pc].code == IR.GotoEndOr)
+                    {
+                        t.pc += re.ir[t.pc].data + IRL!(IR.GotoEndOr);
+                    }
                 }
-                t.pc += IRL!(IR.Option);
+                assert(re.ir[t.pc].code == IR.OrEnd);
+                t.pc -= re.ir[t.pc].data + 1;
                 break;
             case IR.GotoEndOr:
-                assert(0);
-                t.pc = t.pc + prog[t.pc].data + IRL!(IR.GotoEndOr);
+                assert(re.ir[t.pc].code == IR.GotoEndOr);
+                uint npc = t.pc+IRL!(IR.GotoEndOr);
+                assert(re.ir[npc].code == IR.Option);
+                worklist.insertFront(fork(t, npc + re.ir[npc].data, t.counter));//queue next branch
+                t.pc--;
                 break;
             case IR.GroupStart: 
                 uint n = prog[t.pc].data;

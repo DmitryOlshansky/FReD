@@ -286,10 +286,11 @@ unittest
         TestVectors(   `(?<=(a{2,4}b{1,3}))x`,   "yyaaaabx",  "y",   "$&-$1", "x-aaaab"),
         TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aabbbaaaab"),
         TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
-        /*TestVectors(   `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
+        TestVectors(   `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
         TestVectors(   `(?<=(abc|def|aef))x`,    "aefx", "y",        "$&-$1",  "x-aef"),
         TestVectors(   `(?<=(abc|dabc))x`,    "dabcx", "y",        "$&-$1",  "x-abc"),
-        TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),*/
+        TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
+        TestVectors(   `(?<=((ab|da)*))x`,    "abdaabx", "y",        "$&-$2-$1",  "x-ab-abdaab"),
         ];
     string produceExpected(M,String)(M m, String fmt)
     {
