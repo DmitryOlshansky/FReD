@@ -2224,6 +2224,49 @@ struct Program
     }
 }
 
+///Test if bytecode starting at pc in program 're' can match given codepoint
+///Returns: length of matched atomsif test is positive, 0 - can't tell, -1 if doesn't match
+int quickTestFwd(uint pc, dchar front, Program re)
+{
+    static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
+    if(pc >= re.ir.length)
+        return pc;
+    switch(re.ir[pc].code)
+    {
+    case IR.OrChar:
+        uint len = re.ir[pc].sequence;
+        uint end = pc + len;
+        if(re.ir[pc].data != front && re.ir[pc+1].data != front)
+        {
+            for(pc = pc+2; pc<end; pc++)
+                if(re.ir[pc].data == front)
+                    break;
+            if(pc == end)
+                return -1;
+        }
+        return cast(int)len;
+    case IR.Char:
+        if(front == re.ir[pc].data)
+            return IRL!(IR.Char);
+        else
+            return -1;
+    case IR.Any:
+        return IRL!(IR.Any);
+    case IR.Charset:
+        if(re.charsets[re.ir[pc].data][front])
+            return IRL!(IR.Charset);
+        else
+            return -1;
+    case IR.Trie:
+        if(re.tries[re.ir[pc].data][front])
+            return IRL!(IR.Trie);
+        else
+            return -1;        
+    default:
+        return 0;
+    }
+}
+
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
 /*struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
@@ -2531,17 +2574,24 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
                 //now pc is at end IR.Infininite(Q)End
                 uint len = re.ir[pc].data;
+                int test;
                 if(re.ir[pc].code == IR.InfiniteEnd)
                 {
-                    pushState(pc + IRL!(IR.InfiniteEnd), counter);
+                    test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
+                    if(test >= 0)//TODO: can do better if > 0 
+                        pushState(pc+IRL!(IR.InfiniteEnd), counter);
                     infiniteNesting++;
                     pc -= len;
                 }
                 else
                 {
-                    infiniteNesting++;
-                    pushState(pc - len, counter);
-                    infiniteNesting--;
+                    test = quickTestFwd(pc - len, front, re);
+                    if(test >= 0)//TODO: can do better if > 0 
+                    {
+                        infiniteNesting++;
+                        pushState(pc - len, counter);
+                        infiniteNesting--;
+                    }
                     pc += IRL!(IR.InfiniteEnd);
                 }
                 break;
@@ -2597,17 +2647,23 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 }
                 else
                     trackers[infiniteNesting] = index;
-
+                int test;
                 if(re.ir[pc].code == IR.InfiniteEnd)
                 {
-                    infiniteNesting--;
-                    pushState(pc + IRL!(IR.InfiniteEnd), counter);
-                    infiniteNesting++;
+                    test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
+                    if(test >= 0)
+                    {
+                        infiniteNesting--;
+                        pushState(pc + IRL!(IR.InfiniteEnd), counter);
+                        infiniteNesting++;
+                    }
                     pc -= len;
                 }
                 else
                 {
-                    pushState(pc-len, counter);
+                    test = quickTestFwd(pc-len, front, re);
+                    if(test >= 0)
+                        pushState(pc-len, counter);
                     pc += IRL!(IR.InfiniteEnd);
                     infiniteNesting--;
                 }
@@ -3050,7 +3106,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                     goto L_backtrack;
                 break;
              case IR.Nop:
-                pc += IRL!(IR.Nop);
+                pc --;
                 break;
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
@@ -3463,17 +3519,37 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                         break;
                     }
                     uint len = prog[t.pc].data;
+                    uint pc1, pc2; //branches to take in priority order
                     if(prog[t.pc].code == IR.InfiniteEnd)
                     {
-                         //queue out-of-loop thread
-                        worklist.insertFront(fork(t, t.pc +IRL!(IR.InfiniteEnd), t.counter));
-                        t.pc -= len;
+                        pc1 = t.pc - len;
+                        pc2 = t.pc + IRL!(IR.InfiniteEnd);
                     }
                     else
                     {
-                        //queue into-loop thread
-                        worklist.insertFront(fork(t, t.pc - len, t.counter));
-                        t.pc += IRL!(IR.InfiniteQEnd);
+                        pc1 = t.pc + IRL!(IR.InfiniteEnd);
+                        pc2 = t.pc - len;
+                    }
+                    static if(withInput)
+                    {
+                        int test = quickTestFwd(pc1, front, re);
+                        if(test > 0)
+                        {
+                            nlist.insertBack(fork(t, pc1 + test, t.counter));
+                            t.pc = pc2;
+                        }
+                        else if(test == 0)
+                        {
+                            worklist.insertFront(fork(t, pc2, t.counter));
+                            t.pc = pc1;
+                        }
+                        else
+                            t.pc = pc2;
+                    }
+                    else
+                    {
+                        worklist.insertFront(fork(t, pc2, t.counter));
+                        t.pc = pc1;
                     }
                     break;
                 case IR.OrEnd:
@@ -4191,7 +4267,6 @@ struct Captures(R)
     R opIndex()(size_t i) /*const*/ //@@@BUG@@@
     {
         assert(f+i < b,"requested submatch number is out of range");
-        writeln("DEBUG:",matches[f+i].begin,"..",matches[f+i].end);
         return input[matches[f+i].begin..matches[f+i].end];
     }
     
