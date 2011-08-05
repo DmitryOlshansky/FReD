@@ -334,9 +334,10 @@ unittest
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": failed to match pattern #", a ,": ", tvd.pattern));
                     if(c == 'y')
                     {
-                        //debug writeln(" Test #", a, " pattern: ", tvd.pattern);
+                        debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
-                        assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
+                        if(!(result == to!String(tvd.replace)))
+                           stderr.writeln(text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
                                     tvd.replace, " vs ", result));
                     }
                 }

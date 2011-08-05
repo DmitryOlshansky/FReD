@@ -14,7 +14,7 @@ module fred;
 import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
-       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception;
+       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception, std.regionallocator;
 import core.bitop;
 import ascii = std.ascii;
 
@@ -401,23 +401,27 @@ struct Group
     }
 }
 
-/// structure representing interval: [a,b]
+/// structure representing interval: [a,b)
 struct Interval
 {
     ///
-    uint begin, end;
+    struct
+    {
+        uint begin, end;
+    }
+
     ///
     this(uint x)
     {
         begin = x;
-        end = x;
+        end = x+1;
     }
-    ///
+    ///from [a,b]
     this(uint x, uint y)
     {
         assert(x <= y);
         begin = x;
-        end = y;
+        end = y+1;
     }
     ///
     string toString()const
@@ -428,69 +432,63 @@ struct Interval
                        end, ascii.isGraphical(end) ? to!string(cast(dchar)end) : "");
         return s.data;
     }
+
 }
+
 /// basic internal data structure for [...] sets
 struct Charset
 {
 //private:
-    Interval[] intervals;
+    enum endOfRange = 0x110000;
+    uint[] ivals;
     ///
 public:
     ref add(Interval inter)
     {
-        //TODO: This all could use an improvment
-        /*
-        auto beg = assumeSorted(map!"a.end"(intervals)).lowerBound(inter.begin).length;
-        auto end = assumeSorted(map!"a.begin"(intervals)).lowerBound(inter.end).length;
-        */
-        uint beg, end;
-        for(beg=0; beg<intervals.length;beg++)
-            if(intervals[beg].end >= inter.begin)
-                break;
-        for(end=beg; end<intervals.length;end++)
-            if(intervals[end].begin >= inter.end)
-                break;
-        //debug(fred_parser) writeln("Found ",inter," beg:", beg, "  end:", end);
-        if(beg == intervals.length)
+         debug(fred_charset) writeln("Inserting ",inter);
+        if(ivals.empty)
         {
-            intervals ~= inter;
+            insertInPlace(ivals, 0, inter.begin, inter.end);
+            return this;
         }
-        else
+        auto svals = assumeSorted(ivals);
+        auto s = svals.lowerBound(inter.begin).length;
+        auto e = svals.lowerBound(inter.end).length;//TODO: could do slightly better
+        debug(fred_charset)  writeln("Indexes: ", s,"  ", e);
+        if(s & 1)
         {
-            if(inter.begin > intervals[beg].begin)
-                inter.begin = intervals[beg].begin;
-            if(end && inter.end < intervals[end-1].end)
-                inter.end = intervals[end-1].end;
-            replaceInPlaceAlt(intervals, beg, end, [inter]);
+            inter.begin = ivals[s-1];
+            s ^= 1;
         }
-
-        if(beg > 0 && intervals[beg].begin == intervals[beg-1].end+1)
+        if(e & 1)
         {
-            intervals[beg-1].end = intervals[beg].end;
-            replaceInPlaceAlt(intervals, beg, beg+1, cast(Interval[])[]);
+            inter.end = ivals[e];
+            e += 1;
         }
-        if(end > 0 && end < intervals.length && intervals[end-1].end+1 == intervals[end].begin)
+        else //e % 2 == 0
         {
-            intervals[end-1].end = intervals[end].end;
-            replaceInPlaceAlt(intervals, end, end+1, cast(Interval[])[]);
+            if(e < ivals.length && inter.end == ivals[e])
+            {
+                    inter.end = ivals[e+1];
+                    e+=2;
+            }
         }
-        //debug(fred_parser) writeln("Charset after add: ", intervals);
-        debug
-        {
-            for(size_t i=0; i<intervals.length-1; i++)
-                assert(intervals[i].end < intervals[i+1].begin, text("Fatal failure: ",intervals[i]," ", intervals[i]));
-        }
+        for(size_t i=1;i<ivals.length; i++)
+            assert(ivals[i-1] < ivals[i]);
+        debug(fred_charset) writeln("Before ", ivals);
+        replaceInPlaceCtfe(ivals, s, e, inter.begin ,inter.end);
+        debug(fred_charset) writeln("After", ivals);
         return this;
     }
     ///
     ref add(dchar ch){ add(Interval(cast(uint)ch)); return this; }
     /// this = this || set
-    ref add(in Charset set)
+    ref add(in Charset set)//TODO: more effective
     {
-        debug(fred_charset) writef ("%s || %s --> ", intervals, set.intervals);
-        foreach(inter; set.intervals)
-            add(inter);
-        debug(fred_charset) writeln(intervals);
+        debug(fred_charset) writef ("%s || %s --> ", ivals, set.ivals);
+        for(size_t i=0; i<set.ivals.length; i+=2)
+            add(Interval(set.ivals[i], set.ivals[i+1]-1));
+        debug(fred_charset) writeln(ivals);
         return this;
     }
     /// this = this -- set
@@ -498,14 +496,14 @@ public:
     {
         if(empty)
         {
-            intervals = [];
+            ivals = [];
             return this;
         }
         if(set.empty)
             return this;
+        auto a = cast(Interval[])ivals;
+        auto b = cast(const(Interval)[])set.ivals;
         Interval[] result;
-        auto a = intervals;
-        const(Interval)[] b = set.intervals;
         while(!a.empty && !b.empty)
         {
             if(a.front.end < b.front.begin)
@@ -529,7 +527,7 @@ public:
                     else if(a.front.end > b.front.end)
                     {
                         //adjust a in place
-                        a.front.begin = b.front.end+1;
+                        a.front.begin = b.front.end;
                         if(a.front.begin > a.front.end)
                             a.popFront();
                         b.popFront();
@@ -548,7 +546,7 @@ public:
                     }
                     else
                     {
-                        a.front.begin = b.front.end+1;
+                        a.front.begin = b.front.end;
                         if(a.front.begin > a.front.end)
                             a.popFront();
                         b.popFront();
@@ -556,13 +554,14 @@ public:
                 }
             }
         }
-        intervals = result ~ a;//+ leftover of original (if any)
+        result ~= a;//+ leftover of original
+        ivals = cast(uint[])result;
         return this;
     }
     /// this = this ~~ set (i.e. (this || set) -- (this && set))
     void symmetricSub(in Charset set)
     {
-        auto a = Charset(intervals.dup);
+        auto a = Charset(ivals.dup);
         a.intersect(set);
         this.add(set);
         this.sub(a);
@@ -572,12 +571,12 @@ public:
     {
         if(empty || set.empty)
         {
-            intervals = [];
+            ivals = [];
             return this;
         }
         Interval[] intersection;
-        auto a = intervals;
-        const(Interval)[] b = set.intervals;
+        auto a = cast(const(Interval)[])ivals;
+        auto b = cast(const(Interval)[])set.ivals;
         for(;;)
         {
             if(a.front.end < b.front.begin)
@@ -618,73 +617,106 @@ public:
                 }
             }
         }
-        intervals = intersection;
+        ivals = cast(uint[])intersection;
         return this;
     }
     /// this = !this (i.e. [^...] in regex syntax)
     auto negate()
     {
-        if(intervals.empty)
+        if(empty)
         {
-            intervals ~= Interval(0, 0x10FFFF);
+            insertInPlace(ivals, 0, 0, endOfRange);
             return this;
         }
-        Interval[] negated;
-        if(intervals[0].begin != 0)
-            negated ~= Interval(0, intervals[0].begin-1);
-        for(size_t i=0; i<intervals.length-1; i++)
-            negated ~= Interval(intervals[i].end+1, intervals[i+1].begin-1);
-        if(intervals[$-1].end != 0x10FFFF)
-            negated ~= Interval(intervals[$-1].end+1, 0x10FFFF);
-        intervals = negated;
+        if(ivals[0] != 0)
+            insertInPlace(ivals, 0, 0);
+        else
+        {
+            for(size_t i=1; i<ivals.length; i++)
+                ivals[i-1] = ivals[i];//moveAll(ivals[1..$], ivals[0..$-1]);
+            ivals.length -= 1;
+            //assumeSafeAppend(ivals);
+        }
+        if(ivals[$-1] != endOfRange)
+            insertInPlace(ivals, ivals.length, endOfRange);
+        else
+        {
+            ivals.length -= 1;
+            //assumeSafeAppend(ivals);
+        }
+        assert(!(ivals.length & 1));
         return this;
     }
     /// test if ch is present in this set
     bool opIndex(dchar ch) const
     {
-        //debug(fred_charset) writeln(intervals);
-        for(uint i=0; i<intervals.length; i++) // could use binary search (lower bound) on (cast(uint*)intervals.ptr)[0..2*intervals.length], and then check if it is even or odd...
-            if(ch >= intervals[i].begin && ch <= intervals[i].end)
-                return true;
+        //debug(fred_charset) writeln(ivals);
+        auto svals = assumeSorted!"a <= b"(ivals);
+        auto s = svals.lowerBound(cast(uint)ch).length;
         //debug(fred_charset) writeln("Test at ", fnd);
-        return false;
+        return s & 1;
     }
     /// true if set is empty
-    @property bool empty() const {   return intervals.empty; }
+    @property bool empty() const {   return ivals.empty; }
     /// print out in [\uxxxx-\uyyyy...] style
     void printUnicodeSet(void delegate(const(char)[])sink) const
     {
         sink("[");
-        foreach(i; intervals)
-            if(i.begin == i.end)
-                formattedWrite(sink, "\\U%08x", i.begin);
+        for(uint i=0;i<ivals.length; i+=2)
+            if(ivals[i] + 1 == ivals[i+1])
+                formattedWrite(sink, "\\U%08x", ivals[i]);
             else
-                formattedWrite(sink, "\\U%08x-\\U%08x", i.begin, i.end);
+                formattedWrite(sink, "\\U%08x-\\U%08x", ivals[i], ivals[i+1]-1);
         sink("]");
     }
     /// deep copy this Charset
     @property Charset dup() const
     {
-        return Charset(intervals.dup);
-    } 
+        return Charset(ivals.dup);
+    }
     /// full range from start to end
-    @property uint extent() const 
+    @property uint extent() const
     {
-        return intervals.empty ? 0 : intervals.back.end - intervals.front.begin + 1;
+        return ivals.empty ? 0 : ivals[$-1] - ivals[0];
     }
     /// number of codepoints in this charset
     @property uint chars() const
     {
         //CTFE workaround
-        //return reduce!"a+b"(map!"a.end-a.begin+1"(intervals));
         uint ret;
-        for(uint i=0; i<intervals.length; i++)
-            ret += intervals[i].end-intervals[i].begin+1;
+        for(uint i=0; i<ivals.length; i+=2)
+            ret += ivals[i+1] - ivals[i];
         return ret;
     }
+    /// troika for hash map
+    bool opEquals(ref const Charset set) const
+    {
+        return ivals == set.ivals;
+    }
+    ///ditto
+    int opCmp(ref const Charset set) const
+    {
+        return cmp(cast(const(uint)[])ivals, cast(const(uint)[])set.ivals);
+    }
+    ///ditto
+    hash_t toHash() const
+    {
+        hash_t hash = 5381+7*ivals.length;
+        if(!empty)
+            hash = 31*ivals[0] + 17*ivals[$-1];
+        return hash;
+    }
+    int opApply(int delegate(ref uint) dg) const
+    {
+        for(size_t i=0; i<ivals.length; i+=2)
+            for(uint k =ivals[i]; k <ivals[i+1]; k++)
+                if(dg(k))
+                    break;
+        return 1;
+    }
 }
-/// a basic 1-level Trie
-struct Trie(uint prefixBits)
+///
+struct BasicTrie(uint prefixBits)
     if(prefixBits > 4)
 {
     enum prefixWordBits = prefixBits-2, prefixSize=1<<prefixBits,
@@ -710,24 +742,25 @@ struct Trie(uint prefixBits)
     /// create a trie from charset set
     this(in Charset s)
     {
-        if(s.intervals.empty)
+        if(s.empty)
             return;
         const(Charset) set = s.chars > 500_000 ? (negative=true, s.dup.negate) : s;
         uint bound = 0;//set up on first iteration
         ushort emptyBlock = ushort.max;
-        const(Interval)[] ivals  = set.intervals;
+        auto ivals  = set.ivals;
         uint[prefixWordSize] page;
-        for(uint i=0; i<0x110000; i+= prefixSize)
+        for(uint i=0; i<Charset.endOfRange; i+= prefixSize)
         {
-            if(i+prefixSize > ivals[bound].begin || emptyBlock == ushort.max)//avoid empty blocks if we have one already
+            if(i+prefixSize > ivals[bound] || emptyBlock == ushort.max)//avoid empty blocks if we have one already
             {
                 bool flag = true;
             L_Prefix_Loop:
                 for(uint j=0; j<prefixSize; j++)
                 {
-                    while(i+j > ivals[bound].end)
+                    while(i+j >= ivals[bound+1])
                     {
-                        if(++bound == ivals.length)
+                        bound += 2;
+                        if(bound == ivals.length)
                         {
                             bound = uint.max;
                             if(flag)//not a single one set so far
@@ -736,7 +769,7 @@ struct Trie(uint prefixBits)
                             break L_Prefix_Loop;
                         }
                     }
-                    if(i+j >= ivals[bound].begin)
+                    if(i+j >= ivals[bound])
                     {
                         page[j>>5] |=  1<<(j & 31);// 32 = uint.sizeof*8
                         flag = false;
@@ -793,37 +826,39 @@ struct Trie(uint prefixBits)
         return cast(bool)bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask)) ^ negative;
     }
     ///get a negative copy
-    Trie negated() const
+    auto negated() const
     {
-        Trie t = cast(Trie)this;//shallow copy, need to subvert type system?
+        BasicTrie t = cast(BasicTrie)this;//shallow copy, need to subvert type system?
         t.negative = !negative; 
         return t;
     }
 }
-alias Trie!8 DefaultTrie;
+alias BasicTrie!8 Trie;
 
 //version(fred_trie_test)
 unittest//a very sloow test
 {
     uint max_char, max_data;
-    Trie!8 t;
+    Trie t;
+    auto x = wordCharacter;
+    
+    Charset set;
+    set.add(unicodeAlphabetic);
+    for(size_t i=1;i<set.ivals.length; i++)
+        assert(set.ivals[i-1] <= set.ivals[i],text(set.ivals[i-1], "  ",set.ivals[i]));
     t = wordTrie.negated;
     assert(!t['a']);
     assert(t[' ']);
     foreach(up; unicodeProperties)
     {
-        t = Trie!8(up.set);
-        foreach(ival; up.set.intervals)
-        {
-            for(uint ch=ival.begin;ch<=ival.end;ch++)
-                assert(t[ch], text("on ch ==", ch));
-        }
+        t = Trie(up.set);
+        foreach(ch; up.set)
+            assert(t[ch], text("on ch ==", ch));
         auto s = up.set.dup.negate.negate;
-        assert(equal(cast(immutable(Interval)[])s.intervals, cast(immutable(Interval)[])up.set.intervals));
-        foreach(ival; up.set.dup.negate.intervals)
+        assert(equal(cast(immutable(Interval)[])s.ivals, cast(immutable(Interval)[])up.set.ivals));
+        foreach(ch; up.set.dup.negate)
         {
-            for(uint ch=ival.begin;ch<=ival.end;ch++)
-                assert(!t[ch], text("negative on ch ==", ch));
+            assert(!t[ch], text("negative on ch ==", ch));
         }
     }
 }
@@ -912,16 +947,16 @@ unittest
     assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
-///property for \w character class
+
+//property for \w character class
 @property Charset wordCharacter()
 {
     return memoizeExpr!("Charset.init.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
         .add(unicodeMe).add(unicodeNd).add(unicodePc)")();
 }
-///ditto
-@property DefaultTrie wordTrie()
+@property Trie wordTrie()
 {
-    return memoizeExpr!("DefaultTrie(wordCharacter)")();
+    return memoizeExpr!("Trie(wordCharacter)")();
 }
 
 auto memoizeExpr(string expr)()
@@ -934,7 +969,6 @@ auto memoizeExpr(string expr)()
         slot =  mixin(expr);
     return slot;
 }
-
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
@@ -970,10 +1004,9 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
     }
     else if(ucmp(name,"Ll") == 0 || ucmp(name,"Lowercase Letter")==0)
     {
-        foreach(ival; evenUpper.intervals)
-            for(uint ch=ival.begin; ch<=ival.end; ch++)
-                if(ch & 1)
-                    s.add(ch);   
+        foreach(ch; evenUpper)
+            if(ch & 1)
+                s.add(ch);   
         addTest(s,   8, 0);
         addTest(s, -32, 7);
         addTest(s, -37, 9);
@@ -995,10 +1028,9 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
     }
     else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
     {
-        foreach(ival; evenUpper.intervals)
-            for(uint ch=ival.begin; ch<=ival.end; ch++)
-                if(!(ch & 1))
-                    s.add(ch);
+        foreach(ch; evenUpper)
+            if(!(ch & 1))
+                s.add(ch);
         addTest(s,  -8, 1);
         addTest(s,  32, 6);
         addTest(s,  37, 8);
@@ -1130,7 +1162,7 @@ struct Parser(R, bool CTFE=false)
     uint ngroup = 1, nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(Charset)[] charsets;  //
-    const(DefaultTrie)[] tries; //
+    const(Trie)[] tries; //
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
@@ -1977,24 +2009,23 @@ struct Parser(R, bool CTFE=false)
             switch(chars)
             {
                 case 1:
-                    put(Bytecode(IR.Char, set.intervals[0].begin));
+                    put(Bytecode(IR.Char, set.ivals[0]));
                     break;
                 case 0:
                     break;
                 default:
-                    foreach(ival; set.intervals)
-                        for(uint ch=ival.begin; ch<=ival.end;ch++)
-                            put(Bytecode(IR.OrChar, ch, chars));
+                    foreach(ch; set)
+                        put(Bytecode(IR.OrChar, ch, chars));
             }
         }
         else
         {
             //TODO: better heuristic
-            if(set.intervals.length > 4)
+            if(set.ivals.length > 4)
             {//CTFE shitty workaround
-                auto t  = DefaultTrie(set);
+                auto t  = Trie(set);
                 put(Bytecode(IR.Trie, tries.length));
-                tries ~= cast(immutable)t;
+                tries ~= t;
             }
             else
             {
@@ -2042,7 +2073,7 @@ struct Parser(R, bool CTFE=false)
             break;
         case 'W':   
             next(); 
-            DefaultTrie t = wordTrie.negated;
+            Trie t = wordTrie.negated;
             put(Bytecode(IR.Trie, tries.length)); 
             tries ~= t;
             break;
@@ -2133,7 +2164,7 @@ struct Program
     uint hotspotTableSize; // number of entries in merge table
     uint flags;         //global regex flags
     const(Charset)[] charsets; //
-    const(DefaultTrie)[]  tries; //
+    const(Trie)[]  tries; //
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
@@ -2374,7 +2405,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
     }
     alias const(Char)[] String;
     Program re;           //regex program
-    enum initialStack = 2^^16;
+    enum initialStack = 2^^12;
     enum dirtyBit = 1<<31;
     //Stream state
     Stream s;
@@ -2392,6 +2423,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
     State[] states;
     Group[] groupStack;//array list
     Group[] matches;
+    
     ///
     @property bool atStart(){ return index == 0; }
     ///
@@ -2410,16 +2442,9 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         s = stream;
         exhausted = false;
         next();
-        trackers = new uint[re.ngroup+1];    //TODO: it's smaller, make parser count nested infinite loops
-        states = (cast(State*)enforce(malloc(initialStack*State.sizeof)))
-                [0..initialStack];
-        groupStack = (cast(Group*)enforce(malloc(initialStack*Group.sizeof)))
-                [0..initialStack];
-    }
-    ~this()
-    {
-        //free(states.ptr);
-        //free(groupStack.ptr);
+        trackers = new size_t[re.ngroup+1];
+        states = new State[initialStack];
+        groupStack = new Group[initialStack];
     }
     ///lookup next match, fills matches with indices into input
     bool match(Group matches[])
@@ -2431,6 +2456,13 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(exhausted) //all matches collected
             return false;
         this.matches = matches[1..$];
+        version(none)
+        {
+            RegionAllocator alloc = newRegionAllocator();
+            trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
+            states = alloc.uninitializedArray!(State[])(initialStack);
+            groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+        }
         for(;;)
         {
             
@@ -2780,8 +2812,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(matchesDirty)
         {
             if(lastGroup >= groupStack.length)
-                groupStack = (cast(Group*)realloc(groupStack.ptr, groupStack.length*Group.sizeof*2))
-                    [0 .. groupStack.length*2];
+                groupStack.length *= 2;
             lastGroup += matches.length;
             groupStack[lastGroup-matches.length .. lastGroup] = matches[];
             debug(fred_matching)
@@ -2792,8 +2823,7 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
             }
         }
         if(lastState >= states.length)
-            states = (cast(State*)realloc(states.ptr,states.length*State.sizeof*2))
-                    [0 .. states.length*2];
+            states.length *= 2;
         states[lastState++] = State(index, matchesDirty ? pc | dirtyBit : pc , counter, infiniteNesting);
         matchesDirty = false;
         debug(fred_matching)
@@ -2844,6 +2874,13 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         lastState = 0;
         infiniteNesting = -1;// intentional
         matchesDirty = false;
+        version(none)
+        {
+            RegionAllocator alloc = newRegionAllocator();
+            trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
+            states = alloc.uninitializedArray!(State[])(initialStack);
+            groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+        }
         //setup first frame for incremental match storage
         assert(groupStack.length >= matches.length);
         groupStack[0 .. matches.length] = Group.init;

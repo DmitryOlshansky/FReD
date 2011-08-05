@@ -18,7 +18,7 @@ void scanUniData(alias Fn)(string name, Regex!char r)
 {
     foreach(line; File(name).byLine)
 	{
-        auto m = match(line, r);
+        auto m = tmatch(line, r);
         if(!m.empty)
             Fn(m);
     }
@@ -61,18 +61,16 @@ void testCasingIrregular()
             irreg.add(ch);
     lowSet.intersect(irreg);
     uint array[];
-    foreach(ival; lowSet.intervals)
+    foreach(ch; lowSet)
     {
-        for(uint ch=ival.begin; ch<=ival.end; ch++)
             array ~= ch;
     }
     assert(equal(sort(array),sort(lowIrreg.dup)));
     auto upperSet = props["Lu"].dup;
     upperSet.intersect(irreg);
     array.length = 0;
-    foreach(ival; upperSet.intervals)
+    foreach(ch; upperSet)
     {
-        for(uint ch=ival.begin; ch<=ival.end; ch++)
             array ~= ch;
     }
     assert(equal(sort(array),sort(highIrreg.dup)));
@@ -95,7 +93,7 @@ void loadCaseFolding(string name)
     auto f = File(name);
 	foreach(line; f.byLine)
 	{
-		auto m = match(line, r);
+		auto m = tmatch(line, r);
 		if(!m.empty)
 		{
 			auto s1 = m.captures[1];
@@ -121,9 +119,9 @@ void loadCaseFolding(string name)
 			casefold[d] = Charset.init;
 		casefold[d].add(val);
 	}
-	auto copy =  casefold[1].intervals.dup;
-	foreach(ival;  copy)
-        for(uint ch = ival.begin; ch<=ival.end; ch++)
+	auto copy =  Charset(casefold[1].ivals.dup);
+
+	foreach(ch; copy)
         {
             casefold[1].add(1 + ch);
         }
@@ -137,13 +135,13 @@ void loadBlocks(string f)
 			auto s2 = m.captures[2];
 			auto a1 = parse!uint(s1, 16);
 			auto a2 = parse!uint(s2, 16);
-			props["In"~to!string(m.captures[3])] = Charset([Interval(a1, a2)]);
+			props["In"~to!string(m.captures[3])] = Charset([a1, a2+1]);
 	})(f, r);
 }
 
 void loadProperties(string inp)
 {
-    auto r = regex(`^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`);
+    auto r = regex(`^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([a-zA-Z_0-9]*)\s*#|# [a-zA-Z_0-9]+=([a-zA-Z_0-9]+))`);
     string aliasStr;
 	scanUniData!((m){
         auto name = to!string(m.captures[4]);
@@ -182,7 +180,7 @@ void loadProperties(string inp)
 
 void loadNormalization(string inp)
 {
-    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(NFC_QC)\s*;\s*([NM])|#\s*[\w|_]+=([\w_]+)`);
+    auto r = regex(`^(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*(NFC_QC)\s*;\s*([NM])|#\s*[a-zA-Z_0-9]+=([a-zA-Z_0-9]+)`);
     string aliasStr;
 	scanUniData!((m){
         auto name = to!string(m.captures[4]) ~ to!string(m.captures[5]);
@@ -214,8 +212,8 @@ string charsetString(in Charset set, string sep=";\n")
 {
     auto app = appender!(char[])();
 	formattedWrite(app,"Charset([\n");
-	foreach(i; set.intervals)
-		formattedWrite(app, "    Interval(0x%05x,0x%05x),\n", i.begin, i.end);
+	for(size_t i=0; i<set.ivals.length; i+=2)
+		formattedWrite(app, "    0x%05x, 0x%05x,\n", set.ivals[i], set.ivals[i+1]);
 	formattedWrite(app, "])%s\n",sep);
     return cast(string)app.data;
 }
@@ -242,16 +240,16 @@ immutable commonCaseTable = [");
 			auto app = appender!(char[])();
 			bool notEmpty = false;
 			formattedWrite(app, "CommonCaseEntry(%d, Charset([", k);
-			foreach(i; casefold[k].intervals)
+			for(size_t i=0; i<casefold[k].ivals.length; i+= 2)
 			{
-				if(i.begin == i.end)
+				if(casefold[k].ivals[i] == casefold[k].ivals[i+1])
 				{
-					lowIrreg ~= i.begin;
-					highIrreg ~= i.begin+k;
+					lowIrreg ~= casefold[k].ivals[i];
+					highIrreg ~= casefold[k].ivals[i]+k;
 				}
 				else
 				{
-					formattedWrite(app, "Interval(0x%05x, 0x%05x),",i.begin, i.end);
+					formattedWrite(app, "0x%05x, 0x%05x,", casefold[k][i], casefold[k][i+1]);
 					notEmpty = true;
 				}
 
@@ -262,11 +260,11 @@ immutable commonCaseTable = [");
 			app.clear();
 			notEmpty  = false;
 			formattedWrite(app,"CommonCaseEntry(%d, Charset([", -k);
-			foreach(i; casefold[k].intervals)
+			for(size_t i=0; i<casefold[k].ivals.length; i+= 2)
 			{
-				if(i.begin != i.end)
+				if(casefold[k].ivals[i] == casefold[k].ivals[i+1])
 				{
-					formattedWrite(app,"Interval(0x%05x, 0x%05x),",i.begin+k, i.end+k);
+					formattedWrite(app, "0x%05x, 0x%05x,", casefold[k][i], casefold[k][i+1]+k);
 					notEmpty = true;
 				}
 
