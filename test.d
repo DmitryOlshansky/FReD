@@ -336,8 +336,7 @@ unittest
                     {
                         debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
-                        if(!(result == to!String(tvd.replace)))
-                           stderr.writeln(text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
+                        assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
                                     tvd.replace, " vs ", result));
                     }
                 }

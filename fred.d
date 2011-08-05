@@ -528,7 +528,7 @@ public:
                     {
                         //adjust a in place
                         a.front.begin = b.front.end;
-                        if(a.front.begin > a.front.end)
+                        if(a.front.begin >= a.front.end)
                             a.popFront();
                         b.popFront();
                     }
@@ -547,7 +547,7 @@ public:
                     else
                     {
                         a.front.begin = b.front.end;
-                        if(a.front.begin > a.front.end)
+                        if(a.front.begin >= a.front.end)
                             a.popFront();
                         b.popFront();
                     }
@@ -833,7 +833,22 @@ struct BasicTrie(uint prefixBits)
         return t;
     }
 }
+
 alias BasicTrie!8 Trie;
+Trie[const(Charset)] trieCache;
+
+Trie getTrie(in Charset set)
+{
+    if(__ctfe)
+        return Trie(set);
+    else
+    {
+        auto p = set in trieCache;
+        if(p)
+            return *p;
+        return (trieCache[set] = Trie(set));
+    }
+}
 
 //version(fred_trie_test)
 unittest//a very sloow test
@@ -2022,8 +2037,8 @@ struct Parser(R, bool CTFE=false)
         {
             //TODO: better heuristic
             if(set.ivals.length > 4)
-            {//CTFE shitty workaround
-                auto t  = Trie(set);
+            {//also CTFE memory overflow workaround
+                auto t  = getTrie(set);
                 put(Bytecode(IR.Trie, tries.length));
                 tries ~= t;
             }
