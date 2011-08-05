@@ -329,14 +329,20 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc
     }
 }
 
-static void insertInPlaceCtfe(T)(ref T[] arr, size_t idx, T[] items...)
+static void insertInPlaceAlt(T)(ref T[] arr, size_t idx, T[] items...)
 {
-   arr = arr[0..idx] ~ items ~ arr[idx..$];
+   if(__ctfe)
+       arr = arr[0..idx] ~ items ~ arr[idx..$];
+    else
+        insertInPlace(arr, idx, items);
 }
 
-static void replaceInPlaceCtfe(T)(ref T[] arr, size_t from, size_t to, T[] items...)
+static void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
-    arr = arr[0..from]~items~arr[to..$];
+    //if(__ctfe)
+        arr = arr[0..from]~items~arr[to..$];
+    /*else //BUG in replaceInPlace?
+        replaceInPlace(arr, from, to, items);*/
 }
 
 //do not reorder this list
@@ -426,15 +432,8 @@ struct Interval
 /// basic internal data structure for [...] sets
 struct Charset
 {
-private:
+//private:
     Interval[] intervals;
-    static charsetReplace(T)(ref T[]  arr, size_t from, size_t to, T[] stuff...)
-    {
-        if(__ctfe)
-            replaceInPlaceCtfe(arr, from, to, stuff);
-        else
-            replaceInPlace(arr, from, to, stuff);
-    }
     ///
 public:
     ref add(Interval inter)
@@ -462,25 +461,24 @@ public:
                 inter.begin = intervals[beg].begin;
             if(end && inter.end < intervals[end-1].end)
                 inter.end = intervals[end-1].end;
-            charsetReplace(intervals, beg, end, [inter]);
+            replaceInPlaceAlt(intervals, beg, end, [inter]);
         }
 
         if(beg > 0 && intervals[beg].begin == intervals[beg-1].end+1)
         {
             intervals[beg-1].end = intervals[beg].end;
-            charsetReplace(intervals, beg, beg+1, cast(Interval[])[]);
+            replaceInPlaceAlt(intervals, beg, beg+1, cast(Interval[])[]);
         }
         if(end > 0 && end < intervals.length && intervals[end-1].end+1 == intervals[end].begin)
         {
             intervals[end-1].end = intervals[end].end;
-            charsetReplace(intervals, end, end+1, cast(Interval[])[]);
+            replaceInPlaceAlt(intervals, end, end+1, cast(Interval[])[]);
         }
         //debug(fred_parser) writeln("Charset after add: ", intervals);
-        debug(fred_charset)
+        debug
         {
-            uint[] vals = cast(uint[]) intervals;
-            for(size_t i=0; i<vals.length-1; i++)
-                assert(vals[i] <= vals[i+1]);
+            for(size_t i=0; i<intervals.length-1; i++)
+                assert(intervals[i].end < intervals[i+1].begin, text("Fatal failure: ",intervals[i]," ", intervals[i]));
         }
         return this;
     }
@@ -685,7 +683,7 @@ public:
         return ret;
     }
 }
-
+/// a basic 1-level Trie
 struct Trie(uint prefixBits)
     if(prefixBits > 4)
 {
@@ -914,10 +912,28 @@ unittest
     assert(getCommonCasing(0x03B9, data) == [0x03b9, 0x0399, 0x0345, 0x1fbe]);
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
-//property for \w character class
-immutable Charset wordCharacter = Charset.init.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
-        .add(unicodeMe).add(unicodeNd).add(unicodePc);
-immutable DefaultTrie wordTrie = DefaultTrie(wordCharacter);
+///property for \w character class
+@property Charset wordCharacter()
+{
+    return memoizeExpr!("Charset.init.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
+        .add(unicodeMe).add(unicodeNd).add(unicodePc)")();
+}
+///ditto
+@property DefaultTrie wordTrie()
+{
+    return memoizeExpr!("DefaultTrie(wordCharacter)")();
+}
+
+auto memoizeExpr(string expr)()
+{
+    if(__ctfe)
+        return mixin(expr);
+    alias typeof(mixin(expr)) T;
+    static T slot;
+    if(slot == T.init)
+        slot =  mixin(expr);
+    return slot;
+}
 
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
@@ -1059,9 +1075,9 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
 /// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T, bool CTFE=false)
 {
-    static if(!CTFE)
+    //static if(!CTFE)
         Appender!(T[]) stack;
-    else
+    /*else
     {
         struct Proxy
         { 
@@ -1073,7 +1089,7 @@ struct Stack(T, bool CTFE=false)
             void shrinkTo(size_t sz){   data = data[0..sz]; }
         }
         Proxy stack;
-    }
+    }*/
     @property bool empty(){ return stack.data.empty; }
     void push(T item)
     {
@@ -1115,8 +1131,6 @@ struct Parser(R, bool CTFE=false)
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(Charset)[] charsets;  //
     const(DefaultTrie)[] tries; //
-    static if(CTFE)
-        alias insertInPlaceCtfe insertInPlace;
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
@@ -1285,13 +1299,13 @@ struct Parser(R, bool CTFE=false)
                             for(ind=0; ind <dict.length; ind++)
                                 if(t.name >= dict[ind].name)
                                     break;
-                            insertInPlace(dict, ind, t);
+                            insertInPlaceAlt(dict, ind, t);
                         }
                         else
                         {
                             auto d = assumeSorted!"a.name < b.name"(dict);
                             auto ind = d.lowerBound(t).length;
-                            insertInPlace(dict, ind, t);
+                            insertInPlaceAlt(dict, ind, t);
                         }
                         put(Bytecode(IR.GroupStart, nglob));
                         break;
@@ -1371,7 +1385,7 @@ struct Parser(R, bool CTFE=false)
                 if(fixupStack.stack.data.length == 1)//only root entry
                     fix = -1;
                 uint len = ir.length - fix;
-                insertInPlace(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
+                insertInPlaceAlt(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
                 assert(ir[fix+1].code == IR.OrStart);
                 put(Bytecode(IR.GotoEndOr, 0));
                 fixupStack.push(fix+1); // fixup for StartOR
@@ -1485,7 +1499,7 @@ struct Parser(R, bool CTFE=false)
                 if(replace)
                     ir[offset] = op;
                 else
-                    insertInPlace(ir, offset, op);
+                    insertInPlaceAlt(ir, offset, op);
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1);
                 putRaw(min);
@@ -1501,7 +1515,7 @@ struct Parser(R, bool CTFE=false)
                 if(replace)
                     ir[offset] = op;
                 else
-                    insertInPlace(ir, offset, op);
+                    insertInPlaceAlt(ir, offset, op);
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
                 putRaw(1);
@@ -1533,7 +1547,7 @@ struct Parser(R, bool CTFE=false)
             if(replace)
                 ir[offset] = op;
             else
-                insertInPlace(ir, offset, op);
+                insertInPlaceAlt(ir, offset, op);
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
             put(Bytecode.init); //merge index

@@ -366,7 +366,7 @@ unittest
     version(fred_ct)
     void ct_tests()
     {
-        foreach(a, v; mixin(generate(168,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        foreach(a, v; mixin(generate(120,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
