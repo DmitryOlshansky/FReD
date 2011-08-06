@@ -553,8 +553,7 @@ unittest
 {
     auto cr = ctRegex!("abc");
     assert(match("abc",cr).hit == "abc");
-    auto cr2 = ctRegex!("a*aab"); 
-    writeln(ctGenProgram(regex("a*aab").ir));
+    auto cr2 = ctRegex!("ab*c"); 
     assert(!match("abbbbc",cr2).empty);
     assert(match("abbbbc",cr2).hit == "abbbbc");
 }

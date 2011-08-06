@@ -2542,17 +2542,19 @@ template BacktrackingMatcher(alias hardcoded=char)
         }
         static if(is(typeof(hardcoded(this))))
         {
+       
+            bool matchImpl()
+            {
+               return hardcoded(this);
+      
+            }
+        }
+        else
+        {
         /++
             match subexpression against input, using provided malloc'ed array as stack,
             results are stored in matches
         +/
-        bool matchImpl()
-        {
-           return hardcoded(this);
-        }
-        }
-        else
-        {
         bool matchImpl()
         {
             pc = 0;
@@ -2924,7 +2926,7 @@ template BacktrackingMatcher(alias hardcoded=char)
             s.reset(index);
             next();
             debug(fred_matching)
-                writefln("Backtracked front: %s src: %s", front, s[index..s.lastIndex]);
+                writefln("Backtracked (pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
             return true;
         }
         /++
@@ -3343,9 +3345,9 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
                     trackers[infiniteNesting] = index;
 
                     infiniteNesting--;
-                    pushState(pc+1, counter);
+                    pushState($$, counter);
                     infiniteNesting++;
-                    goto case $$;`, addr, fixup);
+                    goto case $$;`, addr, addr+1, fixup);
             ir = ir[ir[0].length..$];
             break;
     case IR.InfiniteQEnd:
