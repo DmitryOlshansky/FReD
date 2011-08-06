@@ -1,3 +1,5 @@
+//
+//when doing C-T regexes, use -J.; pattern for C-T regex is located in file ct_pattern !
 module main;
 
 import std.file;
@@ -9,15 +11,20 @@ version(backtracking)
 	alias match matchFn;
 else version(thompson)	
 	alias tmatch matchFn;
-else
-	static assert(0, "Choose version: backtracking or thompson");
+else version(ct_regex)
+	alias match matchFn;
+else	
+	static assert(0, "Choose version: backtracking or thompson or ct_regex");
 int main(string[] argv)
 {
     if(argv.length < 3){
         writefln("Usage %s <re> file [print]",argv[0]);
         return 1;
     }
-    auto engine = regex(argv[1],"g");
+    version(ct_regex)
+        auto engine = ctRegex!(import("ct_pattern"),"g");
+    else
+        auto engine = regex(argv[1],"g");
     auto data = cast(char[])std.file.read(argv[2]);
     size_t count=0;
     StopWatch sw;

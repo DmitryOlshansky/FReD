@@ -345,6 +345,14 @@ static void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items.
         replaceInPlace(arr, from, to, items);*/
 }
 
+static void moveAllAlt(T)(T[] src, T[] dest)
+{
+    if(__ctfe)
+        foreach(i,v; src)
+            dest[i] = v;
+    else
+        moveAll(src, dest);
+}
 //do not reorder this list
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
@@ -1307,7 +1315,10 @@ struct Parser(R, bool CTFE=false)
                             break;
                 }
                 default:
-                    new RegexException(text("unknown regex flag '",ch,"'"));
+                    if(__ctfe)
+                       assert(text("unknown regex flag '",ch,"'"));
+                    else
+                        new RegexException(text("unknown regex flag '",ch,"'"));
             }
         }
     }
@@ -1549,7 +1560,7 @@ struct Parser(R, bool CTFE=false)
         default:
             if(replace)
             {
-                moveAll(ir[offset+1..$],ir[offset..$-1]);
+                moveAllAlt(ir[offset+1..$],ir[offset..$-1]);
                 ir.length -= 1;
             }
             return;
@@ -2893,7 +2904,7 @@ template BacktrackingMatcher(alias hardcoded=char)
             states[lastState++] = State(index, matchesDirty ? pc | dirtyBit : pc , counter, infiniteNesting);
             matchesDirty = false;
             debug(fred_matching)
-                writefln("Saved front: %s src: %s", front, s[index..s.lastIndex]);
+                writefln("Saved(pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
         }
         //helper function restores engine state        
         bool popState()
@@ -3250,7 +3261,7 @@ struct CtState
     string code;
     int addr;
 }
-//very shitty string formatter, $$ replace with next argument converted to string
+//very shitty string formatter, $$ replaced with next argument converted to string
 string ctSub( U...)(string format, U args)
 {
     bool seenDollar;
@@ -3297,7 +3308,7 @@ CtState ctGenGroup(ref Bytecode[] ir, int addr)
     assert(!ir.empty);
     switch(ir[0].code)
     {
-    case IR.InfiniteStart, IR.InfiniteQStart, IR.RepeatStart:
+    case IR.InfiniteStart, IR.InfiniteQStart, IR.RepeatStart, IR.RepeatQStart:
         uint len = ir[0].data;
         auto nir = ir[ir[0].length .. ir[0].length+len];
         result = ctGenBlock(nir, addr+1);
@@ -3325,48 +3336,96 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
     assert(ir[0].isStart || ir[0].isEnd);
     switch(ir[0].code)
     {
-    case IR.InfiniteStart,IR.InfiniteQStart:
-            r = ctSub( `
-                case $$:
-                    trackers[++infiniteNesting] = size_t.max;
-                    goto case $$;`, addr, fixup);
-            ir = ir[ir[0].length..$];
-            break;
+    case IR.InfiniteStart, IR.InfiniteQStart:
+        r = ctSub( `
+            case $$:
+                trackers[++infiniteNesting] = size_t.max;
+                goto case $$;`, addr, fixup);
+        ir = ir[ir[0].length..$];
+        break;
     case IR.InfiniteEnd:
-            r = ctSub( `
-                case $$:
-                    debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
-                    assert(infiniteNesting < trackers.length);
-                    if(trackers[infiniteNesting] == index)
-                    {//source not consumed
-                        infiniteNesting--;
-                        goto case;
-                    }
-                    trackers[infiniteNesting] = index;
-
+        r = ctSub( `
+            case $$:
+                debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
+                assert(infiniteNesting < trackers.length);
+                if(trackers[infiniteNesting] == index)
+                {//source not consumed
                     infiniteNesting--;
-                    pushState($$, counter);
-                    infiniteNesting++;
-                    goto case $$;`, addr, addr+1, fixup);
-            ir = ir[ir[0].length..$];
-            break;
+                    goto case $$;
+                }
+                trackers[infiniteNesting] = index;
+
+                infiniteNesting--;
+                pushState($$, counter);
+                infiniteNesting++;
+                goto case $$;`, addr, addr+1, addr+1, fixup);
+        ir = ir[ir[0].length..$];
+        break;
     case IR.InfiniteQEnd:
-            r = ctSub( `
-                case $$:
-                    debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
-                    assert(infiniteNesting < trackers.length);
-                    if(trackers[infiniteNesting] == index)
-                    {//source not consumed
-                        infiniteNesting--;
-                        goto case;
-                    }
-                    trackers[infiniteNesting] = index;
-
-                    pushState($$, counter);
+        r = ctSub( `
+            case $$:
+                debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
+                assert(infiniteNesting < trackers.length);
+                if(trackers[infiniteNesting] == index)
+                {//source not consumed
                     infiniteNesting--;
-                    goto case;`, addr, fixup);
-            ir = ir[ir[0].length..$];
-            break;
+                    goto case $$;
+                }
+                trackers[infiniteNesting] = index;
+
+                pushState($$, counter);
+                infiniteNesting--;
+                goto case;`, addr, addr+1, fixup);
+        ir = ir[ir[0].length..$];
+        break;
+    case IR.RepeatStart, IR.RepeatQStart:
+        r = ctSub( `
+            case $$: 
+                goto case $$;`, addr, fixup);
+        ir = ir[ir[0].length..$];
+        break;
+     case IR.RepeatEnd, IR.RepeatQEnd:
+        // len, step, min, max
+        uint len = ir[0].data;
+        uint step = ir[1].raw;
+        uint min = ir[2].raw;
+        uint max = ir[3].raw;
+        r = ctSub(`
+            case $$:
+                if(counter < $$)
+                {
+                    debug(fred_matching) writeln("RepeatEnd min case pc=", $$);
+                    counter += $$;
+                    goto case $$;
+                }`,  addr, min, addr, step, fixup);
+        if(ir[0].code == IR.RepeatEnd)
+        {
+            r ~= ctSub(`
+                else if(counter < $$)
+                {
+                        pushState($$, counter % $$);
+                        counter += $$;
+                        goto case $$;
+                }`, max, addr+1, step, step, fixup);
+        }
+        else
+        {
+            r ~= ctSub(`
+                else if(counter < $$)
+                {
+                    pushState($$, counter + $$);
+                    counter = counter % $$;
+                    goto case $$;
+                }`, max, fixup, step, step, addr+1); 
+        }
+        r ~= ctSub(`
+                else
+                {
+                    counter = counter % $$;
+                    goto case $$;
+                }`, step, addr+1);
+        ir = ir[ir[0].length..$];
+        break;
     case IR.OrStart:
 
             ctSub( `
@@ -3433,6 +3492,7 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             goto case;`, addr, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
+        break;
     case IR.Trie:
         result.code ~= ctSub( `
             case $$:
@@ -3450,12 +3510,12 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             size_t bi;
             if(atStart && wordTrie[front])
             {
-                goto case;
+                goto case $$;
             }
             else if(atEnd && s.loopBack.nextChar(back, bi)
                     && wordTrie[back])
             {
-                goto case;
+                goto case $$;
             }
             else if(s.loopBack.nextChar(back, bi))
             {
@@ -3463,10 +3523,10 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
                 bool ab = wordTrie[back];
                 if(af ^ ab)
                 {
-                    goto case;
+                    goto case $$;
                 }
             }
-            goto L_backtrack;`, addr);
+            goto L_backtrack;`, addr, addr+1, addr+1, addr+1);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -3498,19 +3558,19 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             dchar back;
             size_t bi;
             if(atStart)
-                goto case;
+                goto case $$;
             else if(s.loopBack.nextChar(back,bi) && back == '\n')
-                goto case;
+                goto case $$;
             else
                 goto L_backtrack;
-            `, addr);
+            `, addr, addr + 1,addr + 1);
         result.addr = addr + 1;
         ir.popFront();
         break;
     case IR.Eol:
         result.code ~= ctSub(`
         case $$:
-            debug(fred_matching) writefln("EOL (seen CR: %$$, front 0x%%x) %$$", seenCr, front, s[index..s.lastIndex]);
+            debug(fred_matching) writefln("EOL (seen CR: %x, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
             //no matching inside \r\n
             if(atEnd || ((front == '\n') ^ seenCr) || front == LS
                 || front == PS || front == NEL)
@@ -3527,7 +3587,7 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         case $$:
             matches[$$].begin = index;
             matchesDirty = true;
-            debug(fred_matching) writefln("IR group #%%u starts at %%u", $$+1, index);
+            debug(fred_matching) writefln("IR group #%u starts at %u", $$+1, index);
             goto case;`, addr, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
         ir.popFront();
@@ -3537,7 +3597,7 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         case $$:
             matches[$$].end = index;
             matchesDirty = true;
-            debug(fred_matching) writefln("IR group #%%u ends at %%u", $$+1, index);
+            debug(fred_matching) writefln("IR group #%u ends at %u", $$+1, index);
             goto case;`, addr, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
         ir.popFront();

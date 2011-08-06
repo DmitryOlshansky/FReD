@@ -229,8 +229,8 @@ unittest
      /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
         TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
 //more repetitions:
-        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbbb", "y", "$&", "aaabaaaabbb" ),
-        TestVectors(  "(?:a{2,4}b{1,3}){1,2}?", "aaabaaaabbbb", "y", "$&", "aaab" ),
+        TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbb", "y", "$&", "aaabaaaabbb" ),
+        TestVectors(  "(?:a{2,4}b{1,3}){1,2}?", "aaabaaaabbb", "y", "$&", "aaab" ),
 //groups:
         TestVectors(  "(abc)|(edf)|(xyz)",     "xyz",             "y",   "$1-$2-$3","--xyz"),
         TestVectors(  "(?P<q>\\d+)/(?P<d>\\d+)",     "2/3",       "y",     "${d}/${q}",    "3/2"),
@@ -395,13 +395,20 @@ unittest
 }
  version(fred_ct)
  {
-     unittest
+    unittest
     {
         auto cr = ctRegex!("abc");
         assert(match("abc",cr).hit == "abc");
         auto cr2 = ctRegex!("ab*c"); 
-        assert(!match("abbbbc",cr2).empty);
         assert(match("abbbbc",cr2).hit == "abbbbc");
+        auto cr3 = ctRegex!("^abc$"); 
+        assert(match("abc",cr3).hit == "abc");
+        auto cr4 = ctRegex!(`\b(a\B[a-z]b)\b`); 
+        assert(array(match("azb",cr4).captures) == ["azb", "azb"]);
+        auto cr5 = ctRegex!("(?:a{2,4}b{1,3}){1,2}");
+        assert(match("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
+        auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?");
+        assert(match("aaabaaaabbb",  cr6).hit == "aaab");
     }
 }
 else
