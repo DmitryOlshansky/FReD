@@ -448,7 +448,7 @@ public:
          debug(fred_charset) writeln("Inserting ",inter);
         if(ivals.empty)
         {
-            insertInPlace(ivals, 0, inter.begin, inter.end);
+            insertInPlaceAlt(ivals, 0, inter.begin, inter.end);
             return this;
         }
         auto svals = assumeSorted(ivals);
@@ -476,7 +476,7 @@ public:
         for(size_t i=1;i<ivals.length; i++)
             assert(ivals[i-1] < ivals[i]);
         debug(fred_charset) writeln("Before ", ivals);
-        replaceInPlaceCtfe(ivals, s, e, inter.begin ,inter.end);
+        replaceInPlaceAlt(ivals, s, e, inter.begin ,inter.end);
         debug(fred_charset) writeln("After", ivals);
         return this;
     }
@@ -817,7 +817,7 @@ struct BasicTrie(uint prefixBits)
         }
     }
     /// != 0 if contains char ch
-    int opIndex(dchar ch) const
+    bool opIndex(dchar ch) const
     {
         assert(ch < 0x110000);
         uint ind = ch>>prefixBits;
@@ -2567,21 +2567,21 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && wordCharacter[front])
+                if(atStart && wordTrie[front])
                 {
                     pc += IRL!(IR.Wordboundary);
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && isUniAlpha(back))
+                        && wordTrie[back])
                 {
                     pc += IRL!(IR.Wordboundary);
                     break;
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front];
-                    bool ab = wordCharacter[back];
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
                         pc += IRL!(IR.Wordboundary);
@@ -2594,15 +2594,15 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordCharacter[front])
+                if(atStart && !wordTrie[front])
                     goto L_backtrack;
                 else if(atEnd && s.loopBack.nextChar(back, bi)
                         && !isUniAlpha(back))
                     goto L_backtrack;
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front];
-                    bool ab = wordCharacter[back];
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                         goto L_backtrack;
                 }
@@ -2951,21 +2951,21 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && wordCharacter[front])
+                if(atStart && wordTrie[front])
                 {
                     pc--;
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordCharacter[back])
+                        && wordTrie[back])
                 {
                     pc--;
                     break;
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front];
-                    bool ab = wordCharacter[back];
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
                         pc--;
@@ -2978,15 +2978,15 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordCharacter[front])
+                if(atStart && !wordTrie[front])
                     goto L_backtrack;
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordCharacter[back])
+                        && !wordTrie[back])
                     goto L_backtrack;
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front];
-                    bool ab = wordCharacter[back];
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                        goto L_backtrack;
                 }
@@ -3443,21 +3443,21 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && wordCharacter[front])
+                    if(atStart && wordTrie[front])
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && wordCharacter[back])
+                            && wordTrie[back])
                     {
                         t.pc += IRL!(IR.Wordboundary);
                         break;
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = wordCharacter[front] != 0;
-                        bool ab = wordCharacter[back] != 0;
+                        bool af = wordTrie[front] != 0;
+                        bool ab = wordTrie[back] != 0;
                         if(af ^ ab)
                         {
                             t.pc += IRL!(IR.Wordboundary);
@@ -3471,14 +3471,14 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && !wordCharacter[front])
+                    if(atStart && !wordTrie[front])
                     {
                         recycle(t);
                         t = worklist.fetch();
                         break;
                     }
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !wordCharacter[back])
+                            && !wordTrie[back])
                     {
                         recycle(t);
                         t = worklist.fetch();
@@ -3486,8 +3486,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     }
                     else if(s.loopBack.nextChar(back, index))
                     {
-                        bool af = wordCharacter[front] != 0;
-                        bool ab = wordCharacter[back]  != 0;
+                        bool af = wordTrie[front] != 0;
+                        bool ab = wordTrie[back]  != 0;
                         if(af ^ ab)
                         {
                             recycle(t);
@@ -3867,21 +3867,21 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && wordCharacter[front])
+                if(atStart && wordTrie[front])
                 {
                     t.pc--;
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordCharacter[back])
+                        && wordTrie[back])
                 {
                     t.pc--;
                     break;
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front] != 0;
-                    bool ab = wordCharacter[back] != 0;
+                    bool af = wordTrie[front] != 0;
+                    bool ab = wordTrie[back] != 0;
                     if(af ^ ab)
                     {
                         t.pc--;
@@ -3895,14 +3895,14 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordCharacter[front])
+                if(atStart && !wordTrie[front])
                 {
                     recycle(t);
                     t = worklist.fetch();
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordCharacter[back])
+                        && !wordTrie[back])
                 {
                     recycle(t);
                     t = worklist.fetch();
@@ -3910,8 +3910,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordCharacter[front] != 0;
-                    bool ab = wordCharacter[back]  != 0;
+                    bool af = wordTrie[front] != 0;
+                    bool ab = wordTrie[back]  != 0;
                     if(af ^ ab)
                     {
                         recycle(t);
