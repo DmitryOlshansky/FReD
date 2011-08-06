@@ -1,3 +1,7 @@
+/// Simple UTF-string stream abstraction with caching
+/// able to decode and normalize on the fly, and trying to have as little
+/// overhead (copying) as possible
+module streamDecode;
 import std.range:put;
 import std.stdio, std.format;
 import std.range;
@@ -100,27 +104,27 @@ struct StreamCBuf(Char)
         if (detailed){
             formattedWrite(sink," bufAtt: ");
             foreach(i,c;bufAtt[0..mPos]){
-                formattedWrite(sink,"%x'%s'",indexes[i],to!(Char[])([c]));
+                formattedWrite(sink,"%x<%s>",indexes[i],to!(Char[])([c]));
             }
             formattedWrite(sink,"^^^@%d^^^",bufPos);
             foreach(i,c;bufAtt[mPos..$]){
-                formattedWrite(sink,"%x'%s'",indexes[i],to!(Char[])([c]));
+                formattedWrite(sink,"%x<%s>",indexes[i],to!(Char[])([c]));
             }
         }
         formattedWrite(sink," bufferedHistory:");
         for (size_t i=bufHistorySize;i!=0;--i){
             size_t ii=(bufPos-i+bufAtt.length)%bufAtt.length;
-            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+            formattedWrite(sink,"%x<%s>",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
         }
         formattedWrite(sink,",\n normalizedBuf:");
         for (size_t i=0;i<bufSize;++i){
             size_t ii=(bufPos+i)%bufAtt.length;
-            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+            formattedWrite(sink,"%x<%s>",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
         }
         formattedWrite(sink,",\n readBuf:");
         for (size_t i=0;i<bufReadSize;++i){
             size_t ii=(bufPos+bufSize+i)%bufAtt.length;
-            formattedWrite(sink,"%x'%s'",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
+            formattedWrite(sink,"%x<%s>",indexes[ii],to!(Char[])(bufAtt[ii..ii+1]));
         }
         formattedWrite(sink,",\n");
         formattedWrite(sink," bufStart:%d,\n",bufStart());
@@ -554,11 +558,15 @@ unittest
     size_t ii=0;
     auto chunks = [""d,hello,""d,another,""d];
     foreach(ichunk,chunk;chunks){
-        writefln("pippo pre addChunk(%s)",chunk);
-        stream.desc(delegate void(const(char[])s){ writef(s); });
+        debug(StreamTest){
+            writefln("pippo pre addChunk(%s)",chunk);
+            stream.desc(delegate void(const(char[])s){ writef(s); });
+        }
         stream.addChunk(chunk);
-        writefln("pippo addChunk(%s)",chunk);
-        stream.desc(delegate void(const(char[])s){ writef(s); });
+        debug(StreamTest){
+            writefln("pippo addChunk(%s)",chunk);
+            stream.desc(delegate void(const(char[])s){ writef(s); });
+        }
         size_t i=ii;
         while(stream.nextChar(ch, index))
         {
@@ -566,21 +574,27 @@ unittest
             assert(index == i);
             i++;
             auto j=i;
-            writefln("pre Loopback");
-            stream.desc(delegate void(const(char[])s){ writef(s); });
+            debug(StreamTest){
+                writefln("pre Loopback");
+                stream.desc(delegate void(const(char[])s){ writef(s); });
+            }
             auto firstPass = stream.loopBack();
             while(firstPass.nextChar(ch2, index2))
             {
-                writefln("loopBack, char:%s, index:%s",ch2,index2);
+                debug(StreamTest){
+                    writefln("loopBack, char:%s, index:%s",ch2,index2);
+                }
                 j--;
                 assert(ch2 == fullStr[j]);
                 assert(j == index2);
             }
             assert(j<=((i>stream.historyWindow)?(i-stream.historyWindow):0));
         }
-        writefln("--- post stream.nextChar()");
-        stream.desc(delegate void(const(char[])s){ writef(s); });
-        writefln("i:%s ii:%s chunk.length:%s",i,ii,chunk.length);
+        debug(StreamTest){
+            writefln("--- post stream.nextChar()");
+            stream.desc(delegate void(const(char[])s){ writef(s); });
+            writefln("i:%s ii:%s chunk.length:%s",i,ii,chunk.length);
+        }
         assert(((ichunk==1)?(i == ii+chunk.length-1):(i ==  ii+chunk.length)));// OK, last one waits possible normalization
         ii=i;
     }
@@ -599,9 +613,11 @@ unittest
             auto firstPass = stream.loopBack();
             while(firstPass.nextChar(ch2, index2))
             {
-                writefln("--- inside last loopback");
-                stream.desc(delegate void(const(char[])s){ writef(s); });
-                writefln("last loopBack, char:%s, index:%s",ch2,index2);
+                debug(StreamTest){
+                    writefln("--- inside last loopback");
+                    stream.desc(delegate void(const(char[])s){ writef(s); });
+                    writefln("last loopBack, char:%s, index:%s",ch2,index2);
+                }
                 j--;
                 assert(ch2 == fullStr[j]);
                 assert(j == index2);
