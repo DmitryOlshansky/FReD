@@ -439,7 +439,7 @@ struct Interval
 struct Charset
 {
 //private:
-    enum endOfRange = 0x110000;
+    enum uint endOfRange = 0x110000;
     uint[] ivals;
     ///
 public:
@@ -621,27 +621,27 @@ public:
         return this;
     }
     /// this = !this (i.e. [^...] in regex syntax)
-    auto negate()
+    ref negate()
     {
         if(empty)
         {
-            insertInPlace(ivals, 0, 0, endOfRange);
+            insertInPlaceAlt(ivals, 0, 0u, endOfRange);
             return this;
         }
         if(ivals[0] != 0)
-            insertInPlace(ivals, 0, 0);
+            insertInPlaceAlt(ivals, 0, 0u);
         else
         {
             for(size_t i=1; i<ivals.length; i++)
                 ivals[i-1] = ivals[i];//moveAll(ivals[1..$], ivals[0..$-1]);
-            ivals.length -= 1;
+            ivals = ivals[0..$-1];
             //assumeSafeAppend(ivals);
         }
         if(ivals[$-1] != endOfRange)
-            insertInPlace(ivals, ivals.length, endOfRange);
+            insertInPlaceAlt(ivals, ivals.length, endOfRange);
         else
         {
-            ivals.length -= 1;
+            ivals = ivals[0..$-1] ;
             //assumeSafeAppend(ivals);
         }
         assert(!(ivals.length & 1));
@@ -706,13 +706,37 @@ public:
             hash = 31*ivals[0] + 17*ivals[$-1];
         return hash;
     }
-    int opApply(int delegate(ref uint) dg) const
+    struct Range
     {
-        for(size_t i=0; i<ivals.length; i+=2)
-            for(uint k =ivals[i]; k <ivals[i+1]; k++)
-                if(dg(k))
-                    break;
-        return 1;
+        const(uint)[] ivals;
+        uint j;
+        this(in Charset set)
+        {
+            ivals = set.ivals;
+            if(!empty)
+                j = ivals[0];
+        }
+        @property bool empty() const { return ivals.empty; }
+        @property uint front() const
+        {
+            assert(!empty);
+            return j; 
+        }
+        void popFront()
+        {
+            assert(!empty);
+            if(++j >= ivals[1])
+            {
+                ivals = ivals[2..$];
+                if(!empty)
+                    j = ivals[0];
+            }
+        }
+    }
+    static assert(isInputRange!Range);
+    Range opSlice() const
+    {
+        return Range(this);
     }
 }
 ///
@@ -867,11 +891,11 @@ unittest//a very sloow test
     foreach(up; unicodeProperties)
     {
         t = Trie(up.set);
-        foreach(ch; up.set)
+        foreach(uint ch; up.set[])
             assert(t[ch], text("on ch ==", ch));
         auto s = up.set.dup.negate.negate;
         assert(equal(cast(immutable(Interval)[])s.ivals, cast(immutable(Interval)[])up.set.ivals));
-        foreach(ch; up.set.dup.negate)
+        foreach(ch; up.set.dup.negate[])
         {
             assert(!t[ch], text("negative on ch ==", ch));
         }
@@ -1019,7 +1043,7 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
     }
     else if(ucmp(name,"Ll") == 0 || ucmp(name,"Lowercase Letter")==0)
     {
-        foreach(ch; evenUpper)
+        foreach(ch; evenUpper[])
             if(ch & 1)
                 s.add(ch);   
         addTest(s,   8, 0);
@@ -1043,7 +1067,7 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
     }
     else if(ucmp(name,"Lu") == 0 || ucmp(name,"Uppercase Letter")==0)
     {
-        foreach(ch; evenUpper)
+        foreach(ch; evenUpper[])
             if(!(ch & 1))
                 s.add(ch);
         addTest(s,  -8, 1);
@@ -1122,9 +1146,9 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
 /// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T, bool CTFE=false)
 {
-    //static if(!CTFE)
-        Appender!(T[]) stack;
-    /*else
+    static if(!CTFE)
+        Appender!(T[]) stack;//compiles but bogus at CTFE
+    else
     {
         struct Proxy
         { 
@@ -1136,7 +1160,7 @@ struct Stack(T, bool CTFE=false)
             void shrinkTo(size_t sz){   data = data[0..sz]; }
         }
         Proxy stack;
-    }*/
+    }
     @property bool empty(){ return stack.data.empty; }
     void push(T item)
     {
@@ -2029,23 +2053,31 @@ struct Parser(R, bool CTFE=false)
                 case 0:
                     break;
                 default:
-                    foreach(ch; set)
+                    foreach(ch; set[])
                         put(Bytecode(IR.OrChar, ch, chars));
             }
         }
         else
         {
             //TODO: better heuristic
-            if(set.ivals.length > 4)
-            {//also CTFE memory overflow workaround
-                auto t  = getTrie(set);
-                put(Bytecode(IR.Trie, tries.length));
-                tries ~= t;
+            version(fred_ct)
+            {//fight off memory usage
+                put(Bytecode(IR.Charset, charsets.length));
+                charsets ~= set;
             }
             else
             {
-                put(Bytecode(IR.Charset, charsets.length));
-                charsets ~= set;
+                if(set.ivals.length > 4)
+                {//also CTFE memory overflow workaround
+                    auto t  = getTrie(set);
+                    put(Bytecode(IR.Trie, tries.length));
+                    tries ~= t;
+                }
+                else
+                {
+                    put(Bytecode(IR.Charset, charsets.length));
+                    charsets ~= set;
+                }
             }
         }
     }

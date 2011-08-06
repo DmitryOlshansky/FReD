@@ -366,7 +366,7 @@ unittest
     version(fred_ct)
     void ct_tests()
     {
-        foreach(a, v; mixin(generate(120,38,39,40,52,55,57,62,63,67,80,190,191,192)))
+        foreach(a, v; mixin(generate(140,38,39,40,52,55,57,62,63,67,80,190,191,192)))
         {
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
@@ -381,6 +381,7 @@ unittest
             assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
             
         }
+        //enum x = regex(tv[141].pattern);
         debug writeln("!!! FReD C-T test done !!!");
     }
     version(fred_ct_bug)
@@ -483,7 +484,7 @@ unittest
     test_body!match();
     test_body!tmatch();
 }
-//@@@BUG@@@ template functions doesn't work inside unittest block
+//@@@BUG@@@ template function doesn't work inside unittest block
 version(unittest)
 String baz(String)(RegexMatch!(String) m)
 {
