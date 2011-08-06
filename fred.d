@@ -874,7 +874,7 @@ Trie getTrie(in Charset set)
     }
 }
 
-//version(fred_trie_test)
+version(fred_trie_test)
 unittest//a very sloow test
 {
     uint max_char, max_data;
@@ -2115,14 +2115,11 @@ struct Parser(R, bool CTFE=false)
             break;
         case 'w':
             next();
-            put(Bytecode(IR.Trie, tries.length)); 
-            tries ~= wordTrie;
+            charsetToIr(wordCharacter);
             break;
         case 'W':   
             next(); 
-            Trie t = wordTrie.negated;
-            put(Bytecode(IR.Trie, tries.length)); 
-            tries ~= t;
+            charsetToIr(wordCharacter.dup.negate);
             break;
         case 'p': case 'P':
             auto charset = parseUnicodePropertySpec(current == 'P');
@@ -2190,7 +2187,7 @@ struct Parser(R, bool CTFE=false)
     {
         auto app = appender!string;
         ir = null;
-        formattedWrite(app,"%s\nPattern with error: `%s <--HERE-- %s`",
+        ctSub("%s\nPattern with error: `%s <--HERE-- %s`",
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
@@ -2316,8 +2313,16 @@ struct Program
     }
 }
 
+struct NativeProgram(alias Fn)
+{
+    Program _prog;
+    alias Fn native;
+    alias _prog this;
+    this(Program  prog){    _prog = prog; } 
+}
+
 ///Test if bytecode starting at pc in program 're' can match given codepoint
-///Returns: length of matched atomsif test is positive, 0 - can't tell, -1 if doesn't match
+///Returns: length of matched atom if test is positive, 0 - can't tell, -1 if doesn't match
 int quickTestFwd(uint pc, dchar front, Program re)
 {
     static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
@@ -2442,103 +2447,1131 @@ struct Input(Char)
     regular expressions.
     low level construct, doesn't 'own' any memory
 +/
-struct BacktrackingMatcher(Char, Stream=Input!Char)
-    if(is(Char : dchar))
+template BacktrackingMatcher(alias hardcoded=char)
 {
-    struct State
-    {//top bit in pc is set if saved along with matches
+    struct BacktrackingMatcher(Char, Stream=Input!Char)
+        if(is(Char : dchar))
+    {
+        struct State
+        {//top bit in pc is set if saved along with matches
+            size_t index;
+            uint pc, counter, infiniteNesting;
+        }
+        alias const(Char)[] String;
+        Program re;           //regex program
+        enum initialStack = 2^^12;
+        enum dirtyBit = 1<<31;
+        //Stream state
+        Stream s;
         size_t index;
-        uint pc, counter, infiniteNesting;
-    }
-    alias const(Char)[] String;
-    Program re;           //regex program
-    enum initialStack = 2^^12;
-    enum dirtyBit = 1<<31;
-    //Stream state
-    Stream s;
-    size_t index;
-    dchar front;
-    bool exhausted;
-    bool seenCr;
-    //backtracking machine state
-    uint pc, counter;
-    uint lastState = 0;          //top of state stack
-    uint lastGroup = 0;       //ditto for matches
-    bool matchesDirty; //flag, true if there are unsaved changes to matches
-    size_t[] trackers;
-    uint infiniteNesting;
-    State[] states;
-    Group[] groupStack;//array list
-    Group[] matches;
+        dchar front;
+        bool exhausted;
+        bool seenCr;
+        //backtracking machine state
+        uint pc, counter;
+        uint lastState = 0;          //top of state stack
+        uint lastGroup = 0;       //ditto for matches
+        bool matchesDirty; //flag, true if there are unsaved changes to matches
+        size_t[] trackers;
+        uint infiniteNesting;
+        State[] states;
+        Group[] groupStack;//array list
+        Group[] matches;
     
-    ///
-    @property bool atStart(){ return index == 0; }
-    ///
-    @property bool atEnd(){ return index == s.lastIndex; }
-    ///
-    void next()
-    {    
-        seenCr = front == '\r';
-        if(!s.nextChar(front, index))
-            index = s.lastIndex;
-    }
-    ///
-    this(Program program, Stream stream)
-    {
-        re = program;
-        s = stream;
-        exhausted = false;
-        next();
-        trackers = new size_t[re.ngroup+1];
-        states = new State[initialStack];
-        groupStack = new Group[initialStack];
-    }
-    ///lookup next match, fills matches with indices into input
-    bool match(Group matches[])
-    {
-        debug(fred_matching)
-        {
-            writeln("------------------------------------------");
+        ///
+        @property bool atStart(){ return index == 0; }
+        ///
+        @property bool atEnd(){ return index == s.lastIndex; }
+        ///
+        void next()
+        {    
+            seenCr = front == '\r';
+            if(!s.nextChar(front, index))
+                index = s.lastIndex;
         }
-        if(exhausted) //all matches collected
-            return false;
-        this.matches = matches[1..$];
-        version(none)
+        ///
+        this(Program program, Stream stream)
         {
-            RegionAllocator alloc = newRegionAllocator();
-            trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
-            states = alloc.uninitializedArray!(State[])(initialStack);
-            groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+            re = program;
+            s = stream;
+            exhausted = false;
+            next();
+            trackers = new size_t[re.ngroup+1];
+            states = new State[initialStack];
+            groupStack = new Group[initialStack];
         }
-        for(;;)
+        ///lookup next match, fills matches with indices into input
+        bool match(Group matches[])
         {
+            debug(fred_matching)
+            {
+                writeln("------------------------------------------");
+            }
+            if(exhausted) //all matches collected
+                return false;
+            this.matches = matches[1..$];
+            version(none)
+            {
+                RegionAllocator alloc = newRegionAllocator();
+                trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
+                states = alloc.uninitializedArray!(State[])(initialStack);
+                groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+            }
+            for(;;)
+            {
             
-            size_t start = index;
-            if(matchImpl())
-            {//stream is updated here
-                matches[0].begin = start;
-                matches[0].end = index;
-                if(!(re.flags & RegexOption.global) || atEnd)
-                    exhausted = true;
-                if(start == index)//empty match advances input
+                size_t start = index;
+                if(matchImpl())
+                {//stream is updated here
+                    matches[0].begin = start;
+                    matches[0].end = index;
+                    if(!(re.flags & RegexOption.global) || atEnd)
+                        exhausted = true;
+                    if(start == index)//empty match advances input
+                        next();
+                    return true;
+                }
+                else
                     next();
-                return true;
+                if(atEnd)
+                    break;
+                next();
+            }
+            exhausted = true;
+            return false;
+        }
+        static if(is(typeof(hardcoded(this))))
+        {
+        /++
+            match subexpression against input, using provided malloc'ed array as stack,
+            results are stored in matches
+        +/
+        bool matchImpl()
+        {
+           return hardcoded(this);
+        }
+        }
+        else
+        {
+        bool matchImpl()
+        {
+            pc = 0;
+            counter = 0;
+            lastState = 0;
+            infiniteNesting = -1;// intentional
+            matchesDirty = false;
+            //setup first frame for incremental match storage
+            assert(groupStack.length >= matches.length);
+            groupStack[0 .. matches.length] = Group.init;
+            lastGroup = matches.length;        
+            auto start = index;
+            debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
+            while(pc<re.ir.length)
+            {
+                debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, s._index);
+                switch(re.ir[pc].code)
+                {
+                case IR.OrChar://assumes IRL!(OrChar) == 1
+                    if(atEnd)
+                        goto L_backtrack;
+                    uint len = re.ir[pc].sequence;
+                    uint end = pc + len;
+                    if(re.ir[pc].data != front && re.ir[pc+1].data != front)
+                    {
+                        for(pc = pc+2; pc<end; pc++)
+                            if(re.ir[pc].data == front)
+                                break;
+                        if(pc == end)
+                            goto L_backtrack;
+                    }
+                    pc = end;
+                    next();
+                    break;
+                case IR.Char:
+                    if(atEnd || front != re.ir[pc].data)
+                        goto L_backtrack;
+                    pc += IRL!(IR.Char);
+                    next();
+                break;
+                case IR.Any:
+                    if(atEnd)
+                        goto L_backtrack;
+                    pc += IRL!(IR.Any);
+                    next();
+                    break;
+                case IR.Charset:
+                    if(atEnd || !re.charsets[re.ir[pc].data][front])
+                        goto L_backtrack;
+                    next();
+                    pc += IRL!(IR.Charset);
+                    break;
+                case IR.Trie:
+                    if(atEnd || !re.tries[re.ir[pc].data][front])
+                        goto L_backtrack;
+                    next();
+                    pc += IRL!(IR.Trie);
+                    break;
+                case IR.Wordboundary:
+                    dchar back;
+                    size_t bi;
+                    //at start & end of input
+                    if(atStart && wordTrie[front])
+                    {
+                        pc += IRL!(IR.Wordboundary);
+                        break;
+                    }
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && wordTrie[back])
+                    {
+                        pc += IRL!(IR.Wordboundary);
+                        break;
+                    }
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = wordTrie[front];
+                        bool ab = wordTrie[back];
+                        if(af ^ ab)
+                        {
+                            pc += IRL!(IR.Wordboundary);
+                            break;
+                        }
+                    }
+                    goto L_backtrack;
+                    break;
+                case IR.Notwordboundary:
+                    dchar back;
+                    size_t bi;
+                    //at start & end of input
+                    if(atStart && !wordTrie[front])
+                        goto L_backtrack;
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && !isUniAlpha(back))
+                        goto L_backtrack;
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = wordTrie[front];
+                        bool ab = wordTrie[back];
+                        if(af ^ ab)
+                            goto L_backtrack;
+                    }
+                    pc += IRL!(IR.Wordboundary);
+                    break;
+                case IR.Bol:
+                    dchar back;
+                    size_t bi;
+                    //TODO: multiline & attributes, unicode line terminators
+                    if(atStart)
+                        pc += IRL!(IR.Bol);
+                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                        pc += IRL!(IR.Bol);
+                    else
+                        goto L_backtrack;
+                    break;
+                case IR.Eol:
+                    debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                    //no matching inside \r\n
+                    if(atEnd || ((front == '\n') ^ seenCr) || front == LS 
+                        || front == PS || front == NEL)
+                    {
+                        pc += IRL!(IR.Eol);
+                    }
+                    else
+                        goto L_backtrack;
+                    break;
+                case IR.InfiniteStart, IR.InfiniteQStart:
+                    trackers[infiniteNesting+1] = index;
+                    pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
+                    //now pc is at end IR.Infininite(Q)End
+                    uint len = re.ir[pc].data;
+                    int test;
+                    if(re.ir[pc].code == IR.InfiniteEnd)
+                    {
+                        test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
+                        if(test >= 0)//TODO: can do better if > 0 
+                            pushState(pc+IRL!(IR.InfiniteEnd), counter);
+                        infiniteNesting++;
+                        pc -= len;
+                    }
+                    else
+                    {
+                        test = quickTestFwd(pc - len, front, re);
+                        if(test >= 0)//TODO: can do better if > 0 
+                        {
+                            infiniteNesting++;
+                            pushState(pc - len, counter);
+                            infiniteNesting--;
+                        }
+                        pc += IRL!(IR.InfiniteEnd);
+                    }
+                    break;
+                case IR.RepeatStart, IR.RepeatQStart:
+                    pc += re.ir[pc].data + IRL!(IR.RepeatStart);
+                    break;
+                case IR.RepeatEnd:
+                case IR.RepeatQEnd:
+                    // len, step, min, max
+                    uint len = re.ir[pc].data;
+                    uint step =  re.ir[pc+1].raw;
+                    uint min = re.ir[pc+2].raw;
+                    uint max = re.ir[pc+3].raw;
+                    //debug(fred_matching) writefln("repeat pc=%u, counter=%u",pc,counter);
+
+                    if(counter < min)
+                    {
+                        counter += step;
+                        pc -= len;
+                    }
+                    else if(counter < max)
+                    {
+                        if(re.ir[pc].code == IR.RepeatEnd)
+                        {
+                            pushState(pc + IRL!(IR.RepeatEnd), counter%step);
+                            counter += step;
+                            pc -= len;
+                        }
+                        else
+                        {
+                            pushState(pc - len, counter + step);
+                            counter = counter%step;
+                            pc += IRL!(IR.RepeatEnd);
+                        }
+                    }
+                    else
+                    {
+                        counter = counter%step;
+                        pc += IRL!(IR.RepeatEnd);
+                    }
+                    break;
+                case IR.InfiniteEnd:
+                case IR.InfiniteQEnd:
+                    uint len = re.ir[pc].data;
+                    debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
+                    assert(infiniteNesting < trackers.length);
+
+                    if(trackers[infiniteNesting] == index)
+                    {//source not consumed
+                        pc += IRL!(IR.InfiniteEnd);
+                        infiniteNesting--;
+                        break;
+                    }
+                    else
+                        trackers[infiniteNesting] = index;
+                    int test;
+                    if(re.ir[pc].code == IR.InfiniteEnd)
+                    {
+                        test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
+                        if(test >= 0)
+                        {
+                            infiniteNesting--;
+                            pushState(pc + IRL!(IR.InfiniteEnd), counter);
+                            infiniteNesting++;
+                        }
+                        pc -= len;
+                    }
+                    else
+                    {
+                        test = quickTestFwd(pc-len, front, re);
+                        if(test >= 0)
+                            pushState(pc-len, counter);
+                        pc += IRL!(IR.InfiniteEnd);
+                        infiniteNesting--;
+                    }
+                    break;
+                case IR.OrEnd:
+                    pc += IRL!(IR.OrEnd);
+                    break;
+                case IR.OrStart:
+                    pc += IRL!(IR.OrStart);
+                    goto case;
+                case IR.Option:
+                    uint len = re.ir[pc].data;
+                    if(re.ir[pc+len].code == IR.GotoEndOr)//not a last one
+                    {
+                        pushState(pc + len + IRL!(IR.Option), counter); //remember 2nd branch
+                    }
+                    pc += IRL!(IR.Option);
+                    break;
+                case IR.GotoEndOr:
+                    pc = pc + re.ir[pc].data + IRL!(IR.GotoEndOr);
+                    break;
+                case IR.GroupStart:
+                    uint n = re.ir[pc].data;
+                    matches[n-1].begin = index;//the first is sliced out
+                    matchesDirty = true;
+                    debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
+                    pc += IRL!(IR.GroupStart);
+                    break;
+                case IR.GroupEnd:
+                    uint n = re.ir[pc].data;
+                    matches[n-1].end = index;//the first is sliced out
+                    matchesDirty = true;
+                    debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
+                    pc += IRL!(IR.GroupEnd);
+                    break;
+                /*case IR.LookaheadStart:
+                case IR.NeglookaheadStart:
+                    uint len = re.ir[pc].data;
+                    auto save = index;
+                    auto ch = front;
+                    uint matched = matchImpl(re.ir[pc+1 .. pc+1+len], matches);
+                    s.reset(save);
+                    front = ch;
+                    if(matched ^ (re.ir[pc].code == IR.LookaheadStart))
+                        goto L_backtrack;
+                    pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + len;
+                    break;*/
+                case IR.LookbehindStart:
+                case IR.NeglookbehindStart:
+                    uint len = re.ir[pc].data;
+                    auto prog = re;
+                    prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
+                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack);
+                    backMatcher.matches = matches;
+                    bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
+                    if(!match)
+                        goto L_backtrack;
+                    else
+                    {
+                        pc += IRL!(IR.LookbehindStart)+len+IRL!(IR.LookbehindEnd);
+                        matchesDirty = true;
+                    }
+                    break;
+                case IR.Backref:
+                    uint n = re.ir[pc].data;
+                    auto referenced = s[matches[n-1].begin .. matches[n-1].end];
+                    while(!atEnd && !referenced.empty && front == referenced.front)
+                    {
+                        next();
+                        referenced.popFront();
+                    }
+                    if(referenced.empty)
+                        pc++;
+                    else
+                        goto L_backtrack;
+                    break;
+                    case IR.Nop:
+                    pc += IRL!(IR.Nop);
+                    break;
+                case IR.LookaheadEnd:
+                case IR.NeglookaheadEnd:
+                    return true;
+                default:
+                    assert(0);
+                L_backtrack:
+                    if(!popState())
+                    {
+                        s.reset(start);
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        }
+        /*
+            helper function saves engine state
+        */
+        void pushState(uint pc, uint counter)
+        {
+            if(matchesDirty)
+            {
+                if(lastGroup >= groupStack.length)
+                    groupStack.length *= 2;
+                lastGroup += matches.length;
+                groupStack[lastGroup-matches.length .. lastGroup] = matches[];
+                debug(fred_matching)
+                {
+                    writeln("Saved matches");
+                    foreach(i, m; matches)
+                        writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
+                }
+            }
+            if(lastState >= states.length)
+                states.length *= 2;
+            states[lastState++] = State(index, matchesDirty ? pc | dirtyBit : pc , counter, infiniteNesting);
+            matchesDirty = false;
+            debug(fred_matching)
+                writefln("Saved front: %s src: %s", front, s[index..s.lastIndex]);
+        }
+        //helper function restores engine state        
+        bool popState()
+        {
+            if(!lastState)
+                return false;
+            auto state = states[--lastState];
+            index = state.index;
+            pc = state.pc;
+            counter = state.counter;
+            infiniteNesting = state.infiniteNesting;
+            if(pc & dirtyBit)
+            {
+                pc ^= dirtyBit;
+                matches[] = groupStack[lastGroup-matches.length .. lastGroup];
+                lastGroup -= matches.length;
+                matchesDirty = false;
+                debug(fred_matching)
+                {
+                    writefln("Restored matches", front, s[index .. s.lastIndex]);
+                    foreach(i, m; matches)
+                        writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
+                }
+            }
+            else if(matchesDirty)// since last save there were changes not saved onces
+            {
+                matches[] = groupStack[lastGroup-matches.length .. lastGroup];//take from previous save point
+                matchesDirty = false;
+            }
+            s.reset(index);
+            next();
+            debug(fred_matching)
+                writefln("Backtracked front: %s src: %s", front, s[index..s.lastIndex]);
+            return true;
+        }
+        /++
+            Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
+            Results are stored in matches
+        ++/
+        bool matchBackImpl()
+        {
+            pc = re.ir.length-1;
+            counter = 0;
+            lastState = 0;
+            infiniteNesting = -1;// intentional
+            matchesDirty = false;
+            version(none)
+            {
+                RegionAllocator alloc = newRegionAllocator();
+                trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
+                states = alloc.uninitializedArray!(State[])(initialStack);
+                groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+            }
+            //setup first frame for incremental match storage
+            assert(groupStack.length >= matches.length);
+            groupStack[0 .. matches.length] = Group.init;
+            lastGroup += matches.length;
+            auto start = index;
+            debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
+            for(;;)
+            {
+                debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, retro(s[index..s.lastIndex]));
+                switch(re.ir[pc].code)
+                {
+                case IR.OrChar://assumes IRL!(OrChar) == 1
+                    if(atEnd)
+                        goto L_backtrack;
+                    uint len = re.ir[pc].sequence;
+                    uint end = pc - len;
+                    if(re.ir[pc].data != front && re.ir[pc-1].data != front)
+                    {
+                        for(pc = pc-2; pc>end; pc--)
+                            if(re.ir[pc].data == front)
+                                break;
+                        if(pc == end)
+                            goto L_backtrack;
+                    }
+                    pc = end;
+                    next();
+                    break;
+                case IR.Char:
+                    if(atEnd || front != re.ir[pc].data)
+                       goto L_backtrack;
+                    pc--;
+                    next();
+                break;
+                case IR.Any:
+                    if(atEnd)
+                        goto L_backtrack;
+                    pc--;
+                    next();
+                    break;
+                case IR.Charset:
+                    if(atEnd || !re.charsets[re.ir[pc].data][front])
+                        goto L_backtrack;
+                    next();
+                    pc--;
+                    break;
+                case IR.Trie:
+                    if(atEnd || !re.tries[re.ir[pc].data][front])
+                        goto L_backtrack;
+                    next();
+                    pc--;
+                    break;
+                case IR.Wordboundary:
+                    dchar back;
+                    size_t bi;
+                    //at start & end of input
+                    if(atStart && wordTrie[front])
+                    {
+                        pc--;
+                        break;
+                    }
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && wordTrie[back])
+                    {
+                        pc--;
+                        break;
+                    }
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = wordTrie[front];
+                        bool ab = wordTrie[back];
+                        if(af ^ ab)
+                        {
+                            pc--;
+                            break;
+                        }
+                    }
+                    goto L_backtrack;
+                    break;
+                case IR.Notwordboundary:
+                    dchar back;
+                    size_t bi;
+                    //at start & end of input
+                    if(atStart && !wordTrie[front])
+                        goto L_backtrack;
+                    else if(atEnd && s.loopBack.nextChar(back, bi)
+                            && !wordTrie[back])
+                        goto L_backtrack;
+                    else if(s.loopBack.nextChar(back, index))
+                    {
+                        bool af = wordTrie[front];
+                        bool ab = wordTrie[back];
+                        if(af ^ ab)
+                           goto L_backtrack;
+                    }
+                    pc--;
+                    break;
+                case IR.Bol:
+                    dchar back;
+                    size_t bi;
+                    //TODO: multiline & attributes, unicode line terminators
+                    if(atStart)
+                        pc--;
+                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                        pc--;
+                    else
+                        goto L_backtrack;
+                    break;
+                case IR.Eol:
+                    debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                    //no matching inside \r\n
+                    if(((front == '\n') ^ seenCr) || front == LS 
+                        || front == PS || front == NEL)
+                    {
+                        pc -= IRL!(IR.Eol);
+                    }
+                    else
+                        goto L_backtrack;
+                    break;
+                case IR.InfiniteStart, IR.InfiniteQStart:
+                    uint len = re.ir[pc].data;
+                    assert(infiniteNesting < trackers.length);
+                    if(trackers[infiniteNesting] == index)
+                    {//source not consumed
+                        pc--; //out of loop
+                        infiniteNesting--;
+                        break;
+                    }
+                    else
+                        trackers[infiniteNesting] = index;
+                    if(re.ir[pc].code == IR.InfiniteStart)//greedy
+                    {
+                        infiniteNesting--;
+                        pushState(pc-1, counter);//out of loop
+                        infiniteNesting++;
+                        pc += len;
+                    }
+                    else
+                    {
+                        pushState(pc+len, counter);
+                        pc--;
+                        infiniteNesting--;
+                    }
+                    break;
+                case IR.InfiniteEnd:
+                case IR.InfiniteQEnd://now it's a start
+                    uint len = re.ir[pc].data;
+                    trackers[infiniteNesting+1] = index;
+                    pc -= len+IRL!(IR.InfiniteStart);
+                    assert(re.ir[pc].code == IR.InfiniteStart || re.ir[pc].code == IR.InfiniteQStart);
+                    debug(fred_matching) writeln("(backmatch) Infinite nesting:", infiniteNesting);
+                    if(re.ir[pc].code == IR.InfiniteStart)//greedy
+                    {
+                        pushState(pc-1, counter);
+                        infiniteNesting++;
+                        pc += len;
+                    }
+                    else
+                    {
+                        infiniteNesting++;
+                        pushState(pc + len, counter);
+                        infiniteNesting--;
+                        pc--;
+                    }
+                    break;
+                case IR.RepeatStart, IR.RepeatQStart:
+                    uint len = re.ir[pc].data;
+                    uint tail = pc + len + 1;
+                    uint step =  re.ir[tail+1].raw;
+                    uint min = re.ir[tail+2].raw;
+                    uint max = re.ir[tail+3].raw;
+                    if(counter < min)
+                    {
+                        counter += step;
+                        pc += len;
+                    }
+                    else if(counter < max)
+                    {
+                        if(re.ir[pc].code == IR.RepeatStart)//greedy
+                        {
+                            pushState(pc-1, counter%step);
+                            counter += step;
+                            pc += len;
+                        }
+                        else
+                        {
+                            pushState(pc + len, counter + step);
+                            counter = counter%step;
+                            pc--;
+                        }
+                    }
+                    else
+                    {
+                        counter = counter%step;
+                        pc--;
+                    }
+                    break;
+                case IR.RepeatEnd:
+                case IR.RepeatQEnd:
+                    pc -= re.ir[pc].data+IRL!(IR.RepeatStart);
+                    assert(re.ir[pc].code == IR.RepeatStart || re.ir[pc].code == IR.RepeatQStart);
+                    goto case IR.RepeatStart;
+                case IR.OrEnd:
+                    uint len = re.ir[pc].data;
+                    pc -= len;
+                    assert(re.ir[pc].code == IR.Option);
+                    len = re.ir[pc].data;
+                    auto pc_save = pc+len-1;
+                    pc = pc + len + IRL!(IR.Option);
+                    while(re.ir[pc].code == IR.Option)
+                    {
+                        pushState(pc-IRL!(IR.GotoEndOr)-1, counter);
+                        len = re.ir[pc].data;
+                        pc += len + IRL!(IR.Option);
+                    }
+                    assert(re.ir[pc].code == IR.OrEnd);
+                    pc--;
+                    if(pc != pc_save)
+                    {
+                        pushState(pc, counter);
+                        pc = pc_save;
+                    }
+                    break;
+                case IR.OrStart:
+                    assert(0);
+                case IR.Option:
+                    assert(re.ir[pc].code == IR.Option);
+                    pc += re.ir[pc].data + IRL!(IR.Option);
+                    if(re.ir[pc].code == IR.Option)
+                    {
+                        pc--;//hackish, assumes size of IR.Option == 1
+                        if(re.ir[pc].code == IR.GotoEndOr)
+                        {
+                            pc += re.ir[pc].data + IRL!(IR.GotoEndOr);
+                        }
+                    
+                    }
+                    assert(re.ir[pc].code == IR.OrEnd);
+                    pc -= re.ir[pc].data + IRL!(IR.OrStart)+1;
+                    break;
+                case IR.GotoEndOr:
+                    assert(0);
+                case IR.GroupStart:
+                    uint n = re.ir[pc].data;
+                    matches[n-1].begin = index;
+                    matchesDirty = true;
+                    debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
+                    pc --;
+                    break;
+                case IR.GroupEnd:  
+                    uint n = re.ir[pc].data;
+                    matches[n-1].end = index;
+                    matchesDirty = true;
+                    debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
+                    pc --;
+                    break;
+                case IR.LookaheadStart:
+                case IR.NeglookaheadStart:
+                case IR.LookaheadEnd:
+                case IR.NeglookaheadEnd:
+                case IR.LookbehindEnd:
+                case IR.NeglookbehindEnd:
+                    assert(0, "No lookaround in look back");
+                case IR.Backref:
+                    uint n = re.ir[pc].data;
+                    auto referenced = s[matches[n].begin .. matches[n].end];
+                    while(!atEnd && !referenced.empty && front == referenced.front)
+                    {
+                        next();
+                        referenced.popFront();
+                    }
+                    if(referenced.empty)
+                        pc--;
+                    else
+                        goto L_backtrack;
+                    break;
+                 case IR.Nop:
+                    pc --;
+                    break;
+                case IR.LookbehindStart:
+                case IR.NeglookbehindStart:
+                    return true;
+                default:
+                    assert(re.ir[pc].code < 0x80);
+                    pc --; //data 
+                    break;
+                L_backtrack:
+                    if(!popState())
+                    {
+                        s.reset(start);
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+    }
+}
+/// state of codegenerator
+struct CtState
+{
+    string code;
+    int addr;
+}
+//very shitty string formatter, $$ replace with next argument converted to string
+string ctSub( U...)(string format, U args)
+{
+    bool seenDollar;
+    foreach(i, ch; format)
+    {
+        if(ch == '$')
+        {
+            if(seenDollar)
+            {
+                static if(args.length > 0)
+                {
+                    return  format[0..i-1] ~ to!string(args[0]) ~ ctSub(format[i+1..$], args[1..$]);
+                }
+                else
+                    assert(0);
             }
             else
-                next();
-            if(atEnd)
-                break;
-            next();
+                seenDollar = true;                                       
         }
-        exhausted = true;
-        return false;
+        else
+            seenDollar = false;      
+            
     }
-    /++
-        match subexpression against input, using provided malloc'ed array as stack,
-        results are stored in matches
-    +/
-    bool matchImpl()
+    return format;
+}
+///
+CtState ctGenBlock(Bytecode[] ir, int addr)
+{
+    CtState result;
+    result.addr = addr;
+    while(!ir.empty)
     {
+        auto n = ctGenGroup(ir, result.addr);
+        result.code ~= n.code;
+        result.addr = n.addr;
+    }
+    return result;
+}
+
+///
+CtState ctGenGroup(ref Bytecode[] ir, int addr)
+{
+    CtState result;
+    assert(!ir.empty);
+    switch(ir[0].code)
+    {
+    case IR.InfiniteStart, IR.InfiniteQStart, IR.RepeatStart:
+        uint len = ir[0].data;
+        auto nir = ir[ir[0].length .. ir[0].length+len];
+        result = ctGenBlock(nir, addr+1);
+        //start/end codegen
+        //result.addr is at last test+ jump of loop, addr+1 is body of loop
+        nir = ir[ir[0].length+len..$];
+        result.code = ctGenFixupCode(ir[0..ir[0].length], addr, result.addr) ~ result.code;
+        result.code ~= ctGenFixupCode(nir, result.addr, addr+1);
+        result.addr += 1;   //account end instruction
+        ir = nir;
+        break;
+    case IR.OrStart:
+        assert(0);
+        break;
+    default:
+        assert(ir[0].isAtom,  text(ir[0].mnemonic));
+        result = ctGenAtom(ir, addr);
+    }
+    return result;
+}
+///
+string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
+{
+    string r;
+    assert(ir[0].isStart || ir[0].isEnd);
+    switch(ir[0].code)
+    {
+    case IR.InfiniteStart,IR.InfiniteQStart:
+            r = ctSub( `
+                case $$:
+                    trackers[++infiniteNesting] = size_t.max;
+                    goto case $$;`, addr, fixup);
+            ir = ir[ir[0].length..$];
+            break;
+    case IR.InfiniteEnd:
+            r = ctSub( `
+                case $$:
+                    debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
+                    assert(infiniteNesting < trackers.length);
+                    if(trackers[infiniteNesting] == index)
+                    {//source not consumed
+                        infiniteNesting--;
+                        goto case;
+                    }
+                    trackers[infiniteNesting] = index;
+
+                    infiniteNesting--;
+                    pushState(pc+1, counter);
+                    infiniteNesting++;
+                    goto case $$;`, addr, fixup);
+            ir = ir[ir[0].length..$];
+            break;
+    case IR.InfiniteQEnd:
+            r = ctSub( `
+                case $$:
+                    debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
+                    assert(infiniteNesting < trackers.length);
+                    if(trackers[infiniteNesting] == index)
+                    {//source not consumed
+                        infiniteNesting--;
+                        goto case;
+                    }
+                    trackers[infiniteNesting] = index;
+
+                    pushState($$, counter);
+                    infiniteNesting--;
+                    goto case;`, addr, fixup);
+            ir = ir[ir[0].length..$];
+            break;
+    case IR.OrStart:
+
+            ctSub( `
+                    `, addr, fixup);
+            break;
+    default:
+        assert(0);
+    }
+    return r;
+}
+
+///process & generate source for the simple bytecodes at front of ir using address addr
+CtState ctGenAtom(ref Bytecode[] ir, int addr)
+{
+    CtState result;
+    switch(ir[0].code)
+    {
+    case IR.OrChar://assumes IRL!(OrChar) == 1
+        result.code ~=  ctSub( `
+            case $$:
+                if(atEnd)
+                    goto L_backtrack;`, addr);
+        uint len = ir[0].sequence;
+        for(uint i = 0; i<len; i++)
+        {
+            result.code ~= ctSub( `
+                if(front == $$)
+                {
+                    next();
+                    goto case;
+                }`,  ir[i].data);
+        }
+        result.code ~= ctSub( `
+            goto L_backtrack;`);
+        result.addr = addr + 1;
+        ir.popFrontN(len);
+        break;
+    case IR.Char:
+        result.code ~= ctSub( `
+            case $$:
+                if(atEnd || front != $$)
+                    goto L_backtrack;
+                next();
+                goto case;`, addr, ir[0].data);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Any:
+        result.code ~= ctSub( `
+            case $$:
+                if(atEnd)
+                    goto L_backtrack;
+                next();
+                goto case;`, addr);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Charset:
+        result.code ~= ctSub( `
+            case $$:
+                if(atEnd || !re.charsets[$$][front])
+                    goto L_backtrack;
+                next();
+            goto case;`, addr, ir[0].data);
+        result.addr = addr + 1;
+        ir.popFront();
+    case IR.Trie:
+        result.code ~= ctSub( `
+            case $$:
+                if(atEnd || !re.tries[$$][front])
+                    goto L_backtrack;
+                next();
+            goto case;`, addr, ir[0].data);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Wordboundary:
+        result.code ~= ctSub( `
+        case $$:
+            dchar back;
+            size_t bi;
+            if(atStart && wordTrie[front])
+            {
+                goto case;
+            }
+            else if(atEnd && s.loopBack.nextChar(back, bi)
+                    && wordTrie[back])
+            {
+                goto case;
+            }
+            else if(s.loopBack.nextChar(back, bi))
+            {
+                bool af = wordTrie[front];
+                bool ab = wordTrie[back];
+                if(af ^ ab)
+                {
+                    goto case;
+                }
+            }
+            goto L_backtrack;`, addr);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Notwordboundary:
+        result.code ~= ctSub( `
+        case $$:
+            dchar back;
+            size_t bi;
+            //at start & end of input
+            if(atStart && !wordTrie[front])
+                goto L_backtrack;
+            else if(atEnd && s.loopBack.nextChar(back, bi)
+                    && !wordTrie[back])
+                goto L_backtrack;
+            else if(s.loopBack.nextChar(back, index))
+            {
+                bool af = wordTrie[front];
+                bool ab = wordTrie[back];
+                if(af ^ ab)
+                    goto L_backtrack;
+            }
+            goto case;`, addr);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Bol:
+        result.code ~= ctSub(`
+        case $$:
+            dchar back;
+            size_t bi;
+            if(atStart)
+                goto case;
+            else if(s.loopBack.nextChar(back,bi) && back == '\n')
+                goto case;
+            else
+                goto L_backtrack;
+            `, addr);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Eol:
+        result.code ~= ctSub(`
+        case $$:
+            debug(fred_matching) writefln("EOL (seen CR: %$$, front 0x%%x) %$$", seenCr, front, s[index..s.lastIndex]);
+            //no matching inside \r\n
+            if(atEnd || ((front == '\n') ^ seenCr) || front == LS
+                || front == PS || front == NEL)
+            {
+                goto case;
+            }
+            else
+                goto L_backtrack;`, addr);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.GroupStart:
+        result.code ~= ctSub(`
+        case $$:
+            matches[$$].begin = index;
+            matchesDirty = true;
+            debug(fred_matching) writefln("IR group #%%u starts at %%u", $$+1, index);
+            goto case;`, addr, ir[0].data-1, ir[0].data-1);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.GroupEnd:
+        result.code ~= ctSub(`
+        case $$:
+            matches[$$].end = index;
+            matchesDirty = true;
+            debug(fred_matching) writefln("IR group #%%u ends at %%u", $$+1, index);
+            goto case;`, addr, ir[0].data-1, ir[0].data-1);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Backref:
+        result.code ~= ctSub( `
+        case $$:
+            auto referenced = s[matches[$$].begin .. matches[$$].end];
+            while(!atEnd && !referenced.empty && front == referenced.front)
+            {
+                next();
+                referenced.popFront();
+            }
+            if(referenced.empty)
+                goto case;
+            else
+                goto L_backtrack;
+            break;`, addr, ir[0].data-1, ir[0].data-1);
+        result.addr = addr + 1;
+        ir.popFront();
+        break;
+    case IR.Nop:
+        result.addr = addr;
+        ir.popFront();
+        break;
+    default:
+        assert(0, text(ir[0].mnemonic));
+    }
+    return result;
+}
+
+string ctGenProgram(Bytecode[] ir)
+{
+    auto r = `
+        with(matcher)
+        {
         pc = 0;
         counter = 0;
         lastState = 0;
@@ -2549,682 +3582,32 @@ struct BacktrackingMatcher(Char, Stream=Input!Char)
         groupStack[0 .. matches.length] = Group.init;
         lastGroup = matches.length;        
         auto start = index;
-        debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
-        while(pc<re.ir.length)
+        debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]); 
+    StartLoop:
+        switch(pc)
         {
-            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, s._index);
-            switch(re.ir[pc].code)
+    `;
+    auto bdy = ctGenBlock(ir, 0);
+    r ~= bdy.code;
+    r ~= ctSub(`
+            case $$: break;`,bdy.addr);
+    r ~= `
+        default:
+            assert(0);
+        L_backtrack:
+            if(!popState())
             {
-            case IR.OrChar://assumes IRL!(OrChar) == 1
-                if(atEnd)
-                    goto L_backtrack;
-                uint len = re.ir[pc].sequence;
-                uint end = pc + len;
-                if(re.ir[pc].data != front && re.ir[pc+1].data != front)
-                {
-                    for(pc = pc+2; pc<end; pc++)
-                        if(re.ir[pc].data == front)
-                            break;
-                    if(pc == end)
-                        goto L_backtrack;
-                }
-                pc = end;
-                next();
-                break;
-            case IR.Char:
-                if(atEnd || front != re.ir[pc].data)
-                    goto L_backtrack;
-                pc += IRL!(IR.Char);
-                next();
-            break;
-            case IR.Any:
-                if(atEnd)
-                    goto L_backtrack;
-                pc += IRL!(IR.Any);
-                next();
-                break;
-            case IR.Charset:
-                if(atEnd || !re.charsets[re.ir[pc].data][front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Charset);
-                break;
-            case IR.Trie:
-                if(atEnd || !re.tries[re.ir[pc].data][front])
-                    goto L_backtrack;
-                next();
-                pc += IRL!(IR.Trie);
-                break;
-            case IR.Wordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && wordTrie[front])
-                {
-                    pc += IRL!(IR.Wordboundary);
-                    break;
-                }
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordTrie[back])
-                {
-                    pc += IRL!(IR.Wordboundary);
-                    break;
-                }
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front];
-                    bool ab = wordTrie[back];
-                    if(af ^ ab)
-                    {
-                        pc += IRL!(IR.Wordboundary);
-                        break;
-                    }
-                }
-                goto L_backtrack;
-                break;
-            case IR.Notwordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && !wordTrie[front])
-                    goto L_backtrack;
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !isUniAlpha(back))
-                    goto L_backtrack;
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front];
-                    bool ab = wordTrie[back];
-                    if(af ^ ab)
-                        goto L_backtrack;
-                }
-                pc += IRL!(IR.Wordboundary);
-                break;
-            case IR.Bol:
-                dchar back;
-                size_t bi;
-                //TODO: multiline & attributes, unicode line terminators
-                if(atStart)
-                    pc += IRL!(IR.Bol);
-                else if(s.loopBack.nextChar(back,bi) && back == '\n') 
-                    pc += IRL!(IR.Bol);
-                else
-                    goto L_backtrack;
-                break;
-            case IR.Eol:
-                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
-                //no matching inside \r\n
-                if(atEnd || ((front == '\n') ^ seenCr) || front == LS 
-                    || front == PS || front == NEL)
-                {
-                    pc += IRL!(IR.Eol);
-                }
-                else
-                    goto L_backtrack;
-                break;
-            case IR.InfiniteStart, IR.InfiniteQStart:
-                trackers[infiniteNesting+1] = index;
-                pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
-                //now pc is at end IR.Infininite(Q)End
-                uint len = re.ir[pc].data;
-                int test;
-                if(re.ir[pc].code == IR.InfiniteEnd)
-                {
-                    test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
-                    if(test >= 0)//TODO: can do better if > 0 
-                        pushState(pc+IRL!(IR.InfiniteEnd), counter);
-                    infiniteNesting++;
-                    pc -= len;
-                }
-                else
-                {
-                    test = quickTestFwd(pc - len, front, re);
-                    if(test >= 0)//TODO: can do better if > 0 
-                    {
-                        infiniteNesting++;
-                        pushState(pc - len, counter);
-                        infiniteNesting--;
-                    }
-                    pc += IRL!(IR.InfiniteEnd);
-                }
-                break;
-            case IR.RepeatStart, IR.RepeatQStart:
-                pc += re.ir[pc].data + IRL!(IR.RepeatStart);
-                break;
-            case IR.RepeatEnd:
-            case IR.RepeatQEnd:
-                // len, step, min, max
-                uint len = re.ir[pc].data;
-                uint step =  re.ir[pc+1].raw;
-                uint min = re.ir[pc+2].raw;
-                uint max = re.ir[pc+3].raw;
-                //debug(fred_matching) writefln("repeat pc=%u, counter=%u",pc,counter);
-
-                if(counter < min)
-                {
-                    counter += step;
-                    pc -= len;
-                }
-                else if(counter < max)
-                {
-                    if(re.ir[pc].code == IR.RepeatEnd)
-                    {
-                        pushState(pc + IRL!(IR.RepeatEnd), counter%step);
-                        counter += step;
-                        pc -= len;
-                    }
-                    else
-                    {
-                        pushState(pc - len, counter + step);
-                        counter = counter%step;
-                        pc += IRL!(IR.RepeatEnd);
-                    }
-                }
-                else
-                {
-                    counter = counter%step;
-                    pc += IRL!(IR.RepeatEnd);
-                }
-                break;
-            case IR.InfiniteEnd:
-            case IR.InfiniteQEnd:
-                uint len = re.ir[pc].data;
-                debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
-                assert(infiniteNesting < trackers.length);
-
-                if(trackers[infiniteNesting] == index)
-                {//source not consumed
-                    pc += IRL!(IR.InfiniteEnd);
-                    infiniteNesting--;
-                    break;
-                }
-                else
-                    trackers[infiniteNesting] = index;
-                int test;
-                if(re.ir[pc].code == IR.InfiniteEnd)
-                {
-                    test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
-                    if(test >= 0)
-                    {
-                        infiniteNesting--;
-                        pushState(pc + IRL!(IR.InfiniteEnd), counter);
-                        infiniteNesting++;
-                    }
-                    pc -= len;
-                }
-                else
-                {
-                    test = quickTestFwd(pc-len, front, re);
-                    if(test >= 0)
-                        pushState(pc-len, counter);
-                    pc += IRL!(IR.InfiniteEnd);
-                    infiniteNesting--;
-                }
-                break;
-            case IR.OrEnd:
-                pc += IRL!(IR.OrEnd);
-                break;
-            case IR.OrStart:
-                pc += IRL!(IR.OrStart);
-                goto case;
-            case IR.Option:
-                uint len = re.ir[pc].data;
-                if(re.ir[pc+len].code == IR.GotoEndOr)//not a last one
-                {
-                    pushState(pc + len + IRL!(IR.Option), counter); //remember 2nd branch
-                }
-                pc += IRL!(IR.Option);
-                break;
-            case IR.GotoEndOr:
-                pc = pc + re.ir[pc].data + IRL!(IR.GotoEndOr);
-                break;
-            case IR.GroupStart:
-                uint n = re.ir[pc].data;
-                matches[n-1].begin = index;//the first is sliced out
-                matchesDirty = true;
-                debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
-                pc += IRL!(IR.GroupStart);
-                break;
-            case IR.GroupEnd:
-                uint n = re.ir[pc].data;
-                matches[n-1].end = index;//the first is sliced out
-                matchesDirty = true;
-                debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
-                pc += IRL!(IR.GroupEnd);
-                break;
-            /*case IR.LookaheadStart:
-            case IR.NeglookaheadStart:
-                uint len = re.ir[pc].data;
-                auto save = index;
-                auto ch = front;
-                uint matched = matchImpl(re.ir[pc+1 .. pc+1+len], matches);
-                s.reset(save);
-                front = ch;
-                if(matched ^ (re.ir[pc].code == IR.LookaheadStart))
-                    goto L_backtrack;
-                pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + len;
-                break;*/
-            case IR.LookbehindStart:
-            case IR.NeglookbehindStart:
-                uint len = re.ir[pc].data;
-                auto prog = re;
-                prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
-                auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack);
-                backMatcher.matches = matches;
-                bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
-                if(!match)
-                    goto L_backtrack;
-                else
-                {
-                    pc += IRL!(IR.LookbehindStart)+len+IRL!(IR.LookbehindEnd);
-                    matchesDirty = true;
-                }
-                break;
-            case IR.Backref:
-                uint n = re.ir[pc].data;
-                auto referenced = s[matches[n-1].begin .. matches[n-1].end];
-                while(!atEnd && !referenced.empty && front == referenced.front)
-                {
-                    next();
-                    referenced.popFront();
-                }
-                if(referenced.empty)
-                    pc++;
-                else
-                    goto L_backtrack;
-                break;
-                case IR.Nop:
-                pc += IRL!(IR.Nop);
-                break;
-            case IR.LookaheadEnd:
-            case IR.NeglookaheadEnd:
-                return true;
-            default:
-                assert(0);
-            L_backtrack:
-                if(!popState())
-                {
-                    s.reset(start);
-                    return false;
-                }
+                s.reset(start);
+                return false;
             }
+            else
+                goto StartLoop;
         }
         return true;
-    }
-    /*
-        helper function saves engine state
-    */
-    void pushState(uint pc, uint counter)
-    {
-        if(matchesDirty)
-        {
-            if(lastGroup >= groupStack.length)
-                groupStack.length *= 2;
-            lastGroup += matches.length;
-            groupStack[lastGroup-matches.length .. lastGroup] = matches[];
-            debug(fred_matching)
-            {
-                writeln("Saved matches");
-                foreach(i, m; matches)
-                    writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
-            }
         }
-        if(lastState >= states.length)
-            states.length *= 2;
-        states[lastState++] = State(index, matchesDirty ? pc | dirtyBit : pc , counter, infiniteNesting);
-        matchesDirty = false;
-        debug(fred_matching)
-            writefln("Saved front: %s src: %s", front, s[index..s.lastIndex]);
-    }
-    //helper function restores engine state        
-    bool popState()
-    {
-        if(!lastState)
-            return false;
-        auto state = states[--lastState];
-        index = state.index;
-        pc = state.pc;
-        counter = state.counter;
-        infiniteNesting = state.infiniteNesting;
-        if(pc & dirtyBit)
-        {
-            pc ^= dirtyBit;
-            matches[] = groupStack[lastGroup-matches.length .. lastGroup];
-            lastGroup -= matches.length;
-            matchesDirty = false;
-            debug(fred_matching)
-            {
-                writefln("Restored matches", front, s[index .. s.lastIndex]);
-                foreach(i, m; matches)
-                    writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
-            }
-        }
-        else if(matchesDirty)// since last save there were changes not saved onces
-        {
-            matches[] = groupStack[lastGroup-matches.length .. lastGroup];//take from previous save point
-            matchesDirty = false;
-        }
-        s.reset(index);
-        next();
-        debug(fred_matching)
-            writefln("Backtracked front: %s src: %s", front, s[index..s.lastIndex]);
-        return true;
-    }
-    /++
-        Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
-        Results are stored in matches
-    ++/
-    bool matchBackImpl()
-    {
-        pc = re.ir.length-1;
-        counter = 0;
-        lastState = 0;
-        infiniteNesting = -1;// intentional
-        matchesDirty = false;
-        version(none)
-        {
-            RegionAllocator alloc = newRegionAllocator();
-            trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
-            states = alloc.uninitializedArray!(State[])(initialStack);
-            groupStack = alloc.uninitializedArray!(Group[])(initialStack);
-        }
-        //setup first frame for incremental match storage
-        assert(groupStack.length >= matches.length);
-        groupStack[0 .. matches.length] = Group.init;
-        lastGroup += matches.length;
-        auto start = index;
-        debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
-        for(;;)
-        {
-            debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, retro(s[index..s.lastIndex]));
-            switch(re.ir[pc].code)
-            {
-            case IR.OrChar://assumes IRL!(OrChar) == 1
-                if(atEnd)
-                    goto L_backtrack;
-                uint len = re.ir[pc].sequence;
-                uint end = pc - len;
-                if(re.ir[pc].data != front && re.ir[pc-1].data != front)
-                {
-                    for(pc = pc-2; pc>end; pc--)
-                        if(re.ir[pc].data == front)
-                            break;
-                    if(pc == end)
-                        goto L_backtrack;
-                }
-                pc = end;
-                next();
-                break;
-            case IR.Char:
-                if(atEnd || front != re.ir[pc].data)
-                   goto L_backtrack;
-                pc--;
-                next();
-            break;
-            case IR.Any:
-                if(atEnd)
-                    goto L_backtrack;
-                pc--;
-                next();
-                break;
-            case IR.Charset:
-                if(atEnd || !re.charsets[re.ir[pc].data][front])
-                    goto L_backtrack;
-                next();
-                pc--;
-                break;
-            case IR.Trie:
-                if(atEnd || !re.tries[re.ir[pc].data][front])
-                    goto L_backtrack;
-                next();
-                pc--;
-                break;
-            case IR.Wordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && wordTrie[front])
-                {
-                    pc--;
-                    break;
-                }
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordTrie[back])
-                {
-                    pc--;
-                    break;
-                }
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front];
-                    bool ab = wordTrie[back];
-                    if(af ^ ab)
-                    {
-                        pc--;
-                        break;
-                    }
-                }
-                goto L_backtrack;
-                break;
-            case IR.Notwordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && !wordTrie[front])
-                    goto L_backtrack;
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordTrie[back])
-                    goto L_backtrack;
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front];
-                    bool ab = wordTrie[back];
-                    if(af ^ ab)
-                       goto L_backtrack;
-                }
-                pc--;
-                break;
-            case IR.Bol:
-                dchar back;
-                size_t bi;
-                //TODO: multiline & attributes, unicode line terminators
-                if(atStart)
-                    pc--;
-                else if(s.loopBack.nextChar(back,bi) && back == '\n') 
-                    pc--;
-                else
-                    goto L_backtrack;
-                break;
-            case IR.Eol:
-                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
-                //no matching inside \r\n
-                if(((front == '\n') ^ seenCr) || front == LS 
-                    || front == PS || front == NEL)
-                {
-                    pc -= IRL!(IR.Eol);
-                }
-                else
-                    goto L_backtrack;
-                break;
-            case IR.InfiniteStart, IR.InfiniteQStart:
-                uint len = re.ir[pc].data;
-                assert(infiniteNesting < trackers.length);
-                if(trackers[infiniteNesting] == index)
-                {//source not consumed
-                    pc--; //out of loop
-                    infiniteNesting--;
-                    break;
-                }
-                else
-                    trackers[infiniteNesting] = index;
-                if(re.ir[pc].code == IR.InfiniteStart)//greedy
-                {
-                    infiniteNesting--;
-                    pushState(pc-1, counter);//out of loop
-                    infiniteNesting++;
-                    pc += len;
-                }
-                else
-                {
-                    pushState(pc+len, counter);
-                    pc--;
-                    infiniteNesting--;
-                }
-                break;
-            case IR.InfiniteEnd:
-            case IR.InfiniteQEnd://now it's a start
-                uint len = re.ir[pc].data;
-                trackers[infiniteNesting+1] = index;
-                pc -= len+IRL!(IR.InfiniteStart);
-                assert(re.ir[pc].code == IR.InfiniteStart || re.ir[pc].code == IR.InfiniteQStart);
-                debug(fred_matching) writeln("(backmatch) Infinite nesting:", infiniteNesting);
-                if(re.ir[pc].code == IR.InfiniteStart)//greedy
-                {
-                    pushState(pc-1, counter);
-                    infiniteNesting++;
-                    pc += len;
-                }
-                else
-                {
-                    infiniteNesting++;
-                    pushState(pc + len, counter);
-                    infiniteNesting--;
-                    pc--;
-                }
-                break;
-            case IR.RepeatStart, IR.RepeatQStart:
-                uint len = re.ir[pc].data;
-                uint tail = pc + len + 1;
-                uint step =  re.ir[tail+1].raw;
-                uint min = re.ir[tail+2].raw;
-                uint max = re.ir[tail+3].raw;
-                if(counter < min)
-                {
-                    counter += step;
-                    pc += len;
-                }
-                else if(counter < max)
-                {
-                    if(re.ir[pc].code == IR.RepeatStart)//greedy
-                    {
-                        pushState(pc-1, counter%step);
-                        counter += step;
-                        pc += len;
-                    }
-                    else
-                    {
-                        pushState(pc + len, counter + step);
-                        counter = counter%step;
-                        pc--;
-                    }
-                }
-                else
-                {
-                    counter = counter%step;
-                    pc--;
-                }
-                break;
-            case IR.RepeatEnd:
-            case IR.RepeatQEnd:
-                pc -= re.ir[pc].data+IRL!(IR.RepeatStart);
-                assert(re.ir[pc].code == IR.RepeatStart || re.ir[pc].code == IR.RepeatQStart);
-                goto case IR.RepeatStart;
-            case IR.OrEnd:
-                uint len = re.ir[pc].data;
-                pc -= len;
-                assert(re.ir[pc].code == IR.Option);
-                len = re.ir[pc].data;
-                auto pc_save = pc+len-1;
-                pc = pc + len + IRL!(IR.Option);
-                while(re.ir[pc].code == IR.Option)
-                {
-                    pushState(pc-IRL!(IR.GotoEndOr)-1, counter);
-                    len = re.ir[pc].data;
-                    pc += len + IRL!(IR.Option);
-                }
-                assert(re.ir[pc].code == IR.OrEnd);
-                pc--;
-                if(pc != pc_save)
-                {
-                    pushState(pc, counter);
-                    pc = pc_save;
-                }
-                break;
-            case IR.OrStart:
-                assert(0);
-            case IR.Option:
-                assert(re.ir[pc].code == IR.Option);
-                pc += re.ir[pc].data + IRL!(IR.Option);
-                if(re.ir[pc].code == IR.Option)
-                {
-                    pc--;//hackish, assumes size of IR.Option == 1
-                    if(re.ir[pc].code == IR.GotoEndOr)
-                    {
-                        pc += re.ir[pc].data + IRL!(IR.GotoEndOr);
-                    }
-                    
-                }
-                assert(re.ir[pc].code == IR.OrEnd);
-                pc -= re.ir[pc].data + IRL!(IR.OrStart)+1;
-                break;
-            case IR.GotoEndOr:
-                assert(0);
-            case IR.GroupStart:
-                uint n = re.ir[pc].data;
-                matches[n-1].begin = index;
-                matchesDirty = true;
-                debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
-                pc --;
-                break;
-            case IR.GroupEnd:  
-                uint n = re.ir[pc].data;
-                matches[n-1].end = index;
-                matchesDirty = true;
-                debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
-                pc --;
-                break;
-            case IR.LookaheadStart:
-            case IR.NeglookaheadStart:
-            case IR.LookaheadEnd:
-            case IR.NeglookaheadEnd:
-            case IR.LookbehindEnd:
-            case IR.NeglookbehindEnd:
-                assert(0, "No lookaround in look back");
-            case IR.Backref:
-                uint n = re.ir[pc].data;
-                auto referenced = s[matches[n].begin .. matches[n].end];
-                while(!atEnd && !referenced.empty && front == referenced.front)
-                {
-                    next();
-                    referenced.popFront();
-                }
-                if(referenced.empty)
-                    pc--;
-                else
-                    goto L_backtrack;
-                break;
-             case IR.Nop:
-                pc --;
-                break;
-            case IR.LookbehindStart:
-            case IR.NeglookbehindStart:
-                return true;
-            default:
-                assert(re.ir[pc].code < 0x80);
-                pc --; //data 
-                break;
-            L_backtrack:
-                if(!popState())
-                {
-                    s.reset(start);
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
+    `;
+    return r;
 }
-
 ///State of VM thread
 struct Thread
 {
@@ -4379,7 +4762,7 @@ struct Captures(R)
 
 /**
 */
-struct RegexMatch(R, alias Engine = BacktrackingMatcher)
+struct RegexMatch(R, alias Engine = BacktrackingMatcher!"")
     if(isSomeString!R)
 {
 private:
@@ -4452,16 +4835,40 @@ auto regex(S, S2=string)(S pattern, S2 flags=[])
     }
 }
 
+template ctRegexImpl(string pattern, string flags=[])
+{
+    enum r = regex(pattern, flags);
+    enum source = ctGenProgram(r.ir);
+    bool func(T)(ref T matcher)
+    {
+        pragma(msg, source);
+        mixin(source);
+    }
+    enum nr = NativeProgram!(func)(r);
+}
+
+template ctRegex(string pattern, string flags=[])
+{
+    enum ctRegex = ctRegexImpl!(pattern, flags).nr;
+}
+
 ///
 auto match(R)(R input, Program re)
 {
     return RegexMatch!(Unqual!(typeof(input)))(re, input);
 }
+
 ///ditto
 auto match(R, String)(R input, String pat)
     if(isSomeString!String)
 {
     return RegexMatch!(Unqual!(typeof(input)))(regex(pat), input);
+}
+
+///ditto
+auto match(R, alias s)(R input, NativeProgram!s re)
+{
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!(re.native))(re, input);
 }
 
 ///

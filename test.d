@@ -549,6 +549,16 @@ unittest
     assert(equal(split(s1, regex(", *")), w1[]));
 }
 
+unittest
+{
+    auto cr = ctRegex!("abc");
+    assert(match("abc",cr).hit == "abc");
+    auto cr2 = ctRegex!("a*aab"); 
+    writeln(ctGenProgram(regex("a*aab").ir));
+    assert(!match("abbbbc",cr2).empty);
+    assert(match("abbbbc",cr2).hit == "abbbbc");
+}
+
 version(unittest){
 void main(){}
 }
