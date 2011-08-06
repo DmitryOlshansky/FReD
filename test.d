@@ -384,179 +384,172 @@ unittest
         //enum x = regex(tv[141].pattern);
         debug writeln("!!! FReD C-T test done !!!");
     }
-    version(fred_ct_bug)
-    {
-        enum x = regex("(a*)+");
-        foreach(v; x.ir)
-            writef("%s,", v.raw);
-        writeln();
-        writeln("max depth = ", x.maxCounterDepth);
-        auto y = regex("(a*)+");
-        foreach(v; y.ir)
-            writef("%s,", v.raw);
-        writeln();
-        writeln("max depth = ", y.maxCounterDepth);
-        
-    }
+    
+    version(fred_ct)
+        ct_tests();
     else
     {
         run_tests!match(); //backtracker
         run_tests!tmatch(); //thompson VM
     }
-    version(fred_ct)
-        ct_tests();
 }
-
-unittest
-{
-//global matching
-    void test_body(alias matchFn)()
+ version(fred_ct)
+ {
+     unittest
     {
-        string s = "a quick brown fox jumps over a lazy dog";
-        auto r1 = regex("\\b[a-z]+\\b","g");
-        string[] test;
-        foreach(m; matchFn(s, r1))
-            test ~= m.hit;
-        assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
-        debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
+        auto cr = ctRegex!("abc");
+        assert(match("abc",cr).hit == "abc");
+        auto cr2 = ctRegex!("ab*c"); 
+        assert(!match("abbbbc",cr2).empty);
+        assert(match("abbbbc",cr2).hit == "abbbbc");
     }
-    test_body!match();
-    test_body!tmatch();
 }
-
-//tests for accomulated std.regex issues
-unittest
+else
 {
-    void test_body(alias matchFn)()
+    unittest
     {
-        //issue 5857
-        //matching goes out of control if ... in (...){x} has .*/.+
-        auto c = match("axxxzayyyyyzd",regex("(a.*z){2}d")).captures;
-        assert(c[0] == "axxxzayyyyyzd");
-        assert(c[1] == "ayyyyyz");
-        auto c2 = match("axxxayyyyyd",regex("(a.*){2}d")).captures;
-        assert(c2[0] == "axxxayyyyyd");
-        assert(c2[1] == "ayyyyy");
-        //issue 2108
-        //greedy vs non-greedy
-        auto nogreed = regex("<packet.*?/packet>");
-        assert(match("<packet>text</packet><packet>text</packet>", nogreed).hit
-               == "<packet>text</packet>");
-        auto greed =  regex("<packet.*/packet>");
-        assert(match("<packet>text</packet><packet>text</packet>", greed).hit
-               == "<packet>text</packet><packet>text</packet>");
-        //issue 4574
-        //empty successful match still advances the input
-        string[] pres, posts, hits;
-        foreach(m; match("abcabc", regex("","g"))) {
-            pres ~= m.pre;
-            posts ~= m.post;
-            assert(m.hit.empty);
-
-        }
-        auto heads = [
-            "abcabc",
-            "abcab",
-            "abca",
-            "abc",
-            "ab",
-            "a",
-            ""
-        ];
-        auto tails = [
-            "abcabc",
-             "bcabc",
-              "cabc",
-               "abc",
-                "bc",
-                 "c",
-                  ""
-        ];
-        assert(pres == array(retro(heads)));
-        assert(posts == tails);
-        //issue 6076
-        //regression on .*
-        auto re = regex("c.*|d");
-        auto m = match("mm", re);
-        assert(m.empty);
-        debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
-    }
-    test_body!match();
-    test_body!tmatch();
-}
-//@@@BUG@@@ template function doesn't work inside unittest block
-version(unittest)
-String baz(String)(RegexMatch!(String) m)
-{
-    return std.string.toUpper(m.hit);
-}
-
-// tests for replace 
-unittest
-{
-    void test(alias matchFn)()
-    {
-        foreach(i, v; TypeTuple!(string, wstring, dstring))
+    //global matching
+        void test_body(alias matchFn)()
         {
-            alias v String;
-            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c"))
-                   == to!String("ack rapacity"));
-            assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c"))
-                   == to!String("ack capacity"));
-            assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]"))
-                   == to!String("[n]oon"));
-            assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
-                   == to!String(": test2 test1 :"));
-            auto s = fred.replace!(baz)(to!String("Strap a rocket engine on a chicken."),
-                    regex("[ar]", "g"));
-            assert(s == "StRAp A Rocket engine on A chicken.");
+            string s = "a quick brown fox jumps over a lazy dog";
+            auto r1 = regex("\\b[a-z]+\\b","g");
+            string[] test;
+            foreach(m; matchFn(s, r1))
+                test ~= m.hit;
+            assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
+            debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
         }
-        debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");
+        test_body!match();
+        test_body!tmatch();
     }
-    test!(match)();
-    test!(tmatch)();
-}
 
-// tests for splitter
-unittest
-{
-    auto s1 = ", abc, de,     fg, hi, ";
-    auto sp1 = splitter(s1, regex(", *"));
-    auto w1 = ["", "abc", "de", "fg", "hi", ""];
-    assert(equal(sp1, w1));
+    //tests for accomulated std.regex issues
+    unittest
+    {
+        void test_body(alias matchFn)()
+        {
+            //issue 5857
+            //matching goes out of control if ... in (...){x} has .*/.+
+            auto c = match("axxxzayyyyyzd",regex("(a.*z){2}d")).captures;
+            assert(c[0] == "axxxzayyyyyzd");
+            assert(c[1] == "ayyyyyz");
+            auto c2 = match("axxxayyyyyd",regex("(a.*){2}d")).captures;
+            assert(c2[0] == "axxxayyyyyd");
+            assert(c2[1] == "ayyyyy");
+            //issue 2108
+            //greedy vs non-greedy
+            auto nogreed = regex("<packet.*?/packet>");
+            assert(match("<packet>text</packet><packet>text</packet>", nogreed).hit
+                   == "<packet>text</packet>");
+            auto greed =  regex("<packet.*/packet>");
+            assert(match("<packet>text</packet><packet>text</packet>", greed).hit
+                   == "<packet>text</packet><packet>text</packet>");
+            //issue 4574
+            //empty successful match still advances the input
+            string[] pres, posts, hits;
+            foreach(m; match("abcabc", regex("","g"))) {
+                pres ~= m.pre;
+                posts ~= m.post;
+                assert(m.hit.empty);
+
+            }
+            auto heads = [
+                "abcabc",
+                "abcab",
+                "abca",
+                "abc",
+                "ab",
+                "a",
+                ""
+            ];
+            auto tails = [
+                "abcabc",
+                 "bcabc",
+                  "cabc",
+                   "abc",
+                    "bc",
+                     "c",
+                      ""
+            ];
+            assert(pres == array(retro(heads)));
+            assert(posts == tails);
+            //issue 6076
+            //regression on .*
+            auto re = regex("c.*|d");
+            auto m = match("mm", re);
+            assert(m.empty);
+            debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
+        }
+        test_body!match();
+        test_body!tmatch();
+    }
+    //@@@BUG@@@ template function doesn't work inside unittest block
+    version(unittest)
+    String baz(String)(RegexMatch!(String) m)
+    {
+        return std.string.toUpper(m.hit);
+    }
+
+    // tests for replace 
+    unittest
+    {
+        void test(alias matchFn)()
+        {
+            foreach(i, v; TypeTuple!(string, wstring, dstring))
+            {
+                alias v String;
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c"))
+                       == to!String("ack rapacity"));
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c"))
+                       == to!String("ack capacity"));
+                assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]"))
+                       == to!String("[n]oon"));
+                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
+                       == to!String(": test2 test1 :"));
+                auto s = fred.replace!(baz)(to!String("Strap a rocket engine on a chicken."),
+                        regex("[ar]", "g"));
+                assert(s == "StRAp A Rocket engine on A chicken.");
+            }
+            debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");
+        }
+        test!(match)();
+        test!(tmatch)();
+    }
+
+    // tests for splitter
+    unittest
+    {
+        auto s1 = ", abc, de,     fg, hi, ";
+        auto sp1 = splitter(s1, regex(", *"));
+        auto w1 = ["", "abc", "de", "fg", "hi", ""];
+        assert(equal(sp1, w1));
     
-    auto s2 = ", abc, de,  fg, hi";
-    auto sp2 = splitter(s2, regex(", *"));
-    auto w2 = ["", "abc", "de", "fg", "hi"];
+        auto s2 = ", abc, de,  fg, hi";
+        auto sp2 = splitter(s2, regex(", *"));
+        auto w2 = ["", "abc", "de", "fg", "hi"];
 
-    uint cnt;
-    foreach(e; sp2) {
-        assert(w2[cnt++] == e);
+        uint cnt;
+        foreach(e; sp2) {
+            assert(w2[cnt++] == e);
+        }
+        assert(equal(sp2, w2));
     }
-    assert(equal(sp2, w2));
+
+    unittest
+    {
+        char[] s1 = ", abc, de,  fg, hi, ".dup;
+        auto sp2 = splitter(s1, regex(", *"));
+    }
+
+    unittest
+    {
+        auto s1 = ", abc, de,  fg, hi, ";
+        auto w1 = ["", "abc", "de", "fg", "hi", ""];
+        assert(equal(split(s1, regex(", *")), w1[]));
+    }
+
 }
 
-unittest
-{
-    char[] s1 = ", abc, de,  fg, hi, ".dup;
-    auto sp2 = splitter(s1, regex(", *"));
-}
-
-unittest
-{
-    auto s1 = ", abc, de,  fg, hi, ";
-    auto w1 = ["", "abc", "de", "fg", "hi", ""];
-    assert(equal(split(s1, regex(", *")), w1[]));
-}
-
-unittest
-{
-    auto cr = ctRegex!("abc");
-    assert(match("abc",cr).hit == "abc");
-    auto cr2 = ctRegex!("ab*c"); 
-    assert(!match("abbbbc",cr2).empty);
-    assert(match("abbbbc",cr2).hit == "abbbbc");
-}
 
 version(unittest){
 void main(){}
