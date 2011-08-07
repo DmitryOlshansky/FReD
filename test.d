@@ -409,6 +409,17 @@ unittest
         assert(match("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
         auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?");
         assert(match("aaabaaaabbb",  cr6).hit == "aaab");
+        
+        enum testCT = regex(`(abc)|(edf)|(xyz)`);
+        auto testRT = regex(`(abc)|(edf)|(xyz)`);
+        debug
+        {
+            writeln("C-T version :");
+            testCT.print();
+            writeln("R-T version :");
+            testRT.print();
+        }
+        assert(testCT.ir == testRT.ir);
     }
 }
 else

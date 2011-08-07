@@ -14,7 +14,8 @@ module fred;
 import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
-       std.uni, std.utf, std.format, std.typecons, std.bitmanip, std.functional, std.exception, std.regionallocator;
+       std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
+       std.functional, std.exception, std.regionallocator;
 import core.bitop;
 import ascii = std.ascii;
 
@@ -1138,9 +1139,6 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
             auto eq = range.lowerBound(UnicodeProperty(cast(string)name,Charset.init)).length;//TODO: hackish
             enforce(eq!=range.length && ucmp(name,range[eq].name)==0,"invalid property name");
             s = cast(Charset)range[eq].set;
-            /*auto idx = bsearch(unicodeProperties, immutable(UnicodeProperty)(cast(string)name,Charset.init));
-            enforce(idx != uint.max,"invalid property name");
-            s = cast(Charset)unicodeProperties[idx].set;*/
         }
     }
     if(negated)
@@ -2417,6 +2415,11 @@ struct Input(Char)
     
     ///support for backtracker engine, might not be present
     void reset(size_t index){   _index = index;  }
+    bool skip()
+    {   
+        _index += std.utf.stride(_origin, _index);
+        return _index != lastIndex;
+    }
     
     String opSlice(size_t start, size_t end){   return _origin[start..end]; }
     
@@ -2444,6 +2447,11 @@ struct Input(Char)
         
         ///support for backtracker engine, might not be present
         void reset(size_t index){   _index = index+std.utf.stride(_origin, index);  }
+        bool skip()
+        {   
+            _index -= std.utf.strideBack(_origin, _index); 
+            return _index != lastIndex;
+        }
         
         String opSlice(size_t start, size_t end){   return _origin[end..start]; }
         ///index of at End position
@@ -2505,11 +2513,14 @@ template BacktrackingMatcher(alias hardcoded=char)
         {
             re = program;
             s = stream;
-            exhausted = false;
             next();
+            exhausted = false;
             trackers = new size_t[re.ngroup+1];
             states = new State[initialStack];
             groupStack = new Group[initialStack];
+            //setup first frame for incremental match storage
+            assert(groupStack.length >= matches.length);
+            groupStack[0 .. matches.length] = Group.init;
         }
         ///lookup next match, fills matches with indices into input
         bool match(Group matches[])
@@ -2530,7 +2541,7 @@ template BacktrackingMatcher(alias hardcoded=char)
             }
             for(;;)
             {
-            
+                
                 size_t start = index;
                 if(matchImpl())
                 {//stream is updated here
@@ -2542,11 +2553,10 @@ template BacktrackingMatcher(alias hardcoded=char)
                         next();
                     return true;
                 }
-                else
+                else if(!atEnd)
                     next();
-                if(atEnd)
+                else
                     break;
-                next();
             }
             exhausted = true;
             return false;
@@ -2573,11 +2583,8 @@ template BacktrackingMatcher(alias hardcoded=char)
             lastState = 0;
             infiniteNesting = -1;// intentional
             matchesDirty = false;
-            //setup first frame for incremental match storage
-            assert(groupStack.length >= matches.length);
-            groupStack[0 .. matches.length] = Group.init;
-            lastGroup = matches.length;        
-            auto start = index;
+            lastGroup = matches.length;  //incremental matching      
+            auto start = s._index;
             debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
             while(pc<re.ir.length)
             {
@@ -3255,12 +3262,14 @@ template BacktrackingMatcher(alias hardcoded=char)
         }
     }
 }
+
 /// state of codegenerator
 struct CtState
 {
     string code;
     int addr;
 }
+
 //very shitty string formatter, $$ replaced with next argument converted to string
 string ctSub( U...)(string format, U args)
 {
@@ -3304,30 +3313,64 @@ CtState ctGenBlock(Bytecode[] ir, int addr)
 ///
 CtState ctGenGroup(ref Bytecode[] ir, int addr)
 {
-    CtState result;
+    CtState r;
     assert(!ir.empty);
     switch(ir[0].code)
     {
     case IR.InfiniteStart, IR.InfiniteQStart, IR.RepeatStart, IR.RepeatQStart:
         uint len = ir[0].data;
         auto nir = ir[ir[0].length .. ir[0].length+len];
-        result = ctGenBlock(nir, addr+1);
+        r = ctGenBlock(nir, addr+1);
         //start/end codegen
-        //result.addr is at last test+ jump of loop, addr+1 is body of loop
+        //r.addr is at last test+ jump of loop, addr+1 is body of loop
         nir = ir[ir[0].length+len..$];
-        result.code = ctGenFixupCode(ir[0..ir[0].length], addr, result.addr) ~ result.code;
-        result.code ~= ctGenFixupCode(nir, result.addr, addr+1);
-        result.addr += 1;   //account end instruction
+        r.code = ctGenFixupCode(ir[0..ir[0].length], addr, r.addr) ~ r.code;
+        r.code ~= ctGenFixupCode(nir, r.addr, addr+1);
+        r.addr += 1;   //account end instruction
         ir = nir;
         break;
     case IR.OrStart:
-        assert(0);
+        uint len = ir[0].data;
+        auto nir = ir[ir[0].length .. ir[0].length+len];
+        r = ctGenAlternation(nir, addr);
+        ir = ir[ir[0].length+len..$];
+        assert(ir[0].code == IR.OrEnd);
+        ir = ir[ir[0].length..$];
         break;
     default:
         assert(ir[0].isAtom,  text(ir[0].mnemonic));
-        result = ctGenAtom(ir, addr);
+        r = ctGenAtom(ir, addr);
     }
-    return result;
+    return r;
+}
+
+///generate source for bytecode contained  in OrStart ... OrEnd
+CtState ctGenAlternation(Bytecode[] ir, int addr)
+{
+    CtState[] pieces;
+    CtState r;
+    assert(ir[0].code == IR.Option);
+    for(;;)
+    {
+        auto len = ir[0].data;
+        auto nir = ir[ir[0].length .. ir[0].length+len];
+        if(ir[ir[0].length+len].code == IR.Option)//not a last option
+        {
+            r = ctGenBlock(nir, addr+1);
+            r.code = ctGenFixupCode(ir[0..ir[0].length], addr, r.addr) ~ r.code;
+            addr = r.addr+1;//leave space for GotoEndOr
+            pieces ~= r;
+        }
+        else
+            pieces ~= r;
+    }
+    r = pieces[0];
+    for(uint i=1; i<pieces.length; i++)
+        r.code ~= ctSub(`
+            case $$:
+                goto case $$; `, pieces[i-1].addr+1, addr);
+    r.addr = addr;
+    return r;
 }
 ///
 string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
@@ -3427,7 +3470,6 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
         ir = ir[ir[0].length..$];
         break;
     case IR.OrStart:
-
             ctSub( `
                     `, addr, fixup);
             break;
@@ -3639,11 +3681,8 @@ string ctGenProgram(Bytecode[] ir)
         lastState = 0;
         infiniteNesting = -1;// intentional
         matchesDirty = false;
-        //setup first frame for incremental match storage
-        assert(groupStack.length >= matches.length);
-        groupStack[0 .. matches.length] = Group.init;
         lastGroup = matches.length;        
-        auto start = index;
+        auto start = s._index;
         debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]); 
     StartLoop:
         switch(pc)
