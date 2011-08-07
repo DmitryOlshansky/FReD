@@ -3696,7 +3696,7 @@ string ctGenProgram(Bytecode[] ir)
         lastState = 0;
         infiniteNesting = -1;// intentional
         matchesDirty = false;
-        lastGroup = matches.length;        
+        lastGroup = cast(uint)matches.length;        
         auto start = s._index;
         debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]); 
     StartLoop:
