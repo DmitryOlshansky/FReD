@@ -419,6 +419,7 @@ unittest
             writeln("R-T version :");
             testRT.print();
         }
+        writeln("*****\n",ctGenProgram(testRT.ir));
         assert(testCT.ir == testRT.ir);
     }
 }
