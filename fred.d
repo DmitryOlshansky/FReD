@@ -89,7 +89,7 @@ enum IR:uint {
 /// a shorthand for IR length - full length of specific opcode evaluated at compile time
 template IRL(IR code)
 {
-    enum IRL =  lengthOfIR(code);
+    enum uint IRL =  lengthOfIR(code);
 }
 
 /// how many parameters follow the IR, should be optimized fixing some IR bits
@@ -752,15 +752,20 @@ public:
 struct BasicTrie(uint prefixBits)
     if(prefixBits > 4)
 {
-    enum prefixWordBits = prefixBits-2, prefixSize=1<<prefixBits,
-        prefixWordSize = 1<<(prefixBits-2),  
+	static if(size_t.sizeof == 4)
+		enum unitBits = 2;
+	else static if(size_t.sizeof == 8)
+		enum unitBits = 3;
+	else
+		static assert(0);
+    enum prefixWordBits = prefixBits-unitBits, prefixSize=1<<prefixBits,
+        prefixWordSize = 1<<(prefixWordBits),  
         bitTestShift = prefixBits+3, prefixMask = (1<<prefixBits)-1;
-    static assert(prefixBits > uint.sizeof);
-    uint[] data;
+    size_t[] data;
     ushort[] indexes;
     bool negative;
     //
-    static void printBlock(in uint[] block)
+    static void printBlock(in size_t[] block)
     {
         for(uint k=0; k<prefixSize; k++)
         {
@@ -781,7 +786,7 @@ struct BasicTrie(uint prefixBits)
         uint bound = 0;//set up on first iteration
         ushort emptyBlock = ushort.max;
         auto ivals  = set.ivals;
-        uint[prefixWordSize] page;
+        size_t[prefixWordSize] page;
         for(uint i=0; i<Charset.endOfRange; i+= prefixSize)
         {
             if(i+prefixSize > ivals[bound] || emptyBlock == ushort.max)//avoid empty blocks if we have one already
@@ -804,7 +809,9 @@ struct BasicTrie(uint prefixBits)
                     }
                     if(i+j >= ivals[bound])
                     {
-                        page[j>>5] |=  1<<(j & 31);// 32 = uint.sizeof*8
+						enum mask = (1<<(3+unitBits))-1;
+                        page[j>>(3+unitBits)] 
+							|=  cast(size_t)1<<(j & mask);
                         flag = false;
                     }
                 }
@@ -856,7 +863,7 @@ struct BasicTrie(uint prefixBits)
         uint ind = ch>>prefixBits;
         if(ind >= indexes.length)
             return negative;
-        return cast(bool)bt(data.ptr, (indexes[ch>>prefixBits]<<bitTestShift)+(ch&prefixMask)) ^ negative;
+        return cast(bool)bt(data.ptr, (indexes[ind]<<bitTestShift)+(ch&prefixMask)) ^ negative;
     }
     ///get a negative copy
     auto negated() const
@@ -889,14 +896,13 @@ unittest//a very sloow test
     uint max_char, max_data;
     Trie t;
     auto x = wordCharacter;
-    
     Charset set;
     set.add(unicodeAlphabetic);
     for(size_t i=1;i<set.ivals.length; i++)
-        assert(set.ivals[i-1] <= set.ivals[i],text(set.ivals[i-1], "  ",set.ivals[i]));
-    t = wordTrie.negated;
-    assert(!t['a']);
-    assert(t[' ']);
+        assert(set.ivals[i-1] < set.ivals[i],text(set.ivals[i-1], "  ",set.ivals[i]));
+    t = wordTrie;
+    assert(t['a']);
+    assert(!t[' ']);
     foreach(up; unicodeProperties)
     {
         t = Trie(up.set);
@@ -1421,7 +1427,7 @@ struct Parser(R, bool CTFE=false)
                     parseQuantifier(fix);
                     break;
                 case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                    ir[fix] = Bytecode(ir[fix].code, ir.length - fix - 1);
+                    ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - 1);
                     put(ir[fix].paired);
                     break;
                 case IR.Option: // | xxx )
@@ -1437,7 +1443,7 @@ struct Parser(R, bool CTFE=false)
                         break;
                     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
                         fixupStack.pop();
-                        ir[fix] = Bytecode(ir[fix].code, ir.length - fix - 1);
+                        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - 1);
                         put(ir[fix].paired);
                         break;
                     default://(?:xxx)
@@ -1454,21 +1460,21 @@ struct Parser(R, bool CTFE=false)
                 fix = fixupStack.top;
                 if(ir.length > fix && ir[fix].code == IR.Option)
                 {
-                    ir[fix] = Bytecode(ir[fix].code, ir.length - fix);
+                    ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix);
                     put(Bytecode(IR.GotoEndOr, 0));
-                    fixupStack.top = ir.length; // replace latest fixup for Option
+                    fixupStack.top = cast(uint)ir.length; // replace latest fixup for Option
                     put(Bytecode(IR.Option, 0));
                     break;
                 }
                 //start a new option
                 if(fixupStack.length == 1)//only root entry
                     fix = -1;
-                uint len = ir.length - fix;
+                uint len = cast(uint)ir.length - fix;
                 insertInPlaceAlt(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
                 assert(ir[fix+1].code == IR.OrStart);
                 put(Bytecode(IR.GotoEndOr, 0));
                 fixupStack.push(fix+1); // fixup for StartOR
-                fixupStack.push(ir.length); //for Option
+                fixupStack.push(cast(uint)ir.length); //for Option
                 put(Bytecode(IR.Option, 0));
                 break;
             default://no groups or whatever
@@ -1490,11 +1496,11 @@ struct Parser(R, bool CTFE=false)
     void finishAlternation(uint fix)
     {
         enforce(ir[fix].code == IR.Option, "LR syntax error");
-        ir[fix] = Bytecode(ir[fix].code, ir.length - fix - IRL!(IR.OrStart));
+        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.OrStart));
         fix = fixupStack.pop();
         enforce(ir[fix].code == IR.OrStart, "LR syntax error");
-        ir[fix] = Bytecode(IR.OrStart, ir.length - fix - IRL!(IR.OrStart));
-        put(Bytecode(IR.OrEnd, ir.length - fix - IRL!(IR.OrStart)));
+        ir[fix] = Bytecode(IR.OrStart, cast(uint)ir.length - fix - IRL!(IR.OrStart));
+        put(Bytecode(IR.OrEnd, cast(uint)ir.length - fix - IRL!(IR.OrStart)));
         uint pc = fix + IRL!(IR.OrStart);
         while(ir[pc].code == IR.Option)
         {
@@ -1667,11 +1673,12 @@ struct Parser(R, bool CTFE=false)
             {
                 dchar[5] data;
                 auto range = getCommonCasing(current, data);
+                assert(range.length <= 5);
                 if(range.length == 1)
                     put(Bytecode(IR.Char, range[0]));
                 else
                     foreach(v; range)
-                        put(Bytecode(IR.OrChar, v, range.length));
+                        put(Bytecode(IR.OrChar, v, cast(uint)range.length));
             }
             else
                 put(Bytecode(IR.Char, current));
@@ -2067,20 +2074,20 @@ struct Parser(R, bool CTFE=false)
             //TODO: better heuristic
             version(fred_ct)
             {//fight off memory usage
-                put(Bytecode(IR.Charset, charsets.length));
+                put(Bytecode(IR.Charset, cast(uint)charsets.length));
                 charsets ~= set;
             }
             else
             {
-                if(set.ivals.length > 4)
+                if(set.ivals.length > 8)
                 {//also CTFE memory overflow workaround
                     auto t  = getTrie(set);
-                    put(Bytecode(IR.Trie, tries.length));
+                    put(Bytecode(IR.Trie, cast(uint)tries.length));
                     tries ~= t;
                 }
                 else
                 {
-                    put(Bytecode(IR.Charset, charsets.length));
+                    put(Bytecode(IR.Charset, cast(uint)charsets.length));
                     charsets ~= set;
                 }
             }
@@ -2100,12 +2107,12 @@ struct Parser(R, bool CTFE=false)
 
         case 'd':   
             next(); 
-            put(Bytecode(IR.Charset, charsets.length)); 
+            put(Bytecode(IR.Charset, cast(uint)charsets.length)); 
             charsets ~= unicodeNd;
             break;
         case 'D':   
             next(); 
-            put(Bytecode(IR.Charset, charsets.length)); 
+            put(Bytecode(IR.Charset, cast(uint)charsets.length)); 
             charsets ~= unicodeNd.dup.negate;//TODO: non-allocating  method
             break;
         case 'b':   next(); put(Bytecode(IR.Wordboundary, 0)); break;
@@ -2224,11 +2231,11 @@ struct Program
         uint hotspotIndex = 0;
         uint top = 0;
         counterRange[0] = 1;
-        for(size_t i=0; i<ir.length; i+=ir[i].length)
+        for(uint i=0; i<ir.length; i+=ir[i].length)
         {
             if(ir[i].code == IR.RepeatStart || ir[i].code == IR.RepeatQStart)
             {
-                uint repEnd = i + ir[i].data + IRL!(IR.RepeatStart);
+                uint repEnd = cast(uint)(i + ir[i].data + IRL!(IR.RepeatStart));
                 assert(ir[repEnd].code == ir[i].paired.code);
                 uint max = ir[repEnd + 3].raw;
                 ir[repEnd+1].raw = counterRange[top];
@@ -2253,11 +2260,11 @@ struct Program
     /// IR code validator - proper nesting, illegal instructions, etc.
     void validate()
     {
-        for(size_t pc=0; pc<ir.length; pc+=ir[pc].length)
+        for(uint pc=0; pc<ir.length; pc+=ir[pc].length)
         {
             if(ir[pc].isStart || ir[pc].isEnd)
             {
-                uint dest =  ir[pc].indexOfPair(pc);
+                uint dest = ir[pc].indexOfPair(pc);
                 assert(dest < ir.length, text("Wrong length in opcode at pc=",pc));
                 assert(ir[dest].paired ==  ir[pc],
                         text("Wrong pairing of opcodes at pc=", pc, "and pc=", dest));
@@ -2276,7 +2283,7 @@ struct Program
         writefln("PC\tINST\n");
         prettyPrint(delegate void(const(char)[] s){ write(s); },ir);
         writefln("\n");
-        for(size_t i=0; i<ir.length; i+=ir[i].length)
+        for(uint i=0; i<ir.length; i+=ir[i].length)
         {
             writefln("%d\t%s ", i, disassemble(ir, i, dict));
         }
@@ -2578,7 +2585,7 @@ template BacktrackingMatcher(alias hardcoded=char)
             lastState = 0;
             infiniteNesting = -1;// intentional
             matchesDirty = false;
-            lastGroup = matches.length;  //incremental matching      
+            lastGroup = cast(uint)matches.length;  //incremental matching      
             auto start = s._index;
             debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
             while(pc<re.ir.length)
@@ -2948,7 +2955,7 @@ template BacktrackingMatcher(alias hardcoded=char)
         ++/
         bool matchBackImpl()
         {
-            pc = re.ir.length-1;
+            pc = cast(uint)re.ir.length-1;
             counter = 0;
             lastState = 0;
             infiniteNesting = -1;// intentional
@@ -3799,7 +3806,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     enum threadAllocSize = 16;
     Thread* freelist;
     ThreadList clist, nlist;
-    uint[] merge;
+    size_t[] merge;
     Program re;           //regex program
     Stream s;
     dchar front;
@@ -3830,7 +3837,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         s = stream;
         if(re.hotspotTableSize)
         {
-            merge = new uint[re.hotspotTableSize];
+            merge = new size_t[re.hotspotTableSize];
             reserve(re.hotspotTableSize+2);
         }
         genCounter = 0;
@@ -4193,8 +4200,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     }
                     else static if(withInput)
                     {
-                        uint idx = t.matches.ptr[n].begin + t.uopCounter;
-                        uint end = t.matches.ptr[n].end;
+                        size_t idx = t.matches.ptr[n].begin + t.uopCounter;
+                        size_t end = t.matches.ptr[n].end;
                         if(s[idx..end].front == front)
                         {
                            t.uopCounter += std.utf.stride(s[idx..end], 0);
@@ -4327,7 +4334,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         if(!atEnd)// if no char 
         {
             auto startT = createStart(index);
-            startT.pc = re.ir.length-1;
+            startT.pc = cast(uint)re.ir.length-1;
             evalBack!true(startT, matches);
             for(;;)
             {
@@ -4611,8 +4618,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else static if(withInput)
                 {
-                    uint idx = t.matches.ptr[n].begin + t.uopCounter;
-                    uint end = t.matches.ptr[n].end;
+                    size_t idx = t.matches.ptr[n].begin + t.uopCounter;
+                    size_t end = t.matches.ptr[n].end;
                     if(s[idx..end].front == front)//TODO: could be a BUG in backward matching
                     {
                         t.uopCounter += std.utf.stride(s[idx..end], 0);
@@ -4773,7 +4780,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         list = list.init;
     }
     ///creates a copy of master thread with given pc
-    Thread* fork(Thread* master, uint pc, size_t counter)
+    Thread* fork(Thread* master, uint pc, uint counter)
     {
         auto t = allocate();
         t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup]; //TODO: Small array optimization and/or COW
@@ -4808,7 +4815,7 @@ struct Captures(R)
         input = rmatch.input;
         matches = rmatch.matches;
         re = rmatch.engine.re;
-        b = matches.length;
+        b = cast(uint)matches.length;
         f = 0;
     }
     ///
