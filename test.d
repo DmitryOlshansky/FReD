@@ -373,12 +373,18 @@ unittest
             auto nr = regex(tvd.pattern, tvd.flags);
             debug
             {
-                writeln("C-T version :");
-                r.print();
-                writeln("R-T version :");
-                nr.print();
+                writeln(" Test #", a, " pattern: ", tvd.pattern);
+                if(!equal(r.ir, nr.ir))
+                {
+                    writeln("C-T version :");
+                    r.print();
+                    writeln("R-T version :");
+                    nr.print();
+                    assert(0, text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
+                }
             }
-            assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
+            else
+                assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
             
         }
         //enum x = regex(tv[141].pattern);
@@ -410,8 +416,10 @@ unittest
         auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?");
         assert(match("aaabaaaabbb",  cr6).hit == "aaab");
         
-        enum testCT = regex(`(abc)|(edf)|(xyz)`);
-        auto testRT = regex(`(abc)|(edf)|(xyz)`);
+        //CTFE parser BUG is triggered by group 
+        //in the middle (at least not first and not last) in regex
+        enum testCT = regex(`abc|(edf)|xyz`);
+        auto testRT = regex(`abc|(edf)|xyz`);
         debug
         {
             writeln("C-T version :");
@@ -419,8 +427,9 @@ unittest
             writeln("R-T version :");
             testRT.print();
         }
-        writeln("*****\n",ctGenProgram(testRT.ir));
+        
         assert(testCT.ir == testRT.ir);
+        
     }
 }
 else

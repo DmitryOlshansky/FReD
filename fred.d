@@ -1461,8 +1461,7 @@ struct Parser(R, bool CTFE=false)
                     break;
                 }
                 //start a new option
-                //CTFE workaround
-                if(fixupStack.stack.data.length == 1)//only root entry
+                if(fixupStack.length == 1)//only root entry
                     fix = -1;
                 uint len = ir.length - fix;
                 insertInPlaceAlt(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
@@ -1478,15 +1477,13 @@ struct Parser(R, bool CTFE=false)
                 parseQuantifier(start);
             }
         }
-        //unwind fixup stack, check for errors
-        //.stack.data. is a workaround for CTFE
-        if(fixupStack.stack.data.length != 1)
+
+        if(fixupStack.length != 1)
         {
             fix = fixupStack.pop();
             enforce(ir[fix].code == IR.Option,"LR syntax error");
             finishAlternation(fix);
-            //CTFE workaround
-            enforce(fixupStack.stack.data.length == 1, "LR syntax error");
+            enforce(fixupStack.length == 1, "LR syntax error");
         }
     }
     //helper function, finilizes IR.Option, fix points to the first option of sequence
@@ -2044,8 +2041,7 @@ struct Parser(R, bool CTFE=false)
         }while(!empty || !opstack.empty);
         while(!opstack.empty)
             apply(opstack.pop(),vstack);
-        //CTFE workaround
-        assert(vstack.stack.data.length == 1);
+        assert(vstack.length == 1);
         charsetToIr(vstack.top);
     }
     //try to generate optimal IR code for this charset
@@ -2228,8 +2224,7 @@ struct Program
         uint hotspotIndex = 0;
         uint top = 0;
         counterRange[0] = 1;
-        //CTFE workaround for .length
-        for(size_t i=0; i<ir.length; i+=lengthOfIR(ir[i].code))
+        for(size_t i=0; i<ir.length; i+=ir[i].length)
         {
             if(ir[i].code == IR.RepeatStart || ir[i].code == IR.RepeatQStart)
             {
