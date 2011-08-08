@@ -15,10 +15,10 @@ unittest
     auto r2 = regex("(gylba)");
     assert(match("abcdef", r1).hit == "abc");
     assert(match("wida",r2).empty);
-    assert(tmatch("abcdef", r1).hit == "abc");
-    assert(tmatch("wida", r2).empty);
+    assert(bmatch("abcdef", r1).hit == "abc");
+    assert(bmatch("wida", r2).empty);
     assert(!match("abc", "abc".dup).empty);
-    assert(!tmatch("abc", "abc".dup).empty);
+    assert(!bmatch("abc", "abc".dup).empty);
 }
 
 /* The test vectors in this file are altered from Henry Spencer's regexp
@@ -404,8 +404,8 @@ unittest
         ct_tests();
     else
     {
-        run_tests!match(); //backtracker
-        run_tests!tmatch(); //thompson VM
+        run_tests!bmatch(); //backtracker
+        run_tests!match(); //thompson VM
     }
 }
  version(fred_ct)
@@ -460,8 +460,8 @@ else
             assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
             debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
         }
+        test_body!bmatch();
         test_body!match();
-        test_body!tmatch();
     }
 
     //tests for accomulated std.regex issues
@@ -471,24 +471,24 @@ else
         {
             //issue 5857
             //matching goes out of control if ... in (...){x} has .*/.+
-            auto c = match("axxxzayyyyyzd",regex("(a.*z){2}d")).captures;
+            auto c = matchFn("axxxzayyyyyzd",regex("(a.*z){2}d")).captures;
             assert(c[0] == "axxxzayyyyyzd");
             assert(c[1] == "ayyyyyz");
-            auto c2 = match("axxxayyyyyd",regex("(a.*){2}d")).captures;
+            auto c2 = matchFn("axxxayyyyyd",regex("(a.*){2}d")).captures;
             assert(c2[0] == "axxxayyyyyd");
             assert(c2[1] == "ayyyyy");
             //issue 2108
             //greedy vs non-greedy
             auto nogreed = regex("<packet.*?/packet>");
-            assert(match("<packet>text</packet><packet>text</packet>", nogreed).hit
+            assert(matchFn("<packet>text</packet><packet>text</packet>", nogreed).hit
                    == "<packet>text</packet>");
             auto greed =  regex("<packet.*/packet>");
-            assert(match("<packet>text</packet><packet>text</packet>", greed).hit
+            assert(matchFn("<packet>text</packet><packet>text</packet>", greed).hit
                    == "<packet>text</packet><packet>text</packet>");
             //issue 4574
             //empty successful match still advances the input
             string[] pres, posts, hits;
-            foreach(m; match("abcabc", regex("","g"))) {
+            foreach(m; matchFn("abcabc", regex("","g"))) {
                 pres ~= m.pre;
                 posts ~= m.post;
                 assert(m.hit.empty);
@@ -517,12 +517,12 @@ else
             //issue 6076
             //regression on .*
             auto re = regex("c.*|d");
-            auto m = match("mm", re);
+            auto m = matchFn("mm", re);
             assert(m.empty);
             debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
         }
+        test_body!bmatch();
         test_body!match();
-        test_body!tmatch();
     }
     //@@@BUG@@@ template function doesn't work inside unittest block
     version(unittest)
@@ -553,8 +553,8 @@ else
             }
             debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");
         }
+        test!(bmatch)();
         test!(match)();
-        test!(tmatch)();
     }
 
     // tests for splitter

@@ -8,9 +8,9 @@ import std.datetime;
 
 import fred;
 version(backtracking)
-	alias match matchFn;
+	alias bmatch matchFn;
 else version(thompson)	
-	alias tmatch matchFn;
+	alias match matchFn;
 else version(ct_regex)
 	alias match matchFn;
 else	

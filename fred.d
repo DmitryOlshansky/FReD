@@ -3833,7 +3833,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     size_t index;
     size_t genCounter;    //merge trace counter, goes up on every dchar
     bool matched;
-    bool seenCr;    //true if CR was processed    
+    bool seenCr;    //true if CR was processed   
+    bool exhausted;
     /// true if it's start of input
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
@@ -3886,7 +3887,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         {
             writeln("------------------------------------------");
         }
-        if(matched && !(re.flags & RegexOption.global))
+        if(exhausted)
            return false;
         if(!matched)
             next();
@@ -3927,6 +3928,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 if(!next())
                     break;
             }
+        else
+            exhausted = true;
         genCounter++; //increment also on each end
         debug(fred_matching) writefln("Threaded matching threads at end");
         //try out all zero-width posibilities
@@ -3936,6 +3939,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         {
             eval!false(t, matches);
         }
+        if(matched && !(re.flags & RegexOption.global))
+           exhausted = true;
         //writeln("CLIST :", clist[]);
         //TODO: partial matching
         return matched;
@@ -4996,39 +5001,40 @@ template ctRegex(string pattern, string flags=[])
     enum ctRegex = ctRegexImpl!(pattern, flags).nr;
 }
 
-///
-auto match(R)(R input, RegEx re)
+///initiate matching of input to regex pattern re, using Backtracking matching scheme
+auto bmatch(R)(R input, RegEx re)
 {
     return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(re, input);
+}
+
+///ditto
+auto bmatch(R, String)(R input, String pat)
+    if(isSomeString!String)
+{
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(regex(pat), input);
+}
+
+///initiate matching of input to static regex pattern re, using Backtracking matching scheme (precompiled to machine code)
+auto match(R, alias s)(R input, NativeRegEx!s re)
+{
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!(re.native))(re, input);
+}
+
+///initiate matching of input to regex pattern re, using Thompson NFA matching scheme
+auto match(R)(R input, RegEx re)
+{
+    return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
 
 ///ditto
 auto match(R, String)(R input, String pat)
     if(isSomeString!String)
 {
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(regex(pat), input);
-}
-
-///ditto
-auto match(R, alias s)(R input, NativeRegEx!s re)
-{
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!(re.native))(re, input);
-}
-
-///
-auto tmatch(R)(R input, RegEx re)
-{
-    return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
-}
-///ditto
-auto tmatch(R, String)(R input, String pat)
-    if(isSomeString!String)
-{
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(regex(pat), input);
 }
 
 ///
-R replace(R, alias scheme=tmatch)(R input, RegEx re, R format)
+R replace(R, alias scheme=match)(R input, RegEx re, R format)
     if(isSomeString!R)
 {
     auto app = appender!(R)();
@@ -5045,7 +5051,7 @@ R replace(R, alias scheme=tmatch)(R input, RegEx re, R format)
 }
 
 ///
-R replace(alias fun, R,alias scheme=tmatch)(R input, RegEx re)
+R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
     if(isSomeString!R)
 {
     auto app = appender!(R)();
