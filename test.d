@@ -225,9 +225,6 @@ unittest
         TestVectors(  "(?:ab){3}",       "_abababc","y", "$&-$1",    "ababab-" ),
         TestVectors(  "(?:a(?:x)?)+",    "aaxaxx",  "y", "$&-$1-$2", "aaxax--" ),
         TestVectors(  `\W\w\W`,         "aa b!ca",  "y", "$&",       " b!"),
-        //no lookaround for Thompson VM
-     /+   TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
-        TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ), +/
 //more repetitions:
         TestVectors(  "(?:a{2,4}b{1,3}){1,2}",  "aaabaaaabbb", "y", "$&", "aaabaaaabbb" ),
         TestVectors(  "(?:a{2,4}b{1,3}){1,2}?", "aaabaaaabbb", "y", "$&", "aaab" ),
@@ -285,6 +282,10 @@ unittest
 // luckily obtained regression on incremental matching in backtracker
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
+//lookahead
+        TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
+      //BUG: matches being overwritten kills backref
+      //  TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ),
 //lookback
         TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
         TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),

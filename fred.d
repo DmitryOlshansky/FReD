@@ -2842,18 +2842,26 @@ template BacktrackingMatcher(alias hardcoded)
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc += IRL!(IR.GroupEnd);
                     break;
-                /*case IR.LookaheadStart:
+                case IR.LookaheadStart:
                 case IR.NeglookaheadStart:
                     uint len = re.ir[pc].data;
                     auto save = index;
-                    auto ch = front;
-                    uint matched = matchImpl(re.ir[pc+1 .. pc+1+len], matches);
+                    auto x = this;
+                    x.pc = 0;
+                    x.states = new State[initialStack/8];
+                    x.groupStack = new Group[initialStack/8];
+                    x.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
+                    bool match = x.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
                     s.reset(save);
-                    front = ch;
-                    if(matched ^ (re.ir[pc].code == IR.LookaheadStart))
+                    next();
+                    if(!match)
                         goto L_backtrack;
-                    pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + len;
-                    break;*/
+                    else
+                    {
+                        pc += IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd);
+                        matchesDirty = true;
+                    }
+                    break;
                 case IR.LookbehindStart:
                 case IR.NeglookbehindStart:
                     uint len = re.ir[pc].data;
@@ -3815,7 +3823,9 @@ struct ThreadList
         return ThreadRange(this);
     }
 }
-    
+
+enum SingleShot { Fwd, Bwd };
+
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
@@ -3863,9 +3873,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         genCounter = 0;
     }
-    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece)
+    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
     {
-        s = matcher.s.loopBack;
+        s = stream;
         re = matcher.re;
         re.ir = piece;
         merge = matcher.merge;
@@ -4056,7 +4066,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.Bol:
                     dchar back;
                     size_t bi;
-                    //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         t.pc += IRL!(IR.Bol);
                     else if((re.flags & RegexOption.multiline) 
@@ -4253,9 +4262,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     break;
                 case IR.LookbehindStart:
                 case IR.NeglookbehindStart:
-                    auto backMatcher = ThompsonMatcher!(Char, typeof(s.loopBack))(this, prog[t.pc..t.pc+prog[t.pc].data+1]);
+                    auto backMatcher = ThompsonMatcher!(Char, typeof(s.loopBack))(this, prog[t.pc..t.pc+prog[t.pc].data+1], s.loopBack);
                     backMatcher.freelist = freelist;
-                    if(backMatcher.matchBack(t.matches) ^ (prog[t.pc].code == IR.LookbehindStart))
+                    backMatcher.next(); //load first character from behind
+                    if(backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (prog[t.pc].code == IR.LookbehindStart))
                     {
                         recycle(t);
                         t = worklist.fetch();
@@ -4265,13 +4275,36 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     break;
                 case IR.LookaheadEnd:
                 case IR.NeglookaheadEnd:
-                    assert(0);
+                    finish(t, matches, 1);//leave the whole match intact, TODO: fix overwrite of matches!
+                    recycle(t);
+                    //cut off low priority threads
+                    recycle(clist);
+                    recycle(worklist);
+                    return;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart:
+                    auto save = index;
+                    uint len = prog[t.pc].data;
+                    bool positive = prog[t.pc].code == IR.LookaheadStart;
+                    t.pc += IRL!(IR.LookaheadStart);
+                    auto fwdMatcher = ThompsonMatcher(this, prog[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)], s);
+                    fwdMatcher.freelist = freelist;
+                    fwdMatcher.front = front;
+                    fwdMatcher.index = index;
+                    bool nomatch = fwdMatcher.matchOneShot!(SingleShot.Fwd)(t.matches) ^ positive;
+                    s.reset(index);
+                    next();
+                    if(nomatch)
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                    }
+                    else
+                        t.pc += len + IRL!(IR.LookaheadEnd);
                     break;
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
-                    assert(0, "No lookaround for ThompsonVM yet!");
+                    assert(0);
                 case IR.Nop:
                     t.pc += IRL!(IR.Nop);
                     break;
@@ -4350,27 +4383,37 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             }
         }while(t);
     }
-    ///match the input, evaluating IR backwards without searching
-    bool matchBack(Group[] matches)
+    ///match the input, evaluating IR without searching
+    bool matchOneShot(SingleShot direction)(Group[] matches)
     {
         debug(fred_matching)
         {
-            writeln("---------------matchBack-----------------");
+            writefln("---------------single shot match %s----------------- ", 
+                     direction == SingleShot.Fwd ? "forward" : "backward");
         }
-        next();
+        static if(direction == SingleShot.Fwd)
+            alias eval evalFn;
+        else
+            alias evalBack evalFn;
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
         if(!atEnd)// if no char 
         {
             auto startT = createStart(index);
-            startT.pc = cast(uint)re.ir.length-1;
-            evalBack!true(startT, matches);
+            static if(direction == SingleShot.Fwd)
+                startT.pc = 0;
+            else
+                startT.pc = cast(uint)re.ir.length-1;
+            evalFn!true(startT, matches);
             for(;;)
             {
                 genCounter++;
                 debug(fred_matching)
                 {
-                    writefln("Threaded matching (backwards) threads at  %s", retro(s[index..s.lastIndex]));
+                    static if(direction == SingleShot.Fwd) 
+                        writefln("Threaded matching (forward) threads at  %s",  s[index..s.lastIndex]);
+                    else
+                        writefln("Threaded matching (backward) threads at  %s", retro(s[index..s.lastIndex]));
                     foreach(t; clist[])
                     {
                         assert(t);
@@ -4381,9 +4424,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 for(Thread* t = clist.fetch(); t; t = clist.fetch())
                 {
-                    evalBack!true(t, matches);
+                    evalFn!true(t, matches);
                 }
-                if(matched && nlist.empty)
+                if(nlist.empty)
                 {
                     debug(fred_matching) writeln("Stopped  matching before consuming full input");
                     break;//not a partial match for sure
@@ -4395,11 +4438,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             }
         }
         genCounter++; //increment also on each end
-        debug(fred_matching) writefln("Threaded matching (backwards) threads at end");
+        debug(fred_matching) writefln("Threaded matching (%s) threads at end",
+                                      direction == SingleShot.Fwd ? "forward" : "backward");
         //try out all zero-width posibilities
         for(Thread* t = clist.fetch(); t; t = clist.fetch())
         {
-            evalBack!false(t, matches);
+            evalFn!false(t, matches);
         }
         return matched;
     }
@@ -4676,7 +4720,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
           
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
-                finish(t, matches, 1);
+                finish(t, matches, 1); // TODO: fix overwrite of matches
                 recycle(t);
                 //cut off low priority threads
                 recycle(clist);

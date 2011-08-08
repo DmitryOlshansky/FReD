@@ -1,0 +1,75 @@
+Fast Regular Expressions for D (FReD)
+a project proposed as source level compatible replacement for std.regex
+
+
+Package contents
+--------------------------
+bench\*          - simple grep-like programs for benchmarking and comparing results alike
+streamDecode.d     - upcoming stream regex support
+fred.d           - core library
+fred_uni.d       - unicode tables for properties
+test.d           - test suite
+tools\*          - various helper tools for codegeneration and self testing
+
+Building
+--------------------------
+Building existing projects should be as simple as:
+    - replace all std.regex with fred
+    - recompile adding fred.d and fred_uni.d to the list of compiled files
+
+E.g. to compile testsuite (no static regex):
+dmd -unittest fred.d fred_uni.d test.d
+
+same for static regex only:
+dmd -version=fred_ct -unittest fred.d fred_uni.d test.d
+
+(the reason for separation is the compilation speed of the latter)
+If you just need a test tool to give you a head start, you can compile fred_r.d from bench, usage is:
+fred_r pattern file [print]
+Use the "" around pattern to keep away your shell interpreter that is always hungry for special characters.
+
+Synopsis
+--------------------------
+In case you have no experience with std.regex, the basic usage is:
+
+unittest
+{
+    import std.stdio, fred;
+    //match every character
+    auto r = regex(`\w`, "g"); //g - global
+    auto m = match("abc", r);
+    foreach(cur; m)//iterate over all matches
+        writeln(cur.hit);
+
+    enum ctr = regex(`^.*/(.*)$`); //static regex, precompiled
+    auto m2 = match("foo/bar", ctr);   //first match found here if any
+    asseet(!m2.empty);   //so be sure to check it before examining contents!
+    assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
+}
+
+(you can also find other usage patterns in fred_r.d, test.d or in Phobos documentation on std.regex)
+Caveat for static regexes: result of regex(....) in this case has different type for each pattern, to store a pack of them use Tuples not arrays.
+
+
+Notes for testers
+--------------------------
+Things to keep an eye for:
+
+    - project doesn't compile with FReD, but it did with std.regex
+    - hits on assert(0) and access violation :o)
+    - innocent looking pattern takes enormous time to match, particularly
+      if it's two mostly identical patterns that have drastically different performance
+    - character set operations (particularly subtraction (--) and intersection (&&))
+    - looong patterns (though I have an estimate where they should explode)
+    - Unicode conformance, see level 1 at http://unicode.org/reports/tr18/
+    - static regexes, this is not for the faint of heart, but if you can get CTFE internal error (easy)
+      and able to reduce it (not so easy) then please do it :)
+
+Report any bugs at github : https://github.com/blackwhale/FReD/issues/
+or send on email dmitry.olsh(at)gmail.com tag the topic it with [GSOC] or [FReD]
+Please don't hesitate to include bogus pattern, test _input_, OS and compiler version
+Any additional tests on e.g. conformance are also welcome.
+Know some really good regex library Brand X (for c/c++ preferably)? Please do tell.
+If your favorite regex pattern run orders of magnitude slower on FReD then on this Brand X library then ....
+well, I can't guarantee anything but will sure take a look (please make sure Brand X _does_ use UTF-8/16/32)
+And if you ended up creating another grep like program to benchmark it send it my way.
