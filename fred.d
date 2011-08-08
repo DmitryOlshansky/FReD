@@ -15,7 +15,7 @@ import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
-       std.functional, std.exception, std.regionallocator;
+       std.functional, std.exception;
 import core.bitop;
 import ascii = std.ascii;
 
