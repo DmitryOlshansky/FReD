@@ -354,12 +354,14 @@ static void moveAllAlt(T)(T[] src, T[] dest)
     else
         moveAll(src, dest);
 }
-//do not reorder this list
+
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
 /// casefold - case insensitive matching, do casefolding on match in unicode mode
 /// freeform - ignore whitespace in pattern, to match space use [ ] or \s
-enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8,  };
+enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8, multiline = 0x10 };
+alias TypeTuple!('g', 'i', 'x', 'U', 'm') RegexOptionNames;//do not reorder this list
+
 private enum NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
 //multiply-add, throws exception on overflow
 uint checkedMulAdd(uint f1, uint f2, uint add)
@@ -895,7 +897,9 @@ unittest//a very sloow test
 {
     uint max_char, max_data;
     Trie t;
-    auto x = wordCharacter;
+    t = wordTrie;
+    assert(t['a']);
+    assert(!t[' ']);
     Charset set;
     set.add(unicodeAlphabetic);
     for(size_t i=1;i<set.ivals.length; i++)
@@ -1306,13 +1310,12 @@ struct Parser(R, bool CTFE=false)
     {
         foreach(ch; flags)//flags are ASCII anyway
         {
-            alias TypeTuple!('g', 'i', 'x', 'U') switches;
             switch(ch)
             {
                 
                 foreach(i, op; __traits(allMembers, RegexOption))
                 {
-                    case switches[i]:
+                    case RegexOptionNames[i]:
                             if(re_flags & mixin("RegexOption."~op))
                                 throw new RegexException(text("redundant flag specified: ",ch));
                             re_flags |= mixin("RegexOption."~op);
@@ -2203,15 +2206,15 @@ struct Parser(R, bool CTFE=false)
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-    ///packages parsing results into a Program object
-    @property Program program()
+    ///packages parsing results into a RegEx object
+    @property RegEx program()
     {
-        return Program(this);
+        return RegEx(this);
     }
 }
 
 ///Object that holds all persistent data about compiled regex
-struct Program
+struct RegEx
 {
     Bytecode[] ir;      // compiled bytecode of pattern
     NamedGroup[] dict;  //maps name -> user group number
@@ -2324,17 +2327,22 @@ struct Program
     }
 }
 
-struct NativeProgram(alias Fn)
+struct NativeRegEx(alias Fn)
 {
-    Program _prog;
+    RegEx _prog;
     alias Fn native;
     alias _prog this;
-    this(Program  prog){    _prog = prog; } 
+    this(RegEx  prog){    _prog = prog; } 
+}
+/// whether ch is one of unicode newline sequences
+bool endOfLine(dchar ch, bool seenCr)
+{
+    return ((ch == '\n') ^ seenCr) || ch == '\r' || ch == NEL || ch == LS || ch == PS;
 }
 
 ///Test if bytecode starting at pc in program 're' can match given codepoint
 ///Returns: length of matched atom if test is positive, 0 - can't tell, -1 if doesn't match
-int quickTestFwd(uint pc, dchar front, Program re)
+int quickTestFwd(uint pc, dchar front, RegEx re)
 {
     static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
     if(pc >= re.ir.length)
@@ -2379,15 +2387,15 @@ int quickTestFwd(uint pc, dchar front, Program re)
 /*struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
-    Program storage;
-    this(Program rs){ storage = rs; }
+    RegEx storage;
+    this(RegEx rs){ storage = rs; }
     alias storage this;
 
 }*/
 template Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
-    alias Program Regex;
+    alias RegEx Regex;
 }
 
 /// Simple UTF-string stream abstraction (w/o normalization and such)
@@ -2468,7 +2476,7 @@ struct Input(Char)
     regular expressions.
     low level construct, doesn't 'own' any memory
 +/
-template BacktrackingMatcher(alias hardcoded=char)
+template BacktrackingMatcher(alias hardcoded)
 {
     struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(is(Char : dchar))
@@ -2479,7 +2487,7 @@ template BacktrackingMatcher(alias hardcoded=char)
             uint pc, counter, infiniteNesting;
         }
         alias const(Char)[] String;
-        Program re;           //regex program
+        RegEx re;           //regex program
         enum initialStack = 2^^12;
         enum dirtyBit = 1<<31;
         //Stream state
@@ -2506,12 +2514,12 @@ template BacktrackingMatcher(alias hardcoded=char)
         ///
         void next()
         {    
-            seenCr = front == '\r';
+            seenCr = !(front ^ '\r');
             if(!s.nextChar(front, index))
                 index = s.lastIndex;
         }
         ///
-        this(Program program, Stream stream)
+        this(RegEx program, Stream stream)
         {
             re = program;
             s = stream;
@@ -2667,7 +2675,7 @@ template BacktrackingMatcher(alias hardcoded=char)
                     if(atStart && !wordTrie[front])
                         goto L_backtrack;
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !isUniAlpha(back))
+                            && !wordTrie[back])
                         goto L_backtrack;
                     else if(s.loopBack.nextChar(back, index))
                     {
@@ -2684,16 +2692,20 @@ template BacktrackingMatcher(alias hardcoded=char)
                     //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         pc += IRL!(IR.Bol);
-                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                    else if((re.flags & RegexOption.multiline) 
+                        && s.loopBack.nextChar(back,bi)
+                        && endOfLine(back, seenCr))
+                    {
                         pc += IRL!(IR.Bol);
+                    }
                     else
                         goto L_backtrack;
                     break;
                 case IR.Eol:
                     debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                     //no matching inside \r\n
-                    if(atEnd || ((front == '\n') ^ seenCr) || front == LS 
-                        || front == PS || front == NEL)
+                    if(atEnd || ((re.flags & RegexOption.multiline)
+                        && endOfLine(front, seenCr)))
                     {
                         pc += IRL!(IR.Eol);
                     }
@@ -3069,16 +3081,20 @@ template BacktrackingMatcher(alias hardcoded=char)
                     //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         pc--;
-                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                    else if((re.flags & RegexOption.multiline) 
+                        && s.loopBack.nextChar(back,bi)
+                        && endOfLine(back, seenCr)) 
+                    {
                         pc--;
+                    }
                     else
                         goto L_backtrack;
                     break;
                 case IR.Eol:
                     debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                     //no matching inside \r\n
-                    if(((front == '\n') ^ seenCr) || front == LS 
-                        || front == PS || front == NEL)
+                    if((re.flags & RegexOption.multiline) 
+                        && endOfLine(front, seenCr))
                     {
                         pc -= IRL!(IR.Eol);
                     }
@@ -3610,17 +3626,21 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         ir.popFront();
         break;
     case IR.Bol:
-        result.code ~= ctSub(`
+        result.code ~= ctSub(q{
             case $$:
                 dchar back;
                 size_t bi;
                 if(atStart)
                     goto case $$;
-                else if(s.loopBack.nextChar(back,bi) && back == '\n')
+                else if((re.flags & RegexOption.multiline) 
+                    && s.loopBack.nextChar(back,bi)
+                    && endOfLine(back, seenCr))
+                {
                     goto case $$;
+                }
                 else
                     goto L_backtrack;
-                `, addr, addr + 1,addr + 1);
+        }, addr, addr + 1,addr + 1);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -3629,8 +3649,8 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             case $$:
                 debug(fred_matching) writefln("EOL (seen CR: %x, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                 //no matching inside \r\n
-                if(atEnd || ((front == '\n') ^ seenCr) || front == LS
-                    || front == PS || front == NEL)
+                if(atEnd || ((re.flags & RegexOption.multiline) 
+                        && endOfLine(front, seenCr)))
                 {
                     goto case;
                 }
@@ -3686,7 +3706,7 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
     return result;
 }
 
-string ctGenProgram(Bytecode[] ir)
+string ctGenRegEx(Bytecode[] ir)
 {
     auto r = `
         with(matcher)
@@ -3807,7 +3827,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     Thread* freelist;
     ThreadList clist, nlist;
     size_t[] merge;
-    Program re;           //regex program
+    RegEx re;           //regex program
     Stream s;
     dchar front;
     size_t index;
@@ -3830,7 +3850,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         return true;
     }
     ///
-    this()(Program program, Stream stream)
+    this()(RegEx program, Stream stream)
     {
         s = stream;
         re = program;
@@ -4034,8 +4054,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         t.pc += IRL!(IR.Bol);
-                    else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                    else if((re.flags & RegexOption.multiline) 
+                        && s.loopBack.nextChar(back,bi)
+                        && endOfLine(back, seenCr))
+                    {
                         t.pc += IRL!(IR.Bol);
+                    }
                     else
                     {
                         recycle(t);
@@ -4045,8 +4069,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.Eol:
                     debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                     //no matching inside \r\n
-                    if(atEnd || ((front == '\n') ^ seenCr) || front == LS 
-                       || front == PS || front == NEL)
+                    if(atEnd || ((re.flags & RegexOption.multiline) 
+                        && endOfLine(front, seenCr)))
                     {
                         t.pc += IRL!(IR.Eol);
                     }
@@ -4458,8 +4482,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 //TODO: multiline & attributes, unicode line terminators
                 if(atStart)
                     t.pc--;
-                else if(s.loopBack.nextChar(back,bi) && back == '\n') 
+                else if((re.flags & RegexOption.multiline) 
+                    && s.loopBack.nextChar(back,bi)
+                    && endOfLine(back, seenCr))
+                {
                     t.pc--;
+                }
                 else
                 {
                     recycle(t);
@@ -4469,8 +4497,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             case IR.Eol:
                 debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                 //no matching inside \r\n
-                if(((front == '\n') ^ seenCr) || front == LS 
-                    || front == PS || front == NEL)
+                if((re.flags & RegexOption.multiline) 
+                    && endOfLine(front, seenCr))
                 {
                     t.pc--;
                 }
@@ -4809,7 +4837,7 @@ struct Captures(R)
     R input;
     Group[] matches;
     uint f, b;
-    Program re;
+    RegEx re;
     this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
     {
         input = rmatch.input;
@@ -4878,7 +4906,7 @@ struct Captures(R)
 
 /**
 */
-struct RegexMatch(R, alias Engine = BacktrackingMatcher!"")
+struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
 {
 private:
@@ -4893,7 +4921,7 @@ private:
     
 public:
     ///
-    this(Program prog, R _input)
+    this(RegEx prog, R _input)
     {
         input = _input;
         matches = new Group[prog.ngroup];
@@ -4954,13 +4982,13 @@ auto regex(S, S2=string)(S pattern, S2 flags=[])
 template ctRegexImpl(string pattern, string flags=[])
 {
     enum r = regex(pattern, flags);
-    enum source = ctGenProgram(r.ir);
+    enum source = ctGenRegEx(r.ir);
     bool func(T)(ref T matcher)
     {
-        pragma(msg, source);
+        version(fred_ct) debug pragma(msg, source);
         mixin(source);
     }
-    enum nr = NativeProgram!(func)(r);
+    enum nr = NativeRegEx!(func)(r);
 }
 
 template ctRegex(string pattern, string flags=[])
@@ -4969,26 +4997,26 @@ template ctRegex(string pattern, string flags=[])
 }
 
 ///
-auto match(R)(R input, Program re)
+auto match(R)(R input, RegEx re)
 {
-    return RegexMatch!(Unqual!(typeof(input)))(re, input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(re, input);
 }
 
 ///ditto
 auto match(R, String)(R input, String pat)
     if(isSomeString!String)
 {
-    return RegexMatch!(Unqual!(typeof(input)))(regex(pat), input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(regex(pat), input);
 }
 
 ///ditto
-auto match(R, alias s)(R input, NativeProgram!s re)
+auto match(R, alias s)(R input, NativeRegEx!s re)
 {
     return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!(re.native))(re, input);
 }
 
 ///
-auto tmatch(R)(R input, Program re)
+auto tmatch(R)(R input, RegEx re)
 {
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
@@ -5000,7 +5028,7 @@ auto tmatch(R, String)(R input, String pat)
 }
 
 ///
-R replace(R, alias scheme=match)(R input, Program re, R format)
+R replace(R, alias scheme=tmatch)(R input, RegEx re, R format)
     if(isSomeString!R)
 {
     auto app = appender!(R)();
@@ -5017,7 +5045,7 @@ R replace(R, alias scheme=match)(R input, Program re, R format)
 }
 
 ///
-R replace(alias fun, R,alias scheme=match)(R input, Program re)
+R replace(alias fun, R,alias scheme=tmatch)(R input, RegEx re)
     if(isSomeString!R)
 {
     auto app = appender!(R)();
@@ -5133,7 +5161,7 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
     alias RegexMatch!(Range, Engine) Rx; 
     Rx _match;
 
-    this(Range input, Program separator)
+    this(Range input, RegEx separator)
     {
         _input = input;
         separator.flags |= RegexOption.global;
@@ -5188,13 +5216,13 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
 }
 
 /// Ditto
-Splitter!(Range) splitter(Range)(Range r, Program pat)
+Splitter!(Range) splitter(Range)(Range r, RegEx pat)
     if (is(Unqual!(typeof(Range.init[0])) : dchar))
 {
     return Splitter!(Range)(r, pat);
 }
 ///
-String[] split(String)(String input, Program rx)
+String[] split(String)(String input, RegEx rx)
     if(isSomeString!String)
 {
     auto a = appender!(String[])();
