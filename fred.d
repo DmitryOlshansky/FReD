@@ -390,7 +390,7 @@ private:
         if(!--*pcnt)
             dispose();
     }
-    uint getCount()
+    size_t getCount()
     {
         return *((cast(size_t*)head)-1);
     }
@@ -5247,10 +5247,13 @@ public:
         matches = new Group[matches.length];
         _empty = !engine.match(matches);
     }
-    ///
+    ///test of this match object is empty
     @property bool empty(){ return _empty; }
+    ///same as .empty, provided for convience in conditional expressions
+    T opCast(T:bool)(){ return empty; }
     ///
     @property auto captures(){ return Captures!R(this); }
+   
 }
 
 ///

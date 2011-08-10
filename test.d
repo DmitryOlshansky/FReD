@@ -14,11 +14,11 @@ unittest
     auto r1 = regex("abc");
     auto r2 = regex("(gylba)");
     assert(match("abcdef", r1).hit == "abc");
-    assert(match("wida",r2).empty);
+    assert(match("wida",r2));
     assert(bmatch("abcdef", r1).hit == "abc");
-    assert(bmatch("wida", r2).empty);
-    assert(!match("abc", "abc".dup).empty);
-    assert(!bmatch("abc", "abc".dup).empty);
+    assert(bmatch("wida", r2));
+    assert(!match("abc", "abc".dup));
+    assert(!bmatch("abc", "abc".dup));
 }
 
 /* The test vectors in this file are altered from Henry Spencer's regexp
