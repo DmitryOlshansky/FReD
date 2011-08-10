@@ -67,7 +67,7 @@ Subtle moments:
     - Unicode blocks use InBlock syntax
     - single codepoints use \u and \U syntax (\x for 2 digit acsii),
     - \b, \B, \d, \w, etc are Unicode aware and use full sets of characters
-    - backreferences must be locally unique e.g. (\w+)\1 is not localy unique, while (\w+)\b\1 is
+    - backreferences must be locally unique e.g. (\w+)\1 is not localy unique, while \b(\w+)\b\1 is (note the anchor on both sides!)
 
 I not opposed to getting multiple syntax profiles (a-la Boost), but for the moment it's out the scope of project.
 

@@ -284,7 +284,8 @@ unittest
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
 //lookahead
         TestVectors("(foo.)(?=(bar))",     "foobar foodbar", "y","$&-$1-$2", "food-food-bar" ),
-        //TestVectors(`(\d)\d(?!\1)`,  "111a22b334", "y", "$&-$1", "3-3" ),
+        TestVectors(`\b(\d+)[a-z](?=\1)`,  "123a123", "y", "$&-$1", "123a-123" ),
+        TestVectors(`\$(?!\d{3})\w+`,       "$123 $abc", "y", "$&", "$abc"),
 //lookback
         TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
         TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),
