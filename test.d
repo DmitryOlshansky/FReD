@@ -283,9 +283,10 @@ unittest
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
 //lookahead
-        TestVectors("(foo.)(?=(bar))",     "foobar foodbar", "y","$&-$1-$2", "food-food-bar" ),
-        TestVectors(`\b(\d+)[a-z](?=\1)`,  "123a123", "y", "$&-$1", "123a-123" ),
-        TestVectors(`\$(?!\d{3})\w+`,       "$123 $abc", "y", "$&", "$abc"),
+        TestVectors("(foo.)(?=(bar))",     "foobar foodbar", "y", "$&-$1-$2", "food-food-bar" ),
+        TestVectors(`\b(\d+)[a-z](?=\1)`,  "123a123",        "y", "$&-$1", "123a-123" ),
+        TestVectors(`\$(?!\d{3})\w+`,      "$123 $abc",      "y", "$&", "$abc"),
+        TestVectors(`(abc)(?=(ed(f))\3)`,    "abcedff",      "y", "-", "-"),
 //lookback
         TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
         TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),

@@ -4408,6 +4408,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                         (this, prog[t.pc..t.pc+prog[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
                     backMatcher.freelist = freelist;
                     backMatcher.re.ngroup = prog[t.pc+2].raw - prog[t.pc+1].raw;
+                    backMatcher.backrefed = t.matches;
                     //backMatch
                     backMatcher.next(); //load first character from behind
                     if(backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (prog[t.pc].code == IR.LookbehindStart))
