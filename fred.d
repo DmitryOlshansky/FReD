@@ -369,6 +369,89 @@ static void moveAllAlt(T)(T[] src, T[] dest)
         moveAll(src, dest);
 }
 
+///Chunked allocator a simplistic sort of heirachical allocator
+struct ChunkedAllocator
+{
+private:
+    struct Chunk
+    {
+        Chunk* next;
+        size_t[1] data;
+    }
+    Chunk* head;
+    void incCount()
+    {    
+        auto pcnt = (cast(size_t*)head)-1;
+        ++*pcnt;
+    }
+    void decCount()
+    {
+        auto pcnt = (cast(size_t*)head)-1;
+        if(!--*pcnt)
+            dispose();
+    }
+    uint getCount()
+    {
+        return *((cast(size_t*)head)-1);
+    }
+    void dispose()
+    {
+        Chunk* p = head;
+        void* q;
+        debug(fred_allocation) writeln("ChunkedAllocator disposed");
+        if(p)
+        {
+            q = (cast(void*)p) - size_t.sizeof;
+            p = p.next;
+            free(q);
+        }
+        while(p)
+        {
+            q = p;
+            p = p.next;
+            free(q);
+        }
+    }
+public:
+    void[] allocate(size_t size)
+    {       
+        Chunk* chunk;
+        if(!head)
+        {
+            debug(fred_allocation) writeln("ChunkedAllocator first allocation");
+            auto start = enforce(malloc(size + Chunk.sizeof));
+            chunk = cast(Chunk*) (start + size_t.sizeof);//leave space for ref counter
+            head = chunk;
+            head.next = null;
+            (cast(size_t*)head)[-1] = 1;
+        }
+        else
+        {
+            chunk = cast(Chunk*)enforce(malloc(size + Chunk.sizeof - size_t.sizeof));
+            chunk.next = head.next;
+            head.next = chunk;
+        }
+        return (cast(void*)chunk.data.ptr)[0 .. size];
+    }
+    T newArray(T)(size_t n)
+    {
+        alias typeof(T.init[0]) E;
+        auto arr =  (cast(E*)allocate(n*E.sizeof))[0..n];
+        arr[] = E.init;
+        return arr;
+    }
+    this(this)
+    {
+        if(head)
+            incCount();
+    }
+    ~this()
+    {
+       if(head)
+           decCount();
+    }
+}
+
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
 /// casefold - case insensitive matching, do casefolding on match in unicode mode
@@ -2592,7 +2675,7 @@ struct Input(Char)
 +/
 template BacktrackingMatcher(alias hardcoded)
 {
-    struct BacktrackingMatcher(Char, Stream=Input!Char)
+    struct BacktrackingMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         if(is(Char : dchar))
     {
         struct State
@@ -2620,7 +2703,7 @@ template BacktrackingMatcher(alias hardcoded)
         State[] states;
         Group[] groupStack;//array list
         Group[] matches, backrefed;
-    
+        Allocator* alloc;
         ///
         @property bool atStart(){ return index == 0; }
         ///
@@ -2633,10 +2716,11 @@ template BacktrackingMatcher(alias hardcoded)
                 index = s.lastIndex;
         }
         ///
-        this(RegEx program, Stream stream)
+        this(RegEx program, Stream stream, Allocator* allocator)
         {
             re = program;
             s = stream;
+            alloc = allocator;
             next();
             exhausted = false;
             trackers = new size_t[re.ngroup+1];
@@ -2991,7 +3075,7 @@ template BacktrackingMatcher(alias hardcoded)
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
                     prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
                     prog.ngroup = me - ms;
-                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack);
+                    auto backMatcher = BacktrackingMatcher!(Char, Allocator, typeof(s.loopBack))(prog, s.loopBack, alloc);
                     backMatcher.matches = matches[ms .. me];
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
@@ -3961,7 +4045,7 @@ enum SingleShot { Fwd, Bwd };
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
-struct ThompsonMatcher(Char, Stream=Input!Char)
+struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     if(is(Char : dchar))
 {
     alias const(Char)[] String;
@@ -3978,6 +4062,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     bool matched;
     bool seenCr;    //true if CR was processed   
     bool exhausted;
+    Allocator* alloc;
     /// true if it's start of input
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
@@ -3994,23 +4079,22 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         return true;
     }
     ///
-    this()(RegEx program, Stream stream)
+    this()(RegEx program, Stream stream, Allocator* allocator)
     {
-        s = stream;
         re = program;
         s = stream;
+        alloc = allocator;
         if(re.hotspotTableSize)
-        {
-            merge = new size_t[re.hotspotTableSize];
-            reserve(re.hotspotTableSize+2);
-        }
+            merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
+        reserve(4 + re.hotspotTableSize);//4 is a wild guess, alternation branches bring in extra thread per branch
         genCounter = 0;
     }
-    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
+    this(S)(ThompsonMatcher!(Char,Allocator,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
     {
         s = stream;
         re = matcher.re;
         re.ir = piece;
+        alloc = allocator;
         merge = matcher.merge;
         genCounter = matcher.genCounter;
     }
@@ -4084,7 +4168,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         if(matched && !(re.flags & RegexOption.global))
            exhausted = true;
-        //writeln("CLIST :", clist[]);
         //TODO: partial matching
         return matched;
     }
@@ -4093,9 +4176,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     +/
     void finish(const(Thread)* t, Group[] matches)
     {
-        //debug(fred_matching) writeln(t.matches);
         matches.ptr[0..re.ngroup] = t.matches.ptr[0..re.ngroup];
-        //end of the whole match happens after current symbol
         debug(fred_matching) 
         {
             writef("FOUND pc=%s prog_len=%s",
@@ -4404,9 +4485,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.LookbehindStart:
                 case IR.NeglookbehindStart:
                     auto backMatcher = 
-                        ThompsonMatcher!(Char, typeof(s.loopBack))
-                        (this, prog[t.pc..t.pc+prog[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
+                        ThompsonMatcher!(Char, Allocator, typeof(s.loopBack))
+                        (this, prog[t.pc..t.pc+prog[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
                     backMatcher.freelist = freelist;
+                    backMatcher.alloc = alloc;
                     backMatcher.re.ngroup = prog[t.pc+2].raw - prog[t.pc+1].raw;
                     backMatcher.backrefed = t.matches;
                     //backMatch
@@ -4436,7 +4518,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     uint len = prog[t.pc].data;
                     uint ms = prog[t.pc+1].raw, me = prog[t.pc+2].raw;
                     bool positive = prog[t.pc].code == IR.LookaheadStart;
-                    auto fwdMatcher = ThompsonMatcher(this, prog[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s);
+                    auto fwdMatcher = ThompsonMatcher(this, prog[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s, alloc);
                     fwdMatcher.freelist = freelist;
                     fwdMatcher.front = front;
                     fwdMatcher.index = index;
@@ -4984,10 +5066,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
     }
     ///
-    void reserve(uint size)
+    void reserve(size_t size)
     {//re.ngroup is unsigned
         const tSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
-        void[] mem = new void[tSize*size];
+        void[] mem = alloc.allocate(tSize*size)[0 .. tSize*size];
         freelist = cast(Thread*)&mem[0];
         size_t i;
         for(i=tSize; i<tSize*size; i+=tSize)
@@ -5124,15 +5206,19 @@ private:
     alias Unqual!(typeof(R.init[0])) Char;
     alias Engine!Char EngineType;
     EngineType engine;
-    
+    ChunkedAllocator alloc;
 public:
     ///
     this(RegEx prog, R _input)
     {
         input = _input;
         matches = new Group[prog.ngroup];
-        engine = EngineType(prog, Input!Char(input));
+        engine = EngineType(prog, Input!Char(input), &alloc);
         _empty = !engine.match(matches);
+    }
+    this(this)
+    {
+        debug(fred_allocation) writeln("RegexMatch postblit");
     }
     ///
     @property R pre()
@@ -5150,8 +5236,8 @@ public:
         assert(!empty);
         return input[matches[0].begin .. matches[0].end];
     }
-    ///
-    @property ref front()
+    ///@@@BUG@@@ 6199,  should be ref to avoid postblits
+    @property auto front()
     {
         return this;
     }
@@ -5382,7 +5468,7 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
             _match = Rx(separator, _input);
         }
     }
-
+    
     auto ref opSlice()
     {
         return this.save();
@@ -5428,6 +5514,7 @@ Splitter!(Range) splitter(Range)(Range r, RegEx pat)
 {
     return Splitter!(Range)(r, pat);
 }
+
 ///
 String[] split(String)(String input, RegEx rx)
     if(isSomeString!String)

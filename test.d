@@ -303,7 +303,7 @@ unittest
         TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
         TestVectors(   `(?<=((ab|da)*))x`,    "abdaabx", "y",        "$&-$2-$1",  "x-ab-abdaab"),
         ];
-    string produceExpected(M,String)(M m, String fmt)
+    string produceExpected(M,String)(auto ref M m, String fmt)
     {
         auto app = appender!(String)();
         replaceFmt(fmt, m.captures, app, true);
@@ -315,7 +315,7 @@ unittest
         foreach(Char; TypeTuple!(char, wchar, dchar))
         {
             alias immutable(Char)[] String;
-            String produceExpected(M,Range)(M m, Range fmt)
+            String produceExpected(M,Range)(auto ref M m, Range fmt)
             {
                 auto app = appender!(String)();
                 replaceFmt(fmt, m.captures, app, true);
