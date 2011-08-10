@@ -178,8 +178,19 @@ struct Bytecode
     @property bool isStart() const { return isStartIR(code); }
     ///ditto
     @property bool isEnd() const { return isEndIR(code); }
-    /// number of arguments
+    /// number of arguments for this instruction
     @property int args() const { return immediateParamsIR(code); }
+    ///mark this GroupStart or GroupEnd as referenced in backreference
+    void setBackrefence()
+    {
+        assert(code == IR.GroupStart || code == IR.GroupEnd);
+        raw = raw | (1<<23);
+    }
+    @property bool backreference() const
+    {
+        assert(code == IR.GroupStart || code == IR.GroupEnd);
+        return cast(bool)(raw & (1<<23));
+    }
     /// human readable name of instruction
     @property string mnemonic() const
     {
@@ -253,7 +264,7 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
                 name = "'"~v.name~"'";
                 break;
             }
-        formattedWrite(output, " %s #%u ",
+        formattedWrite(output, " %s #%u " ~ (irb[pc].backreference ? "referenced" : ""),
                 name, n);
         break;
     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
@@ -1033,7 +1044,7 @@ auto memoizeExpr(string expr)()
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
-const(Charset) getUnicodeSet(in char[] name, bool negated)
+const(Charset) getUnicodeSet(in char[] name, bool negated,  bool casefold)
 {
     alias comparePropertyName ucmp;
     Charset s;
@@ -1154,7 +1165,19 @@ const(Charset) getUnicodeSet(in char[] name, bool negated)
             s = cast(Charset)range[eq].set;
         }
     }
-    if(negated)
+    if(casefold)
+    {
+        Charset n;
+        dchar[5] buf;
+        foreach(ch; s[])
+        {
+            auto range = getCommonCasing(ch, buf);
+            foreach(v; range)
+                n.add(v);
+        }
+        return cast(const Charset) (negated ? n.negate : n);
+    }       
+    else if(negated)
     {
 		s = s.dup;//tables are immutable
         s.negate();
@@ -1221,6 +1244,8 @@ struct Parser(R, bool CTFE=false)
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(Charset)[] charsets;  //
     const(Trie)[] tries; //
+    uint[] backrefed; //bitarray for groups
+    
     this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
@@ -1243,6 +1268,12 @@ struct Parser(R, bool CTFE=false)
             }
         }
 
+    }
+    void markBackref(uint n)
+    {   
+        if(n/32 >= backrefed.length)
+            backrefed.length = n/32 + 1;
+        backrefed[n/32] |= 1<<(n & 31);
     }
     @property dchar current(){ return _current; }
     bool next()
@@ -2186,6 +2217,7 @@ struct Parser(R, bool CTFE=false)
             if(nref >= ngroup)
                 nref /= 10;
             put(Bytecode(IR.Backref, nref));
+            markBackref(nref);
             break;
         default:
             auto op = Bytecode(IR.Char, current);
@@ -2206,7 +2238,7 @@ struct Parser(R, bool CTFE=false)
             if(current != '-' && current != ' ' && current != '_')
                 result[k++] = cast(char)ascii.toLower(current);
         enforce(k != MAX_PROPERTY, "invalid property name");
-		auto s = getUnicodeSet(result[0..k], negated);
+		auto s = getUnicodeSet(result[0..k], negated, false);//TODO: speed up casefold map, cast(bool)(re_flags & RegexOption.casefold));
 		enforce(!s.empty, "unrecognized unicode property spec");
 		enforce(current == '}', "} expected ");
 		next();
@@ -2215,9 +2247,9 @@ struct Parser(R, bool CTFE=false)
     //
     void error(string msg)
     {
-        auto app = appender!string;
+        auto app = appender!string();
         ir = null;
-        ctSub("%s\nPattern with error: `%s <--HERE-- %s`",
+        formattedWrite(app, "%s\nPattern with error: `%s` <--HERE-- `%s`",
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
@@ -2239,12 +2271,20 @@ struct RegEx
     uint flags;         //global regex flags
     const(Charset)[] charsets; //
     const(Trie)[]  tries; //
+    
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
     +/
-    void lightPostprocess()
+    void lightPostprocess(uint[] backrefs)
     {
+        //bit access helper
+        static uint isBackref(uint n, uint[] backrefs)
+        {
+            if(n/32 >= backrefs.length)
+                return 0;
+            return backrefs[n/32] & (1<<(n&31));
+        }
         struct FixedStack(T)
         {
             T[] arr;
@@ -2281,12 +2321,16 @@ struct RegEx
                     laRange.top = tuple(min(laRange.top[0], ir[i].data), max(laRange.top[1], ir[i].data));
                     ir[i] = Bytecode(IR.GroupStart, ir[i].data - laRange.top[0]);
                 }
+                if(isBackref(ir[i].data, backrefs))
+                    ir[i].setBackrefence();
                 break;
             case IR.GroupEnd:
                 if(!laRange.empty)
                 {//inside lookaround
                     ir[i] = Bytecode(IR.GroupEnd, ir[i].data - laRange.top[0]);
                 }
+                if(isBackref(ir[i].data, backrefs))
+                    ir[i].setBackrefence();
                 break;
             case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
                 laRange.push(tuple(uint.max, 0u));
@@ -2386,7 +2430,7 @@ struct RegEx
         flags = p.re_flags;
         charsets = p.charsets;
         tries = p.tries;
-        lightPostprocess();
+        lightPostprocess(p.backrefed);
         debug(fred_parser)
         {
             print();
@@ -2394,7 +2438,7 @@ struct RegEx
         debug validate();
     }
 }
-
+///same as RegEx, but also contains pointer to generated  machine code of the  matcher
 struct NativeRegEx(alias Fn)
 {
     RegEx _prog;
