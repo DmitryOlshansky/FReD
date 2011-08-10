@@ -14,7 +14,8 @@ else version(thompson)
 else version(ct_regex)
 	alias match matchFn;
 else	
-	static assert(0, "Choose version: backtracking or thompson or ct_regex");
+	static assert(0, "Use -version=backtracking or -version=thompson or -version=ct_regex");
+
 int main(string[] argv)
 {
     if(argv.length < 3){

@@ -283,9 +283,8 @@ unittest
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
 //lookahead
-        TestVectors("foo.(?=bar)",     "foobar foodbar", "y","$&-$1", "food-" ),
-      //BUG: matches being overwritten kills backref
-      //  TestVectors("(?:(.)(?!\\1))+",  "12345678990", "y", "$&-$1", "12345678-8" ),
+        TestVectors("(foo.)(?=(bar))",     "foobar foodbar", "y","$&-$1-$2", "food-food-bar" ),
+        //TestVectors(`(\d)\d(?!\1)`,  "111a22b334", "y", "$&-$1", "3-3" ),
 //lookback
         TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
         TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),
@@ -298,7 +297,7 @@ unittest
         TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
         TestVectors(   `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
         TestVectors(   `(?<=(abc|def|aef))x`,    "aefx", "y",        "$&-$1",  "x-aef"),
-        TestVectors(   `(?<=(abc|dabc))x`,    "dabcx", "y",        "$&-$1",  "x-abc"),
+        TestVectors(   `(?<=(abc|dabc))(x)`,    "dabcx", "y",        "$&-$1-$2",  "x-abc-x"),
         TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
         TestVectors(   `(?<=((ab|da)*))x`,    "abdaabx", "y",        "$&-$2-$1",  "x-ab-abdaab"),
         ];
@@ -324,6 +323,7 @@ unittest
             foreach(a, tvd; tv)
             {
                 uint c = tvd.result[0];
+                debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                 try
                 {
                     i = 1;
@@ -344,7 +344,6 @@ unittest
                     assert((c == 'y') ? i : !i, text(matchFn.stringof ~": failed to match pattern #", a ,": ", tvd.pattern));
                     if(c == 'y')
                     {
-                        debug writeln(" Test #", a, " pattern: ", tvd.pattern);
                         auto result = produceExpected(m, to!(String)(tvd.format));
                         assert(result == to!String(tvd.replace), text(matchFn.stringof ~": mismatch pattern #", a, ": ", tvd.pattern," expected: ",
                                     tvd.replace, " vs ", result));

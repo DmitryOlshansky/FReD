@@ -9,7 +9,7 @@ streamDecode.d     - upcoming stream regex support
 fred.d           - core library
 fred_uni.d       - unicode tables for properties
 test.d           - test suite
-tools\*          - various helper tools for codegeneration and self testing
+tools\*          - various helper tools for code generation and self testing
 
 Building
 --------------------------
@@ -41,35 +41,57 @@ unittest
     foreach(cur; m)//iterate over all matches
         writeln(cur.hit);
 
-    enum ctr = regex(`^.*/(.*)$`); //static regex, precompiled
+    enum ctr = regex(`^.*/(.+)/?$`); //static regex, precompiled
     auto m2 = match("foo/bar", ctr);   //first match found here if any
-    asseet(!m2.empty);   //so be sure to check it before examining contents!
+    assert(!m2.empty);   //so be sure to check it before examining contents!
     assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
 }
 
 (you can also find other usage patterns in fred_r.d, test.d or in Phobos documentation on std.regex)
 Caveat for static regexes: result of regex(....) in this case has different type for each pattern, to store a pack of them use Tuples not arrays.
 
+Syntax
+--------------------------
+I'd really hate to reiterate all the trivia here. But sure, it will be a nice and big table in DDoc later on.
+To get an idea of syntax seek column ECMScript here http://www.regular-expressions.info/refflavors.html
+(but in it's behavior it's very similar to .Net)
+and add this one to the mix  http://www.regular-expressions.info/refunicode.html
+Notable "extra" features :
+    - lookbehind with full regex syntax (except another lookaround)
+    - \p{xxx} and \P{xxx} unicode properties (Perl style)
+    - named groups (?P<mygroup>abc) (Python styled)
+    - full set operations inside character classes,
+      operators are -- subtraction, && intersection, ~~ symmetric difference, || union
+   
+Subtle moments:
+    - Unicode blocks use InBlock syntax
+    - single codepoints use \u and \U syntax (\x for 2 digit acsii),
+    - \b, \B, \d, \w, etc are Unicode aware and use full sets of characters
+    - backreferences must be locally unique e.g. (xxx)\1 is not localy unique, while (xxx)b\1 is
+
+I not opposed to getting multiple syntax profiles (a-la Boost), but for the moment it's out the scope of project.
 
 Notes for testers
 --------------------------
+While project is mature enough for mainstream usage (barring CTFE parts), there could be some bugs in the hiding.
 Things to keep an eye for:
-
     - project doesn't compile with FReD, but it did with std.regex
     - hits on assert(0) and access violation :o)
     - innocent looking pattern takes enormous time to match, particularly
       if it's two mostly identical patterns that have drastically different performance
     - character set operations (particularly subtraction (--) and intersection (&&))
-    - looong patterns (though I have an estimate where they should explode)
+    - interesting case insensitve matching (i.e. unicode characters/texts)
     - Unicode conformance, see level 1 at http://unicode.org/reports/tr18/
     - static regexes, this is not for the faint of heart, but if you can get CTFE internal error (easy)
       and able to reduce it (not so easy) then please do it :)
+    - there are 3 different regex engines (counting C-T one) 
+      to invoke traditional backtracking engine use bmatch instead of match
 
 Report any bugs at github : https://github.com/blackwhale/FReD/issues/
-or send on email dmitry.olsh(at)gmail.com tag the topic it with [GSOC] or [FReD]
+or send email to dmitry.olsh(at)gmail.com tag the topic with [GSOC] or [FReD]
 Please don't hesitate to include bogus pattern, test _input_, OS and compiler version
 Any additional tests on e.g. conformance are also welcome.
 Know some really good regex library Brand X (for c/c++ preferably)? Please do tell.
-If your favorite regex pattern run orders of magnitude slower on FReD then on this Brand X library then ....
+If your favorite regex pattern runs orders of magnitude slower on FReD then on this Brand X library then ....
 well, I can't guarantee anything but will sure take a look (please make sure Brand X _does_ use UTF-8/16/32)
-And if you ended up creating another grep like program to benchmark it send it my way.
+And if you ended up creating another grep like program to benchmark it send, of course send it my way.
