@@ -4666,20 +4666,17 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         L_Charset:
         L_OrChar:
         L_Char:  
+            mixin(replica);
         L_Any:
         L_Repeat:
-            mixin(replica);
+        L_OrFetch:
         L_InfiniteFetch:
         L_Infinite:
-            mixin(replica);
         L_GotondOr:
         L_Or:
         L_Option:
-        L_OrFetch:
-            mixin(replica);
         L_GroupStart:
         L_GroupEnd:
-            mixin(replica);
         L_Wordboundary:
         L_NotWordboundary:
         L_Bol:
