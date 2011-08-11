@@ -4060,7 +4060,7 @@ enum replica = q{
                     writef(" %s ", x.pc);
                 writeln("]");
             }
-            switch(prog[t.pc].code)
+            switch(re.ir[t.pc].code)
             {
             case IR.End:
                 finish(t, matches);
@@ -4173,27 +4173,27 @@ enum replica = q{
                 }
                 goto L_Eol;
             case IR.InfiniteStart, IR.InfiniteQStart:
-                t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
+                t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
                 goto case IR.InfiniteEnd; // both Q and non-Q
             case IR.RepeatStart, IR.RepeatQStart:
-                t.pc += prog[t.pc].data + IRL!(IR.RepeatStart);
+                t.pc += re.ir[t.pc].data + IRL!(IR.RepeatStart);
                 goto case IR.RepeatEnd; // both Q and non-Q
             case IR.RepeatEnd:
             case IR.RepeatQEnd:
                 // len, step, min, max
-                uint len = prog[t.pc].data;
-                uint step =  prog[t.pc+1].raw;
-                uint min = prog[t.pc+2].raw;
+                uint len = re.ir[t.pc].data;
+                uint step =  re.ir[t.pc+1].raw;
+                uint min = re.ir[t.pc+2].raw;
                 if(t.counter < min)
                 {
                     t.counter += step;
                     t.pc -= len;
                     goto L_Repeat;
                 }
-                uint max = prog[t.pc+3].raw;
+                uint max = re.ir[t.pc+3].raw;
                 if(t.counter < max)
                 {
-                    if(prog[t.pc].code == IR.RepeatEnd)
+                    if(re.ir[t.pc].code == IR.RepeatEnd)
                     {
                         //queue out-of-loop thread
                         worklist.insertFront(fork(t, t.pc + IRL!(IR.RepeatEnd),  t.counter % step));
@@ -4216,25 +4216,25 @@ enum replica = q{
                 goto L_Repeat;
             case IR.InfiniteEnd:
             case IR.InfiniteQEnd:
-                if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[t.pc + 1].raw+t.counter] );
-                    merge[prog[t.pc + 1].raw+t.counter] = genCounter;
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
                 }
                 else
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
                     recycle(t);
                     t = worklist.fetch();
                     if(!t)
                         return;
                     goto L_InfiniteFetch;
                 }
-                uint len = prog[t.pc].data;
+                uint len = re.ir[t.pc].data;
                 uint pc1, pc2; //branches to take in priority order
-                if(prog[t.pc].code == IR.InfiniteEnd)
+                if(re.ir[t.pc].code == IR.InfiniteEnd)
                 {
                     pc1 = t.pc - len;
                     pc2 = t.pc + IRL!(IR.InfiniteEnd);
@@ -4267,17 +4267,17 @@ enum replica = q{
                 }
                 goto L_Infinite;
             case IR.OrEnd:
-                if(merge[prog[t.pc + 1].raw+t.counter] < genCounter)
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
-                    merge[prog[t.pc + 1].raw+t.counter] = genCounter;
+                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
                     t.pc += IRL!(IR.OrEnd);
                 }
                 else
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[prog[t.pc + 1].raw+t.counter] );
+                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
                     recycle(t);
                     t = worklist.fetch();
                     if(!t)
@@ -4289,31 +4289,31 @@ enum replica = q{
                 t.pc += IRL!(IR.OrStart);
                 goto case;
             case IR.Option:
-                uint next = t.pc + prog[t.pc].data + IRL!(IR.Option);
+                uint next = t.pc + re.ir[t.pc].data + IRL!(IR.Option);
                 //queue next Option
-                if(prog[next].code == IR.Option)
+                if(re.ir[next].code == IR.Option)
                 {
                     worklist.insertFront(fork(t, next, t.counter));
                 }
                 t.pc += IRL!(IR.Option);
                 goto L_Option;
             case IR.GotoEndOr:
-                t.pc = t.pc + prog[t.pc].data + IRL!(IR.GotoEndOr);
+                t.pc = t.pc + re.ir[t.pc].data + IRL!(IR.GotoEndOr);
                 goto L_GotondOr;
             case IR.GroupStart: 
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].begin = index;
                 t.pc += IRL!(IR.GroupStart);
                 //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                 goto L_GroupStart;
             case IR.GroupEnd:  
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].end = index;
                 t.pc += IRL!(IR.GroupEnd);
                 //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                 goto L_GroupEnd;
             case IR.Backref:
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 Group* source;
                 if(n >= re.ngroup)
                     source = backrefed.ptr;
@@ -4358,14 +4358,14 @@ enum replica = q{
             case IR.NeglookbehindStart:
                 auto backMatcher = 
                     ThompsonMatcher!(Char, Allocator, typeof(s.loopBack))
-                    (this, prog[t.pc..t.pc+prog[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
+                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
                 backMatcher.freelist = freelist;
                 backMatcher.alloc = alloc;
-                backMatcher.re.ngroup = prog[t.pc+2].raw - prog[t.pc+1].raw;
+                backMatcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
                 backMatcher.backrefed = t.matches;
                 //backMatch
                 backMatcher.next(); //load first character from behind
-                if(backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (prog[t.pc].code == IR.LookbehindStart))
+                if(backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart))
                 {
                     recycle(t);
                     t = worklist.fetch();
@@ -4374,13 +4374,13 @@ enum replica = q{
                     //
                 }
                 else
-                    t.pc += prog[t.pc].data + IRL!(IR.LookbehindStart) + IRL!(IR.LookbehindEnd);
+                    t.pc += re.ir[t.pc].data + IRL!(IR.LookbehindStart) + IRL!(IR.LookbehindEnd);
                 goto L_Lookbehind;
             case IR.LookaheadEnd:
             case IR.NeglookaheadEnd:
-                t.pc = prog[t.pc].indexOfPair(t.pc);
-                assert(prog[t.pc].code == IR.LookaheadStart || prog[t.pc].code == IR.NeglookaheadStart);
-                uint ms = prog[t.pc+1].raw, me = prog[t.pc+2].raw;
+                t.pc = re.ir[t.pc].indexOfPair(t.pc);
+                assert(re.ir[t.pc].code == IR.LookaheadStart || re.ir[t.pc].code == IR.NeglookaheadStart);
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
                 finish(t, matches.ptr[ms..me]);
                 recycle(t);
                 //cut off low priority threads
@@ -4390,10 +4390,10 @@ enum replica = q{
             case IR.LookaheadStart:
             case IR.NeglookaheadStart:
                 auto save = index;
-                uint len = prog[t.pc].data;
-                uint ms = prog[t.pc+1].raw, me = prog[t.pc+2].raw;
-                bool positive = prog[t.pc].code == IR.LookaheadStart;
-                auto fwdMatcher = ThompsonMatcher(this, prog[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s, alloc);
+                uint len = re.ir[t.pc].data;
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
+                bool positive = re.ir[t.pc].code == IR.LookaheadStart;
+                auto fwdMatcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s, alloc);
                 fwdMatcher.freelist = freelist;
                 fwdMatcher.front = front;
                 fwdMatcher.index = index;
@@ -4422,10 +4422,10 @@ enum replica = q{
             static if(withInput)
             {
                 case IR.OrChar://assumes IRL!(OrChar) == 1
-                    uint len = prog[t.pc].sequence;
+                    uint len = re.ir[t.pc].sequence;
                     uint end = t.pc + len;
                     for(; t.pc<end; t.pc++)
-                        if(prog[t.pc].data == front)
+                        if(re.ir[t.pc].data == front)
                             break;
                     if(t.pc != end)
                     {
@@ -4439,9 +4439,9 @@ enum replica = q{
                         return;
                     goto L_OrChar;
                 case IR.Char:
-                    if(front == prog[t.pc].data)
+                    if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)prog[t.pc].data);
+                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc += IRL!(IR.Char);
                         nlist.insertBack(t);
                     }
@@ -4459,7 +4459,7 @@ enum replica = q{
                         return;
                     goto L_Any;
                 case IR.Charset:
-                    if(re.charsets[prog[t.pc].data][front])
+                    if(re.charsets[re.ir[t.pc].data][front])
                     {
                         debug(fred_matching) writeln("Charset passed");
                         t.pc += IRL!(IR.Charset);
@@ -4475,7 +4475,7 @@ enum replica = q{
                         return;
                     goto L_Charset;
                 case IR.Trie:
-                    if(re.tries[prog[t.pc].data][front])
+                    if(re.tries[re.ir[t.pc].data][front])
                     {
                         debug(fred_matching) writeln("Trie passed");
                         t.pc += IRL!(IR.Trie);
@@ -4491,7 +4491,7 @@ enum replica = q{
                         return;
                     goto L_Trie;
                 default:
-                    assert(0, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
+                    assert(0, "Unrecognized instruction " ~ re.ir[t.pc].mnemonic);
             }
             else
             {
@@ -4659,7 +4659,6 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     +/
     void eval(bool withInput)(Thread* t, Group[] matches)
     {
-        Bytecode[] prog = re.ir;
         ThreadList worklist;
         debug(fred_matching) writeln("Evaluating thread");
         L_Trie:
