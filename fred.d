@@ -18,6 +18,7 @@ import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.functional, std.exception;
 import core.bitop;
 import ascii = std.ascii;
+import std.string : representation;
 
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
@@ -2680,63 +2681,168 @@ size_t effectiveSize(Char)()
 struct ShiftOr(Char)
 {
 private:
-    uint table[256];
+    uint[256] table;
     size_t n_length;
     enum charSize =  effectiveSize!Char();
     
-    static uint advance(uint mask)
-    {
-        return mask << charSize;
-    }
-    
-    uint add(dchar ch, uint mask)
-    {
-        static if(charSize == 1)
-        {
-            table[cast(ubyte)ch] &= ~mask;
-        }
-        else static if(charSize == 2)
-        {
-            uint val = ch;
-            table[cast(ubyte)(val&0xFF)] &= ~mask;
-            mask <<= 1;
-            
-            val >>= 8;
-            table[cast(ubyte)(val&0xFF)] &= ~mask;
-        }
-        else static if(charSize == 3)
-        {
-            uint val = ch;
-            table[cast(ubyte)(val&0xFF)] &= ~mask;
-            mask <<= 1;
-            
-            val >>= 8;
-            table[cast(ubyte)(val&0xFF)] &= ~mask;
-            mask <<= 1;
-            
-            val >>= 8;
-            table[cast(ubyte)(val&0xFF)] &= ~mask;
-        }
-        return mask;
-    }
-    
-    uint add(dchar ch, uint mask)
-    {
-        
-    }
 public:
-    this(in Bytecode[] ir)
+    this(in Bytecode[] prog)
     {
-        n_length = needle.length;
+        static struct Thread
+        {
+            uint[256] tab;
+            uint mask;
+            uint idx;
+            uint pc, counter;
+            this(uint newPc, uint newCounter)
+            {
+                pc = newPc;
+                counter = newCounter;
+                mask = 1;
+                idx = 0;
+                tab[] = uint.max;
+            }
+            uint add(dchar ch)
+            {
+                static if(charSize == 3)
+                {
+                    uint val = ch;
+                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
+                    mask <<= 1;
+                    val >>= 8;
+                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
+                    mask <<= 1;    
+                    val >>= 8;
+                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
+                    mask <<= 1;  
+                    assert(val <= 0x10);
+                    return 3;
+                }
+                else
+                {
+                    Char[dchar.sizeof/Char.sizeof] buf;
+                    size_t total = encode(buf, ch);
+                    for(size_t i=0; i<total; i++, mask<<=1)
+                    {
+                        static if(charSize == 1)
+                            tab[buf[i]] &= ~mask;
+                        else static if(charSize == 2)
+                        {
+                            tab[buf[i]&0xFF] &= ~mask;
+                            mask <<= 1;
+                            tab[buf[i]>>8] &= ~mask;
+                        }
+                    }
+                    return total*Char.sizeof;
+                }
+            }
+            @property bool full(){    return !mask; }
+        }
+        static Thread fork(ref const(Thread) t, uint newPc, uint newCounter)
+        {
+            Thread nt = t;
+            nt.pc = newPc;
+            nt.counter = newCounter;
+            return nt;
+        }
+        static Thread fetch(ref Thread[] worklist)
+        {
+            auto t = worklist[$-1];
+            worklist.length -= 1;
+            worklist.assumeSafeAppend();
+            return t;
+        }
         table[] =  uint.max;
-        prepareShiftOr(needle);
+        Thread[] trs;
+        Thread t = Thread(0, 0);
+        n_length = 32;
+        for(;;)
+        {
+        L_Eval_Thread:
+            for(;;)
+            {
+                switch(prog[t.pc].code)
+                {
+                case IR.Char:
+                    uint s = t.add(prog[t.pc].data);
+                    if(t.full)
+                        goto L_StopThread;
+                    t.idx += s;
+                    t.pc += IRL!(IR.Char);
+                    break;
+                case IR.OrChar://assumes IRL!(OrChar) == 1
+                    uint msave = t.mask;
+                    uint s = 0; 
+                    uint len = prog[t.pc].sequence;
+                    uint end = t.pc + len;
+                    for(; t.pc<end; t.pc++)
+                    {
+                        s = max(s, prog[t.pc].data);
+                        if(t.full)
+                           goto L_StopThread; 
+                        t.mask = msave;
+                    }
+                    t.idx += s;
+                    t.mask = 1<<t.idx;
+                    break;
+                case IR.Charset:
+                    goto L_StopThread;
+                case IR.Trie:
+                    goto L_StopThread;
+                case IR.GotoEndOr:
+                    t.pc += IRL!(IR.GotoEndOr)+prog[t.pc].data;
+                    assert(prog[t.pc].code == IR.OrEnd);
+                    goto case;
+                case IR.OrEnd:
+                    t.pc += IRL!(IR.OrEnd);
+                    break;
+                case IR.OrStart:
+                    t.pc += IRL!(IR.OrStart);
+                    goto case;
+                case IR.Option:
+                    uint next = t.pc + prog[t.pc].data + IRL!(IR.Option);
+                    //queue next Option
+                    if(prog[next].code == IR.Option)
+                    {
+                        trs ~= fork(t, next, t.counter);
+                    }
+                    t.pc += IRL!(IR.Option);
+                    break;
+                case IR.Any:
+                    t.pc += IRL!(IR.Any);
+                    break;
+                case IR.GroupStart, IR.GroupEnd:
+                    t.pc += IRL!(IR.GroupStart);
+                    break;
+                default:
+                L_StopThread:
+                    table[] &= t.tab[];
+                    n_length = min(t.idx, n_length);
+                    break L_Eval_Thread;
+                }
+            }
+            if(trs.empty)
+                break;
+            t = fetch(trs);
+        }
+        debug(fred_search)
+        {
+            for(size_t i=0; i<table.length; i+=4)
+            {
+                writefln("%32b %32b %32b %32b",table[i], table[i+1], table[i+2], table[i+3]);
+            }
+            writeln("Min length: ", n_length);
+        }   
     }
-    
-    size_t search(Char)(const(Char)[] haystack, size_t idx)
+    @property bool empty() const {  return n_length == 0; }
+    ///
+    size_t search(const(Char)[] haystack, size_t idx)
     {
-        auto limit = 1<<(n_length*charSize - 1);
+        assert(!empty);
+        uint limit = 1u<<(n_length - 1u);
         auto data = representation(haystack);
         uint state = ~0;
+        debug(fred_search) writefln("Limit: %32b",limit);
         for(size_t i=idx; i<data.length;i++){
             static if(charSize == 1)
             {
@@ -2744,8 +2850,7 @@ public:
             }
             else static if(charSize == 2)
             {
-                uint val = data[i];
-                assert(val <= ushort.max);
+                ushort val = data[i];
                 state = (state<<1) | table[val&0xFF];
                 val >>= 8;
                 state = (state<<1) | table[val];
@@ -2761,8 +2866,11 @@ public:
                 assert(val <= 0x10); //dchar <= 0x10FFFF
                 state = (state<<1) | table[val];
             }
+            debug(fred_search) writefln("State: %32b", state);
             if(!(state & limit))
-                return i-n_length+1;
+            {
+                return (i-n_length/charSize+1);
+            }
         }
         return data.length;
     }
@@ -2789,7 +2897,26 @@ unittest
         size_t x = kick.search("aabaacaa", 0);
         assert(x == 3);
         x = kick.search("aabaacaa", x+1);
-        assert(x == 8);
+        assert(x == 8);        
+    }
+    foreach(i, v;TypeTuple!(char, wchar, dchar))
+    {
+        alias v Char;
+        alias immutable(v)[] String;
+        auto r = regex(`abc[a-z]`);
+        auto kick = ShiftOr!Char(r.ir);
+        auto x = kick.search(to!String("abbabca"), 0);
+        assert(x == 3, text("real x is ", x));
+        
+        auto r2 = regex(`(ax|bd|cdy)`);
+        String s2 = to!String("abdcdyabax");
+        kick = ShiftOr!Char(r2.ir);
+        x = kick.search(s2, 0);
+        assert(x == 1, text("real x is ", x));
+        x = kick.search(s2, x+1);
+        assert(x == 3, text("real x is ", x));
+        x = kick.search(s2, x+1);
+        assert(x == 8, text("real x is ", x));
     }
 }
 
