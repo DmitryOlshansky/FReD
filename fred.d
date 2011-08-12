@@ -2364,6 +2364,7 @@ struct RegEx
     const(Charset)[] charsets; //
     const(Trie)[]  tries; //
     uint[] backrefed; //bit array of backreferenced submatches
+    
     //bit access helper
     uint isBackref(uint n)
     {
@@ -2377,7 +2378,6 @@ struct RegEx
     +/
     void lightPostprocess() //TODO: translate indexes of backrefes to groups inside lookaround
     {
-       
         struct FixedStack(T)
         {
             T[] arr;
@@ -2588,6 +2588,209 @@ int quickTestFwd(uint pc, dchar front, RegEx re)
         return 0;
     }
 }
+///simple minded get-me-to-the-prefix kickstart
+struct FixedKickstart(Char)
+{
+private:
+    Char[] prefix;
+    void addChar(dchar ch)
+    {
+        Char[dchar.sizeof/Char.sizeof] buf;
+        static if(!is(dchar : Char))
+        {      
+            size_t len = encode(buf, ch);
+            prefix ~= buf[0..len];
+        }
+        else
+            prefix ~= ch;
+    }
+public:
+    this(Bytecode[] prog)
+    {
+        uint pc = 0;
+        uint counter = 0;
+L_ConstructLoop:
+        for(;;)
+            switch(prog[pc].code)
+            {
+                case IR.Char:
+                    addChar(cast(dchar)prog[pc].data);
+                    pc += IRL!(IR.Char);
+                    break;
+                case IR.GroupStart, IR.GroupEnd:
+                    pc += IRL!(IR.GroupStart);
+                    break;
+                case IR.Wordboundary, IR.Notwordboundary:
+                    if(prefix.length == 0) //no chars so far
+                        pc += IRL!(IR.Wordboundary);
+                    else
+                        break L_ConstructLoop;
+                    break;
+                case IR.RepeatStart:
+                    pc += IRL!(IR.RepeatStart)+prog[pc].data;
+                    assert(prog[pc].code == IR.RepeatEnd);
+                    goto case IR.RepeatEnd;
+                case IR.RepeatEnd:
+                    uint len = prog[pc].data;
+                    uint step = prog[pc+1].raw;
+                    uint min = prog[pc+2].raw;
+                    uint max = prog[pc+3].raw;
+                    if(counter < min)
+                    {
+                        counter += step;
+                        pc -= len;
+                    }
+                    else if(counter < max)
+                        break L_ConstructLoop;
+                    else
+                    {
+                        counter = counter%step;
+                        pc += IRL!(IR.RepeatEnd);
+                    }
+                    break;
+                
+                default:
+                    break L_ConstructLoop;
+            }
+    }
+    //
+    @property bool empty() const{ return prefix.empty; }
+    //
+    size_t search(const(Char)[] str, size_t index)
+    {
+        auto x = find(str[index..$], prefix).length;
+        return str.length - x;
+    }
+}
+
+size_t effectiveSize(Char)()
+{
+    static if(is(Char == char))
+        return 1;
+    else static if(is(Char == wchar))
+        return 2;
+    else static if(is(Char == dchar))
+        return 3;
+    else
+        static assert(0);
+}
+
+///
+struct ShiftOr(Char)
+{
+private:
+    uint table[256];
+    size_t n_length;
+    enum charSize =  effectiveSize!Char();
+    
+    static uint advance(uint mask)
+    {
+        return mask << charSize;
+    }
+    
+    uint add(dchar ch, uint mask)
+    {
+        static if(charSize == 1)
+        {
+            table[cast(ubyte)ch] &= ~mask;
+        }
+        else static if(charSize == 2)
+        {
+            uint val = ch;
+            table[cast(ubyte)(val&0xFF)] &= ~mask;
+            mask <<= 1;
+            
+            val >>= 8;
+            table[cast(ubyte)(val&0xFF)] &= ~mask;
+        }
+        else static if(charSize == 3)
+        {
+            uint val = ch;
+            table[cast(ubyte)(val&0xFF)] &= ~mask;
+            mask <<= 1;
+            
+            val >>= 8;
+            table[cast(ubyte)(val&0xFF)] &= ~mask;
+            mask <<= 1;
+            
+            val >>= 8;
+            table[cast(ubyte)(val&0xFF)] &= ~mask;
+        }
+        return mask;
+    }
+    
+    uint add(dchar ch, uint mask)
+    {
+        
+    }
+public:
+    this(in Bytecode[] ir)
+    {
+        n_length = needle.length;
+        table[] =  uint.max;
+        prepareShiftOr(needle);
+    }
+    
+    size_t search(Char)(const(Char)[] haystack, size_t idx)
+    {
+        auto limit = 1<<(n_length*charSize - 1);
+        auto data = representation(haystack);
+        uint state = ~0;
+        for(size_t i=idx; i<data.length;i++){
+            static if(charSize == 1)
+            {
+                state = (state<<1) | table[data[i]];
+            }
+            else static if(charSize == 2)
+            {
+                uint val = data[i];
+                assert(val <= ushort.max);
+                state = (state<<1) | table[val&0xFF];
+                val >>= 8;
+                state = (state<<1) | table[val];
+            }
+            else static if(charSize == 3)
+            {
+                uint val = data[i];
+                assert(val <= dchar.max);
+                state = (state<<1) | table[val&0xFF];
+                val >>= 8;
+                state = (state<<1) | table[val&0xFF];
+                val >>= 8;
+                assert(val <= 0x10); //dchar <= 0x10FFFF
+                state = (state<<1) | table[val];
+            }
+            if(!(state & limit))
+                return i-n_length+1;
+        }
+        return data.length;
+    }
+}
+
+unittest
+{
+    foreach(i, v; TypeTuple!(char, wchar, dchar))
+    {
+        alias v Char;
+        alias immutable(v)[] String;
+        auto r = regex(`abc[a-z]`);
+        auto kick = FixedKickstart!Char(r.ir);
+        assert(kick.prefix == to!String("abc"));
+        auto r2 = regex(`(abc){2}a+`);
+        kick = FixedKickstart!Char(r2.ir);
+        assert(kick.prefix == to!String("abcabca"));
+        auto r3 = regex(`\b(a{2}b{3}){2,4}x`);
+        kick = FixedKickstart!Char(r3.ir);
+        assert(kick.prefix == to!String("aabbbaabbb"));
+        auto r4 = regex(`\ba{2}c\bxyz`);
+        kick = FixedKickstart!Char(r4.ir);
+        assert(kick.prefix == to!String("aac"));
+        size_t x = kick.search("aabaacaa", 0);
+        assert(x == 3);
+        x = kick.search("aabaacaa", x+1);
+        assert(x == 8);
+    }
+}
 
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
 /*struct Regex(Char)
@@ -2618,7 +2821,7 @@ struct Input(Char)
         _index = idx;
     }
     /// codepoint at current stream position
-    bool nextChar(ref dchar res,ref size_t pos)
+    bool nextChar(ref dchar res, ref size_t pos)
     {
         if(_index == _origin.length)
             return false;
@@ -2626,16 +2829,21 @@ struct Input(Char)
         res = std.utf.decode(_origin, _index);
         return true;
     }
+    bool search(Kickstart)(ref Kickstart kick, ref dchar res, ref size_t pos)
+    {
+        size_t idx = kick.search(_origin, _index);
+        if(idx != lastIndex)
+        {
+            _index = idx;
+            return nextChar(res, pos);
+        }
+        return false;
+    }
     ///index of at End position
     @property size_t lastIndex(){   return _origin.length; }
     
     ///support for backtracker engine, might not be present
     void reset(size_t index){   _index = index;  }
-    bool skip()
-    {   
-        _index += std.utf.stride(_origin, _index);
-        return _index != lastIndex;
-    }
     
     String opSlice(size_t start, size_t end){   return _origin[start..end]; }
     
@@ -2663,11 +2871,6 @@ struct Input(Char)
         
         ///support for backtracker engine, might not be present
         void reset(size_t index){   _index = index+std.utf.stride(_origin, index);  }
-        bool skip()
-        {   
-            _index -= std.utf.strideBack(_origin, _index); 
-            return _index != lastIndex;
-        }
         
         String opSlice(size_t start, size_t end){   return _origin[end..start]; }
         ///index of at End position
@@ -2687,6 +2890,8 @@ template BacktrackingMatcher(alias hardcoded)
     struct BacktrackingMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         if(is(Char : dchar))
     {
+        alias FixedKickstart!Char Kickstart;
+        
         struct State
         {//top bit in pc is set if saved along with matches
             size_t index;
@@ -2713,6 +2918,14 @@ template BacktrackingMatcher(alias hardcoded)
         Group[] groupStack;//array list
         Group[] matches, backrefed;
         Allocator* alloc;
+        static if(__traits(hasMember,Stream, "search"))
+        {
+            enum kicked = true;
+            Kickstart kickstart;
+        }
+        else
+            enum kicked = false;
+        
         ///
         @property bool atStart(){ return index == 0; }
         ///
@@ -2720,9 +2933,23 @@ template BacktrackingMatcher(alias hardcoded)
         ///
         void next()
         {    
-            seenCr = !(front ^ '\r');
+            seenCr = front == '\r';
             if(!s.nextChar(front, index))
                 index = s.lastIndex;
+        }
+        ///
+        void search()
+        {
+            static if(kicked)
+            {
+                //TODO: update seenCr
+                if(!s.search(kickstart, front, index))
+                {
+                    index = s.lastIndex;
+                }
+            }
+            else
+                next();
         }
         ///
         this(RegEx program, Stream stream, Allocator* allocator)
@@ -2739,6 +2966,8 @@ template BacktrackingMatcher(alias hardcoded)
             assert(groupStack.length >= matches.length);
             groupStack[0 .. re.ngroup] = Group.init;
             backrefed = new Group[re.ngroup];
+            static if(kicked)
+                kickstart = Kickstart(re.ir);
         }
         ///lookup next match, fills matches with indices into input
         bool match(Group matches[])
@@ -2772,7 +3001,7 @@ template BacktrackingMatcher(alias hardcoded)
                     return true;
                 }
                 else if(!atEnd)
-                    next();
+                    search();
                 else
                     break;
             }
@@ -4513,6 +4742,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     if(is(Char : dchar))
 {
     alias const(Char)[] String;
+    alias FixedKickstart!Char Kickstart;
     enum threadAllocSize = 16;
     Thread* freelist;
     ThreadList clist, nlist;
@@ -4527,6 +4757,14 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     bool seenCr;    //true if CR was processed   
     bool exhausted;
     Allocator* alloc;
+    static if(__traits(hasMember,Stream, "search"))
+    {
+        enum kicked = true;
+        Kickstart kickstart;
+    }
+    else
+        enum kicked = false;
+    bool delegate() searchFn;
     /// true if it's start of input
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
@@ -4543,6 +4781,21 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         return true;
     }
     ///
+    bool search()
+    {
+        static if(kicked)
+        {
+            //TODO: update seenCr
+            if(!s.search(kickstart, front, index))
+            {
+                index = s.lastIndex;
+                return false;
+            }
+            return true;
+        }
+        assert(0);
+    }
+    ///
     this()(RegEx program, Stream stream, Allocator* allocator)
     {
         re = program;
@@ -4552,6 +4805,11 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
             merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
         reserve(4 + re.hotspotTableSize);//4 is a wild guess, alternation branches bring in extra thread per branch
         genCounter = 0;
+        static if(kicked)
+        {
+            kickstart = Kickstart(re.ir);//TODO: supply allocator here as well
+            version(fred_search) writeln("Kickstart: ", kickstart.prefix);
+        }
     }
     this(S)(ThompsonMatcher!(Char,Allocator,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
     {
@@ -4580,8 +4838,16 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         }
         if(exhausted)
            return false;
+        static if(kicked)
+        {
+            searchFn = kickstart.empty ? &this.next : &this.search;
+        }
+        else
+            searchFn = &this.next;
         if(!matched)
-            next();
+        {
+           searchFn();
+        }
         else//char in question is  fetched in prev call to match
         {
             matched = false;
@@ -4616,7 +4882,12 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 }
                 clist = nlist;
                 nlist = ThreadList.init;
-                if(!next())
+                if(clist.tip is null)
+                {
+                    if(!searchFn())
+                        break;
+                }
+                else if(!next())
                     break;
             }
         else
