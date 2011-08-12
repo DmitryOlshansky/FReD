@@ -432,6 +432,7 @@ public:
             chunk.next = head.next;
             head.next = chunk;
         }
+        debug(fred_allocation) writeln("Chunked allocator: allocated %s bytes", size);
         return (cast(void*)chunk.data.ptr)[0 .. size];
     }
     T newArray(T)(size_t n)
@@ -4594,7 +4595,9 @@ enum replica = q{
                 backMatcher.backrefed = t.matches;
                 //backMatch
                 backMatcher.next(); //load first character from behind
-                if(backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart))
+                bool match = backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                freelist = backMatcher.freelist;
+                if(match)
                 {
                     recycle(t);
                     t = worklist.fetch();
@@ -4604,6 +4607,7 @@ enum replica = q{
                 }
                 else
                     t.pc += re.ir[t.pc].data + IRL!(IR.LookbehindStart) + IRL!(IR.LookbehindEnd);
+                
                 goto L_Lookbehind;
             case IR.LookaheadEnd:
             case IR.NeglookaheadEnd:
@@ -4629,6 +4633,7 @@ enum replica = q{
                 fwdMatcher.re.ngroup = me - ms;
                 fwdMatcher.backrefed = t.matches;
                 bool nomatch = fwdMatcher.matchOneShot!(SingleShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = fwdMatcher.freelist;
                 s.reset(index);
                 next();
                 if(nomatch)
@@ -4641,6 +4646,7 @@ enum replica = q{
                 }
                 else
                     t.pc += len + IRL!(IR.LookaheadEnd) + IRL!(IR.LookaheadStart);
+                
                 goto L_Lookahead;
             case IR.LookbehindEnd:
             case IR.NeglookbehindEnd:
@@ -4753,6 +4759,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     dchar front;
     size_t index;
     size_t genCounter;    //merge trace counter, goes up on every dchar
+    size_t threadSize;
     bool matched;
     bool seenCr;    //true if CR was processed   
     bool exhausted;
@@ -4801,6 +4808,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         re = program;
         s = stream;
         alloc = allocator;
+        threadSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
         if(re.hotspotTableSize)
             merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
         reserve(4 + re.hotspotTableSize);//4 is a wild guess, alternation branches bring in extra thread per branch
@@ -4817,6 +4825,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         re = matcher.re;
         re.ir = piece;
         alloc = allocator;
+        threadSize = matcher.threadSize;
         merge = matcher.merge;
         genCounter = matcher.genCounter;
     }
@@ -5029,7 +5038,6 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     +/
     void evalBack(bool withInput)(Thread* t, Group[] matches)
     {
-        Bytecode[] prog = re.ir;
         ThreadList worklist;
         debug(fred_matching) writeln("Evaluating thread backwards");
         do
@@ -5041,8 +5049,8 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                     writef(" %s ", x.pc);
                 writeln("]");
             }
-            debug(fred_matching) writeln(disassemble(prog, t.pc));
-            switch(prog[t.pc].code)
+            debug(fred_matching) writeln(disassemble(re.ir, t.pc));
+            switch(re.ir[t.pc].code)
             {
             case IR.Wordboundary:
                 dchar back;
@@ -5135,23 +5143,23 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 }
                 break;
             case IR.InfiniteStart, IR.InfiniteQStart:
-                uint len = prog[t.pc].data;
+                uint len = re.ir[t.pc].data;
                 uint mIdx = t.pc + len + IRL!(IR.InfiniteEnd); // we're always pointed at the tail of instruction
-                if(merge[prog[mIdx].raw+t.counter] < genCounter)
+                if(merge[re.ir[mIdx].raw+t.counter] < genCounter)
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
-                    merge[prog[mIdx].raw+t.counter] = genCounter;
+                                    t.pc, index, genCounter, merge[re.ir[mIdx].raw+t.counter] );
+                    merge[re.ir[mIdx].raw+t.counter] = genCounter;
                 }
                 else
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
+                                    t.pc, index, genCounter, merge[re.ir[mIdx].raw+t.counter] );
                     recycle(t);
                     t = worklist.fetch();
                     break;
                 }
-                if(prog[t.pc].code == IR.InfiniteStart)//greedy
+                if(re.ir[t.pc].code == IR.InfiniteStart)//greedy
                 {
                     worklist.insertFront(fork(t, t.pc-1, t.counter));
                     t.pc += len;
@@ -5164,16 +5172,16 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 break;
             case IR.InfiniteEnd:
             case IR.InfiniteQEnd://now it's a start
-                uint len = prog[t.pc].data;
+                uint len = re.ir[t.pc].data;
                 t.pc -= len+IRL!(IR.InfiniteStart);
-                assert(prog[t.pc].code == IR.InfiniteStart || prog[t.pc].code == IR.InfiniteQStart);
+                assert(re.ir[t.pc].code == IR.InfiniteStart || re.ir[t.pc].code == IR.InfiniteQStart);
                 goto case IR.InfiniteStart;
             case IR.RepeatStart, IR.RepeatQStart:
-                uint len = prog[t.pc].data;
+                uint len = re.ir[t.pc].data;
                 uint tail = t.pc + len + 1;
-                uint step =  prog[tail+1].raw;
-                uint min = prog[tail+2].raw;
-                uint max = prog[tail+3].raw;
+                uint step =  re.ir[tail+1].raw;
+                uint min = re.ir[tail+2].raw;
+                uint max = re.ir[tail+3].raw;
                 if(t.counter < min)
                 {
                     t.counter += step;
@@ -5181,7 +5189,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 }
                 else if(t.counter < max)
                 {
-                    if(prog[t.pc].code == IR.RepeatStart)//greedy
+                    if(re.ir[t.pc].code == IR.RepeatStart)//greedy
                     {
                         worklist.insertFront(fork(t, t.pc-1, t.counter%step));
                         t.counter += step;
@@ -5202,8 +5210,8 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 break;
             case IR.RepeatEnd:
             case IR.RepeatQEnd:
-                t.pc -= prog[t.pc].data+IRL!(IR.RepeatStart);
-                assert(prog[t.pc].code == IR.RepeatStart || prog[t.pc].code == IR.RepeatQStart);
+                t.pc -= re.ir[t.pc].data+IRL!(IR.RepeatStart);
+                assert(re.ir[t.pc].code == IR.RepeatStart || re.ir[t.pc].code == IR.RepeatQStart);
                 goto case IR.RepeatStart;
             case IR.OrEnd:
                 uint len = re.ir[t.pc].data;
@@ -5213,18 +5221,18 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 t.pc = t.pc + len; //to IR.GotoEndOr or just before IR.OrEnd
                 break;
             case IR.OrStart:
-                uint len = prog[t.pc].data;
+                uint len = re.ir[t.pc].data;
                 uint mIdx = t.pc + len + IRL!(IR.OrEnd); //should point to the end of OrEnd
-                if(merge[prog[mIdx].raw+t.counter] < genCounter)
+                if(merge[re.ir[mIdx].raw+t.counter] < genCounter)
                 {
                     debug(fred_matching) writefln("A thread(t.pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
-                    merge[prog[mIdx].raw+t.counter] = genCounter;
+                                    t.pc, index, genCounter, merge[re.ir[mIdx].raw+t.counter] );
+                    merge[re.ir[mIdx].raw+t.counter] = genCounter;
                 }
                 else
                 {
                     debug(fred_matching) writefln("A thread(t.pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[prog[mIdx].raw+t.counter] );
+                                    t.pc, index, genCounter, merge[re.ir[mIdx].raw+t.counter] );
                     recycle(t);
                     t = worklist.fetch();
                     break;
@@ -5253,17 +5261,17 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 t.pc--;
                 break;
             case IR.GroupStart: 
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].begin = index;
                 t.pc--;
                 break;
             case IR.GroupEnd:  
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].end = index;
                 t.pc--;
                 break;
             case IR.Backref:
-                uint n = prog[t.pc].data;
+                uint n = re.ir[t.pc].data;
                 auto source = n >= re.ngroup ? backrefed.ptr : t.matches.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
@@ -5297,7 +5305,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
           
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
-                uint ms = prog[t.pc+1].raw, me = prog[t.pc+2].raw;
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
                 finish(t, matches.ptr[ms .. me]);
                 recycle(t);
                 //cut off low priority threads
@@ -5317,10 +5325,10 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
             static if(withInput)
             {
                 case IR.OrChar://assumes IRL!(OrChar) == 1
-                    uint len = prog[t.pc].sequence;
+                    uint len = re.ir[t.pc].sequence;
                     uint end = t.pc - len;
                     for(; t.pc>end; t.pc--)
-                        if(prog[t.pc].data == front)
+                        if(re.ir[t.pc].data == front)
                             break;
                     if(t.pc != end)
                     {
@@ -5332,9 +5340,9 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                     t = worklist.fetch();
                     break;
                 case IR.Char:
-                    if(front == prog[t.pc].data)
+                    if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)prog[t.pc].data);
+                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc--;
                         nlist.insertBack(t);
                     }
@@ -5348,7 +5356,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                     t = worklist.fetch();
                     break;
                 case IR.Charset:
-                    if(re.charsets[prog[t.pc].data][front])
+                    if(re.charsets[re.ir[t.pc].data][front])
                     {
                         debug(fred_matching) writeln("Charset passed");
                         t.pc--;
@@ -5362,7 +5370,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                     t = worklist.fetch();
                     break;
                 case IR.Trie:
-                    if(re.tries[prog[t.pc].data][front])
+                    if(re.tries[re.ir[t.pc].data][front])
                     {
                         debug(fred_matching) writeln("Trie passed");
                         t.pc--;
@@ -5376,13 +5384,13 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                     t = worklist.fetch();
                     break;
                 default:
-                    assert(prog[t.pc].code < 0x80, "Unrecognized instruction " ~ prog[t.pc].mnemonic);
+                    assert(re.ir[t.pc].code < 0x80, "Unrecognized instruction " ~ re.ir[t.pc].mnemonic);
                     t.pc--;
             }
             else
             {
                 default:
-                    if(prog[t.pc].code < 0x80)
+                    if(re.ir[t.pc].code < 0x80)
                         t.pc--;
                     else
                     {
@@ -5412,13 +5420,12 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     ///
     void reserve(size_t size)
     {//re.ngroup is unsigned
-        const tSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
-        void[] mem = alloc.allocate(tSize*size)[0 .. tSize*size];
+        void[] mem = alloc.allocate(threadSize*size)[0 .. threadSize*size];
         freelist = cast(Thread*)&mem[0];
         size_t i;
-        for(i=tSize; i<tSize*size; i+=tSize)
-            (cast(Thread*)&mem[i-tSize]).next = cast(Thread*)&mem[i];
-        (cast(Thread*)&mem[i-tSize]).next = null;
+        for(i=threadSize; i<threadSize*size; i+=threadSize)
+            (cast(Thread*)&mem[i-threadSize]).next = cast(Thread*)&mem[i];
+        (cast(Thread*)&mem[i-threadSize]).next = null;
     }
     ///dispose a thread
     void recycle(Thread* t)
