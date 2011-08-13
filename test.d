@@ -520,8 +520,12 @@ else
             //regression on .*
             auto re = regex("c.*|d");
             auto m = matchFn("mm", re);
-            assert(m.empty);
+            assert(m);
             debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
+            auto rprealloc = regex(`((.){5}.{1,10}){5}`);
+            auto arr = array(replicate('0',100));
+            auto m2 = matchFn(arr, re);
+            assert(m2);
         }
         test_body!bmatch();
         test_body!match();

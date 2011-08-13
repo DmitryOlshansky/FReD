@@ -100,7 +100,7 @@ int immediateParamsIR(IR i){
     case IR.OrEnd,IR.InfiniteEnd,IR.InfiniteQEnd:
         return 1;
     case IR.RepeatEnd, IR.RepeatQEnd:
-        return 3;
+        return 4;
     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
         return 2;
     default:
@@ -120,7 +120,7 @@ int lengthOfPairedIR(IR i)
 /// if the operation has a merge point (this relies on the order of the ops)
 bool hasMerge(IR i)
 {
-    return (i&0b11)==0b10 && i<=IR.InfiniteQEnd;
+    return (i&0b11)==0b10 && i<=IR.RepeatQEnd;
 }
 /// is an IR that opens a "group"
 bool isStartIR(IR i)
@@ -240,12 +240,12 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
     case IR.RepeatStart, IR.InfiniteStart, IR.Option, IR.GotoEndOr, IR.OrStart:
         //forward-jump instructions
         uint len = irb[pc].data;
-        formattedWrite(output, " pc=>%u", pc+len+1);
+        formattedWrite(output, " pc=>%u", pc+len+IRL!(IR.RepeatStart));
         break;
     case IR.RepeatEnd, IR.RepeatQEnd: //backward-jump instructions
         uint len = irb[pc].data;
         formattedWrite(output, " pc=>%u min=%u max=%u step=%u",
-                pc-len, irb[pc+2].raw, irb[pc+3].raw, irb[pc+1].raw);
+                pc-len, irb[pc+3].raw, irb[pc+4].raw, irb[pc+2].raw);
         break;
     case IR.InfiniteEnd, IR.InfiniteQEnd, IR.OrEnd: //ditto
         uint len = irb[pc].data;
@@ -1727,6 +1727,7 @@ struct Parser(R, bool CTFE=false)
                 else
                     insertInPlaceAlt(ir, offset, op);
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
+                put(Bytecode.init); //hotspot
                 putRaw(1);
                 putRaw(min);
                 putRaw(max);
@@ -1744,6 +1745,7 @@ struct Parser(R, bool CTFE=false)
                     insertInPlaceAlt(ir, offset, op);
                 offset += 1;//so it still points to the repeated block
                 put(Bytecode(greedy ? IR.RepeatEnd : IR.RepeatQEnd, len));
+                put(Bytecode.init); //hotspot
                 putRaw(1);
                 putRaw(min);
                 putRaw(min);
@@ -2396,18 +2398,26 @@ struct RegEx
         auto laRange = FixedStack!(Tuple!(uint,uint))(new Tuple!(uint,uint)[ngroup+1], -1);
         for(uint i=0; i<ir.length; i+=ir[i].length)
         {
+            if(ir[i].hotspot)
+            {
+                assert(i + 1 < ir.length, "unexpected end of IR while looking for hotspot");
+                ir[i+1] = Bytecode.fromRaw(hotspotTableSize);
+                hotspotTableSize += counterRange.top;
+            }
             switch(ir[i].code)
             {
             case IR.RepeatStart, IR.RepeatQStart:
                 uint repEnd = cast(uint)(i + ir[i].data + IRL!(IR.RepeatStart));
                 assert(ir[repEnd].code == ir[i].paired.code);
-                uint max = ir[repEnd + 3].raw;
-                ir[repEnd+1].raw = counterRange.top;
-                ir[repEnd+2].raw *= counterRange.top;
+                uint max = ir[repEnd + 4].raw;
+                ir[repEnd+2].raw = counterRange.top;
                 ir[repEnd+3].raw *= counterRange.top;
+                ir[repEnd+4].raw *= counterRange.top;
                 counterRange.push((max+1) * counterRange.top);
+                threadCount += counterRange.top;
                 break;
             case IR.RepeatEnd, IR.RepeatQEnd:
+                threadCount += counterRange.top;
                 counterRange.pop();
                 break;
             case IR.GroupStart:
@@ -2418,6 +2428,7 @@ struct RegEx
                 }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
+                threadCount += counterRange.top;
                 break;
             case IR.GroupEnd:
                 if(!laRange.empty)
@@ -2426,9 +2437,11 @@ struct RegEx
                 }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
+                threadCount += counterRange.top;
                 break;
             case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
                 laRange.push(tuple(uint.max, 0u));
+                threadCount += counterRange.top;
                 break;
             case IR.LookaheadEnd, IR.NeglookaheadEnd, IR.LookbehindEnd, IR.NeglookbehindEnd:
                 auto ofs = i - ir[i].data - IRL!(IR.LookaheadStart);
@@ -2436,16 +2449,11 @@ struct RegEx
                 auto slice = laRange.pop();
                 ir[ofs+1] = Bytecode.fromRaw(slice[0] == uint.max ? 0 : slice[0]);
                 ir[ofs+2] = Bytecode.fromRaw(slice[1] == 0 ? 0 : slice[1] + 1);
+                threadCount += counterRange.top;
                 break;
-            default:   
-            }
-            if(ir[i].hotspot)
-            {
-                assert(i + 1 < ir.length, "unexpected end of IR while looking for hotspot");
-                ir[i+1] = Bytecode.fromRaw(hotspotTableSize);
-                hotspotTableSize += counterRange.top;
-            }
-            threadCount += counterRange.top;
+            default:  
+                threadCount += counterRange.top;
+            }            
         }
         debug(fred_allocation) writefln("IR processed, max threads: %d", threadCount);
     }
@@ -2635,9 +2643,9 @@ L_ConstructLoop:
                     goto case IR.RepeatEnd;
                 case IR.RepeatEnd:
                     uint len = prog[pc].data;
-                    uint step = prog[pc+1].raw;
-                    uint min = prog[pc+2].raw;
-                    uint max = prog[pc+3].raw;
+                    uint step = prog[pc+2].raw;
+                    uint min = prog[pc+3].raw;
+                    uint max = prog[pc+4].raw;
                     if(counter < min)
                     {
                         counter += step;
@@ -3311,9 +3319,9 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.RepeatQEnd:
                     // len, step, min, max
                     uint len = re.ir[pc].data;
-                    uint step =  re.ir[pc+1].raw;
-                    uint min = re.ir[pc+2].raw;
-                    uint max = re.ir[pc+3].raw;
+                    uint step =  re.ir[pc+2].raw;
+                    uint min = re.ir[pc+3].raw;
+                    uint max = re.ir[pc+4].raw;
                     //debug(fred_matching) writefln("repeat pc=%u, counter=%u",pc,counter);
 
                     if(counter < min)
@@ -3734,9 +3742,9 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.RepeatStart, IR.RepeatQStart:
                     uint len = re.ir[pc].data;
                     uint tail = pc + len + 1;
-                    uint step =  re.ir[tail+1].raw;
-                    uint min = re.ir[tail+2].raw;
-                    uint max = re.ir[tail+3].raw;
+                    uint step =  re.ir[tail+2].raw;
+                    uint min = re.ir[tail+3].raw;
+                    uint max = re.ir[tail+4].raw;
                     if(counter < min)
                     {
                         counter += step;
@@ -4046,9 +4054,9 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
      case IR.RepeatEnd, IR.RepeatQEnd:
         // len, step, min, max
         uint len = ir[0].data;
-        uint step = ir[1].raw;
-        uint min = ir[2].raw;
-        uint max = ir[3].raw;
+        uint step = ir[2].raw;
+        uint min = ir[3].raw;
+        uint max = ir[4].raw;
         r = ctSub(`
             case $$:
                 if(counter < $$)
@@ -4391,7 +4399,7 @@ struct ThreadList
     {
         const(Thread)* ct;
         this(ThreadList tlist){ ct = tlist.tip; }
-        @property bool empty(){ return ct == null; }
+        @property bool empty(){ return ct is null; }
         @property const(Thread)* front(){ return ct; }
         @property popFront()
         {
@@ -4540,15 +4548,31 @@ enum replica = q{
             case IR.RepeatQEnd:
                 // len, step, min, max
                 uint len = re.ir[t.pc].data;
-                uint step =  re.ir[t.pc+1].raw;
-                uint min = re.ir[t.pc+2].raw;
+                uint step =  re.ir[t.pc+2].raw;
+                uint min = re.ir[t.pc+3].raw;
                 if(t.counter < min)
                 {
                     t.counter += step;
                     t.pc -= len;
                     goto L_Repeat;
                 }
-                uint max = re.ir[t.pc+3].raw;
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
+                }
+                else
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    goto L_RepeatFetch;
+                }
+                uint max = re.ir[t.pc+4].raw;
                 if(t.counter < max)
                 {
                     if(re.ir[t.pc].code == IR.RepeatEnd)
@@ -4994,6 +5018,12 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         if(!atEnd)// if no char 
             for(;;)
             {
+                /*debug(fred_allocation)
+                {
+                    foreach(x; clist[])
+                        foreach(y; clist[])
+                            assert(x is y || x.pc != y.pc || x.counter != y.counter);
+                }*/
                 genCounter++;
                 debug(fred_matching)
                 {
@@ -5078,6 +5108,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         L_Repeat:
         L_OrFetch:
         L_InfiniteFetch:
+        L_RepeatFetch:
         L_Infinite:
         L_GotondOr:
         L_Or:
@@ -5092,9 +5123,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         L_Lookbehind:
         L_Lookahead:
         L_Fallback:
-            mixin(replica);
-        
-       
+            mixin(replica);       
             
     }
     ///match the input, evaluating IR without searching
@@ -5306,16 +5335,32 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
                 goto case IR.InfiniteStart;
             case IR.RepeatStart, IR.RepeatQStart:
                 uint len = re.ir[t.pc].data;
-                uint tail = t.pc + len + 1;
-                uint step =  re.ir[tail+1].raw;
-                uint min = re.ir[tail+2].raw;
-                uint max = re.ir[tail+3].raw;
+                uint tail = t.pc + len + IRL!(IR.RepeatStart);
+                uint step =  re.ir[tail+2].raw;
+                uint min = re.ir[tail+3].raw;
+                
                 if(t.counter < min)
                 {
                     t.counter += step;
                     t.pc += len;
+                    break;
                 }
-                else if(t.counter < max)
+                uint max = re.ir[tail+4].raw;
+                if(merge[re.ir[tail+1].raw+t.counter] < genCounter)
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[tail+1].raw+t.counter] );
+                    merge[re.ir[tail+1].raw+t.counter] = genCounter;
+                }
+                else
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[tail+1].raw+t.counter] );
+                    recycle(t);
+                    t = worklist.fetch();
+                    break;
+                }
+                if(t.counter < max)
                 {
                     if(re.ir[t.pc].code == IR.RepeatStart)//greedy
                     {
