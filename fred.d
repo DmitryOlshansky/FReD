@@ -416,7 +416,7 @@ private:
     }
 public:
     void[] allocate(size_t size)
-    {       
+    {
         Chunk* chunk;
         if(!head)
         {
@@ -433,7 +433,7 @@ public:
             chunk.next = head.next;
             head.next = chunk;
         }
-        debug(fred_allocation) writeln("Chunked allocator: allocated %s bytes", size);
+        debug(fred_allocation) writefln("Chunked allocator: allocated %s bytes", size);
         return (cast(void*)chunk.data.ptr)[0 .. size];
     }
     T newArray(T)(size_t n)
@@ -2362,6 +2362,7 @@ struct RegEx
     uint ngroup;        //number of internal groups
     uint maxCounterDepth; //max depth of nested {n,m} repetitions
     uint hotspotTableSize; // number of entries in merge table
+    uint threadCount;
     uint flags;         //global regex flags
     const(Charset)[] charsets; //
     const(Trie)[]  tries; //
@@ -2378,7 +2379,7 @@ struct RegEx
         lightweight post process step - no GC allocations (TODO!),
         only essentials
     +/
-    void lightPostprocess() //TODO: translate indexes of backrefes to groups inside lookaround
+    void lightPostprocess()
     {
         struct FixedStack(T)
         {
@@ -2392,7 +2393,6 @@ struct RegEx
         }
         auto counterRange = FixedStack!uint(new uint[maxCounterDepth+1], -1);
         counterRange.push(1);
-        uint hotspotIndex = 0;
         auto laRange = FixedStack!(Tuple!(uint,uint))(new Tuple!(uint,uint)[ngroup+1], -1);
         for(uint i=0; i<ir.length; i+=ir[i].length)
         {
@@ -2437,16 +2437,17 @@ struct RegEx
                 ir[ofs+1] = Bytecode.fromRaw(slice[0] == uint.max ? 0 : slice[0]);
                 ir[ofs+2] = Bytecode.fromRaw(slice[1] == 0 ? 0 : slice[1] + 1);
                 break;
-            default:
+            default:   
             }
             if(ir[i].hotspot)
             {
                 assert(i + 1 < ir.length, "unexpected end of IR while looking for hotspot");
-                ir[i+1] = Bytecode.fromRaw(hotspotIndex);
-                hotspotIndex += counterRange.top;
+                ir[i+1] = Bytecode.fromRaw(hotspotTableSize);
+                hotspotTableSize += counterRange.top;
             }
+            threadCount += counterRange.top;
         }
-        hotspotTableSize = hotspotIndex;
+        debug(fred_allocation) writefln("IR processed, max threads: %d", threadCount);
     }
     /// IR code validator - proper nesting, illegal instructions, etc.
     void validate()
@@ -4938,7 +4939,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         threadSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
         if(re.hotspotTableSize)
             merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
-        reserve(4 + re.hotspotTableSize);//4 is a wild guess, alternation branches bring in extra thread per branch
+        reserve(re.threadCount);
         genCounter = 0;
         static if(kicked)
         {
@@ -5531,18 +5532,10 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     ///get a dirty recycled Thread
     Thread* allocate()
     {
-        if(freelist)
-        {
-            Thread* t = freelist;
-            freelist = freelist.next;
-            return t;
-        }
-        else
-        {
-            reserve(threadAllocSize);
-            debug(fred_allocation) writefln("Allocated space for another %d threads", threadAllocSize);
-            return allocate();
-        }
+        assert(freelist, "not enough preallocated memory");
+        Thread* t = freelist;
+        freelist = freelist.next;
+        return t;
     }
     ///
     void reserve(size_t size)
