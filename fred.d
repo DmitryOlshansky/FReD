@@ -454,6 +454,8 @@ public:
            decCount();
     }
 }
+// default allocator to use
+alias ChunkedAllocator Allocator;
 
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
@@ -494,12 +496,14 @@ dchar parseUniHex(Char)(ref Char[] str, uint maxDigit)
     str = str[maxDigit..$];
     return val;
 }
+
 ///index entry structure for name --> number of submatch
 struct NamedGroup
 {
     string name;
     uint group;
 }
+
 ///holds pir of start-end markers for a submatch
 struct Group
 {
@@ -746,14 +750,14 @@ public:
             for(size_t i=1; i<ivals.length; i++)
                 ivals[i-1] = ivals[i];//moveAll(ivals[1..$], ivals[0..$-1]);
             ivals = ivals[0..$-1];
-            //assumeSafeAppend(ivals);
+            assumeSafeAppend(ivals);
         }
         if(ivals[$-1] != endOfRange)
             insertInPlaceAlt(ivals, ivals.length, endOfRange);
         else
         {
             ivals = ivals[0..$-1] ;
-            //assumeSafeAppend(ivals);
+            assumeSafeAppend(ivals);
         }
         assert(!(ivals.length & 1));
         return this;
@@ -2632,16 +2636,12 @@ L_ConstructLoop:
                     pc += IRL!(IR.GroupStart);
                     break;
                 case IR.Wordboundary, IR.Notwordboundary:
-                    if(prefix.length == 0) //no chars so far
-                        pc += IRL!(IR.Wordboundary);
-                    else
-                        break L_ConstructLoop;
+                    pc += IRL!(IR.Wordboundary);
                     break;
-                case IR.RepeatStart:
+                case IR.RepeatStart, IR.RepeatQStart:
                     pc += IRL!(IR.RepeatStart)+prog[pc].data;
-                    assert(prog[pc].code == IR.RepeatEnd);
                     goto case IR.RepeatEnd;
-                case IR.RepeatEnd:
+                case IR.RepeatEnd, IR.RepeatQEnd:
                     uint len = prog[pc].data;
                     uint step = prog[pc+2].raw;
                     uint min = prog[pc+3].raw;
@@ -2667,6 +2667,8 @@ L_ConstructLoop:
     //
     @property bool empty() const{ return prefix.empty; }
     //
+    @property uint length() const{ return prefix.length; }
+    //
     size_t search(const(Char)[] str, size_t index)
     {
         auto x = find(str[index..$], prefix).length;
@@ -2686,7 +2688,10 @@ size_t effectiveSize(Char)()
         static assert(0);
 }
 
-///
+/**
+    kickstart engine using ShiftOr algorithm,
+    a bit parallel technique for inexact string searching
+*/
 struct ShiftOr(Char)
 {
 private:
@@ -2702,48 +2707,53 @@ public:
             uint[256] tab;
             uint mask;
             uint idx;
-            uint pc, counter;
+            uint pc, counter, hops;
             this(uint newPc, uint newCounter)
             {
                 pc = newPc;
                 counter = newCounter;
                 mask = 1;
                 idx = 0;
+                hops = 0;
                 tab[] = uint.max;
             }
-            uint add(dchar ch)
+            void add(dchar ch)
             {
                 static if(charSize == 3)
                 {
-                    uint val = ch;
-                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
-                    mask <<= 1;
+                    uint val = ch, tmask = mask;
+                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
+                    tmask <<= 1;
                     val >>= 8;
-                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
-                    mask <<= 1;    
+                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
+                    tmask <<= 1;    
                     val >>= 8;
-                    tab[cast(ubyte)(val&0xFF)] &= ~mask;
-                    mask <<= 1;  
+                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
+                    tmask <<= 1;  
                     assert(val <= 0x10);
-                    return 3;
                 }
                 else
                 {
                     Char[dchar.sizeof/Char.sizeof] buf;
+                    uint tmask = mask;
                     size_t total = encode(buf, ch);
-                    for(size_t i=0; i<total; i++, mask<<=1)
+                    for(size_t i=0; i<total; i++, tmask<<=1)
                     {
                         static if(charSize == 1)
-                            tab[buf[i]] &= ~mask;
+                            tab[buf[i]] &= ~tmask;
                         else static if(charSize == 2)
                         {
-                            tab[buf[i]&0xFF] &= ~mask;
-                            mask <<= 1;
-                            tab[buf[i]>>8] &= ~mask;
+                            tab[buf[i]&0xFF] &= ~tmask;
+                            tmask <<= 1;
+                            tab[buf[i]>>8] &= ~tmask;
                         }
                     }
-                    return total*Char.sizeof;
                 }
+            }
+            void advance(uint s)
+            {
+                mask <<= s;
+                idx += s;
             }
             @property bool full(){    return !mask; }
         }
@@ -2761,9 +2771,15 @@ public:
             worklist.assumeSafeAppend();
             return t;
         }
+        static uint charLen(uint ch)
+        {
+            assert(ch <= 0x10FFFF);
+            return codeLength!Char(cast(dchar)ch)*charSize;
+        }
         table[] =  uint.max;
         Thread[] trs;
         Thread t = Thread(0, 0);
+        //TODO: locate first fixed char if any
         n_length = 32;
         for(;;)
         {
@@ -2773,27 +2789,42 @@ public:
                 switch(prog[t.pc].code)
                 {
                 case IR.Char:
-                    uint s = t.add(prog[t.pc].data);
-                    if(t.full)
+                    uint s = charLen(prog[t.pc].data);
+                    if(t.idx+s > n_length)
                         goto L_StopThread;
-                    t.idx += s;
+                    t.add(prog[t.pc].data);
+                    t.advance(s);
                     t.pc += IRL!(IR.Char);
                     break;
                 case IR.OrChar://assumes IRL!(OrChar) == 1
-                    uint msave = t.mask;
-                    uint s = 0; 
                     uint len = prog[t.pc].sequence;
                     uint end = t.pc + len;
-                    for(; t.pc<end; t.pc++)
+                    uint s = 0;
+                    Thread tx;
+                    for(uint npc = t.pc; npc<end; npc++)
                     {
-                        s = max(s, prog[t.pc].data);
-                        if(t.full)
-                           goto L_StopThread; 
-                        t.mask = msave;
+                        if(charLen(prog[npc].data) == s)
+                            tx.add(prog[npc].data);
+                        else
+                        {
+                            if(tx.mask && tx.idx + s <= n_length)
+                            {
+                                tx.advance(s);
+                                trs ~= tx;
+                            }
+                            tx = fork(t, end, t.counter);
+                            s = charLen(prog[npc].data);
+                            tx.add(prog[npc].data);
+                        }
                     }
-                    t.idx += s;
-                    t.mask = 1<<t.idx;
+                    t = tx;
+                    if(tx.idx == t.idx && tx.idx + s <= n_length)// in case s was always the same
+                        tx.advance(s);
+                    else
+                        goto L_StopThread;
                     break;
+                case IR.Any:
+                    goto L_StopThread;
                 case IR.Charset:
                     goto L_StopThread;
                 case IR.Trie:
@@ -2817,14 +2848,60 @@ public:
                     }
                     t.pc += IRL!(IR.Option);
                     break;
-                case IR.Any:
-                    t.pc += IRL!(IR.Any);
+                case IR.RepeatStart:case IR.RepeatQStart:
+                    t.pc += IRL!(IR.RepeatStart)+prog[t.pc].data;
+                    goto case IR.RepeatEnd;
+                case IR.RepeatEnd:
+                case IR.RepeatQEnd:
+                    uint len = prog[t.pc].data;
+                    uint step = prog[t.pc+2].raw;
+                    uint min = prog[t.pc+3].raw;
+                    if(t.counter < min)
+                    {
+                        t.counter += step;
+                        t.pc -= len;
+                        break;
+                    }
+                    uint max = prog[t.pc+4].raw;
+                    if(t.counter < max)
+                    {
+                        trs ~= fork(t, t.pc - len, t.counter + step);
+                        t.counter = t.counter%step;
+                        t.pc += IRL!(IR.RepeatEnd);
+                    }
+                    else
+                    {
+                        t.counter = t.counter%step;
+                        t.pc += IRL!(IR.RepeatEnd);
+                    }
+                    break;
+                case IR.InfiniteStart, IR.InfiniteQStart:
+                    t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
+                    goto case IR.InfiniteEnd; // both Q and non-Q
+                case IR.InfiniteEnd:
+                case IR.InfiniteQEnd:
+                    uint len = prog[t.pc].data;
+                    uint pc1, pc2; //branches to take in priority order
+                    if(++t.hops == 32)
+                        goto L_StopThread;
+                    pc1 = t.pc + IRL!(IR.InfiniteEnd);
+                    pc2 = t.pc - len;
+                    trs ~= fork(t, pc2, t.counter);
+                    t.pc = pc1;
                     break;
                 case IR.GroupStart, IR.GroupEnd:
                     t.pc += IRL!(IR.GroupStart);
                     break;
+                case IR.Bol, IR.Wordboundary, IR.Notwordboundary:
+                    t.pc += IRL!(IR.Bol);
+                    break;
+                case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
+                    t.pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + prog[t.pc].data;
+                    break;
                 default:
                 L_StopThread:
+                    assert(prog[t.pc].code >= 0x80);
+                    debug (fred_search) writeln("ShiftOr stumbled on ",prog[t.pc].mnemonic);
                     table[] &= t.tab[];
                     n_length = min(t.idx, n_length);
                     break L_Eval_Thread;
@@ -2844,6 +2921,8 @@ public:
         }   
     }
     @property bool empty() const {  return n_length == 0; }
+    
+    @property uint length() const{ return n_length/charSize; }
     ///
     size_t search(const(Char)[] haystack, size_t idx)
     {
@@ -2877,9 +2956,7 @@ public:
             }
             debug(fred_search) writefln("State: %32b", state);
             if(!(state & limit))
-            {
                 return (i-n_length/charSize+1);
-            }
         }
         return data.length;
     }
@@ -2887,48 +2964,74 @@ public:
 
 unittest
 {
-    foreach(i, v; TypeTuple!(char, wchar, dchar))
-    {
-        alias v Char;
-        alias immutable(v)[] String;
-        auto r = regex(`abc[a-z]`);
-        auto kick = FixedKickstart!Char(r.ir);
-        assert(kick.prefix == to!String("abc"));
-        auto r2 = regex(`(abc){2}a+`);
-        kick = FixedKickstart!Char(r2.ir);
-        assert(kick.prefix == to!String("abcabca"));
-        auto r3 = regex(`\b(a{2}b{3}){2,4}x`);
-        kick = FixedKickstart!Char(r3.ir);
-        assert(kick.prefix == to!String("aabbbaabbb"));
-        auto r4 = regex(`\ba{2}c\bxyz`);
-        kick = FixedKickstart!Char(r4.ir);
-        assert(kick.prefix == to!String("aac"));
-        size_t x = kick.search("aabaacaa", 0);
-        assert(x == 3);
-        x = kick.search("aabaacaa", x+1);
-        assert(x == 8);        
+    void test_fixed(alias Kick)()
+    {   
+        foreach(i, v; TypeTuple!(char, wchar, dchar))
+        {
+            alias v Char;
+            alias immutable(v)[] String;
+            auto r = regex(`abc[a-z]`);
+            auto kick = Kick!Char(r.ir);
+            assert(kick.length == 3, text(Kick.stringof," ",v.stringof, " == ", kick.length));
+            auto r2 = regex(`(abc){2}a+`);
+            kick = Kick!Char(r2.ir);
+            assert(kick.length == 7, text(Kick.stringof,v.stringof," == ", kick.length));
+            auto r3 = regex(`\b(a{2}b{3}){2,4}`);
+            kick = Kick!Char(r3.ir);
+            assert(kick.length == 10, text(Kick.stringof,v.stringof," == ", kick.length));
+            auto r4 = regex(`\ba{2}c\bxyz`);
+            kick = Kick!Char(r4.ir);
+            assert(kick.length == 6, text(Kick.stringof,v.stringof, " == ", kick.length));
+            auto r5 = regex(`\ba{2}c\b`);
+            kick = Kick!Char(r5.ir);
+            size_t x = kick.search("aabaacaa", 0);
+            assert(x == 3, text(Kick.stringof,v.stringof," == ", kick.length));
+            x = kick.search("aabaacaa", x+1);
+            assert(x == 8, text(Kick.stringof,v.stringof," == ", kick.length));
+        }
     }
-    foreach(i, v;TypeTuple!(char, wchar, dchar))
+    void test_flex(alias Kick)()
     {
-        alias v Char;
-        alias immutable(v)[] String;
-        auto r = regex(`abc[a-z]`);
-        auto kick = ShiftOr!Char(r.ir);
-        auto x = kick.search(to!String("abbabca"), 0);
-        assert(x == 3, text("real x is ", x));
+        foreach(i, v;TypeTuple!(char, wchar, dchar))
+        {
+            alias v Char;
+            alias immutable(v)[] String;
+            auto r = regex(`abc[a-z]`);
+            auto kick = Kick!Char(r.ir);
+            auto x = kick.search(to!String("abbabca"), 0);
+            assert(x == 3, text("real x is ", x));
         
-        auto r2 = regex(`(ax|bd|cdy)`);
-        String s2 = to!String("abdcdyabax");
-        kick = ShiftOr!Char(r2.ir);
-        x = kick.search(s2, 0);
-        assert(x == 1, text("real x is ", x));
-        x = kick.search(s2, x+1);
-        assert(x == 3, text("real x is ", x));
-        x = kick.search(s2, x+1);
-        assert(x == 8, text("real x is ", x));
+            auto r2 = regex(`(ax|bd|cdy)`);
+            String s2 = to!String("abdcdyabax");
+            kick = Kick!Char(r2.ir);
+            x = kick.search(s2, 0);
+            assert(x == 1, text("real x is ", x));
+            x = kick.search(s2, x+1);
+            assert(x == 3, text("real x is ", x));
+            x = kick.search(s2, x+1);
+            assert(x == 8, text("real x is ", x));
+            auto rdot = regex(`...`);
+            kick = Kick!Char(rdot.ir);
+            assert(kick.length == 0);
+            kick = Kick!Char(regex(`a(b+|c+)x`).ir);
+            assert(kick.length == 3);
+            assert(kick.search("ababx",0) == 2);
+            assert(kick.search("abaacca",0) == 3);
+            assert(kick.search("abaacba",0) == 3);//expected inexact
+            
+        }
     }
+    test_fixed!(FixedKickstart)();
+    test_fixed!(ShiftOr)();
+    test_flex!(ShiftOr)();
 }
 
+//pick a default kickstart method
+version(fred_simpleKickstart)
+    alias FixedKickstart Kickstart;
+else
+    alias ShiftOr Kickstart;
+        
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
 /*struct Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
@@ -3024,11 +3127,9 @@ struct Input(Char)
 +/
 template BacktrackingMatcher(alias hardcoded)
 {
-    struct BacktrackingMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
+    struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(is(Char : dchar))
-    {
-        alias FixedKickstart!Char Kickstart;
-        
+    {        
         struct State
         {//top bit in pc is set if saved along with matches
             size_t index;
@@ -3055,10 +3156,11 @@ template BacktrackingMatcher(alias hardcoded)
         Group[] groupStack;//array list
         Group[] matches, backrefed;
         Allocator* alloc;
+        void delegate() searchFn;
         static if(__traits(hasMember,Stream, "search"))
         {
             enum kicked = true;
-            Kickstart kickstart;
+            Kickstart!Char kickstart;
         }
         else
             enum kicked = false;
@@ -3104,7 +3206,7 @@ template BacktrackingMatcher(alias hardcoded)
             groupStack[0 .. re.ngroup] = Group.init;
             backrefed = new Group[re.ngroup];
             static if(kicked)
-                kickstart = Kickstart(re.ir);
+                kickstart = Kickstart!Char(re.ir);
         }
         ///lookup next match, fills matches with indices into input
         bool match(Group matches[])
@@ -3123,6 +3225,10 @@ template BacktrackingMatcher(alias hardcoded)
                 states = alloc.uninitializedArray!(State[])(initialStack);
                 groupStack = alloc.uninitializedArray!(Group[])(initialStack);
             }
+            static if(kicked)
+                searchFn = kickstart.empty ? &this.next :&this.search;
+            else
+                searchFn = &this.next;
             for(;;)
             {
                 
@@ -3138,7 +3244,7 @@ template BacktrackingMatcher(alias hardcoded)
                     return true;
                 }
                 else if(!atEnd)
-                    search();
+                    searchFn();
                 else
                     break;
             }
@@ -3450,7 +3556,7 @@ template BacktrackingMatcher(alias hardcoded)
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
                     prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
                     prog.ngroup = me - ms;
-                    auto backMatcher = BacktrackingMatcher!(Char, Allocator, typeof(s.loopBack))(prog, s.loopBack, alloc);
+                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, alloc);
                     backMatcher.matches = matches[ms .. me];
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
@@ -4739,7 +4845,7 @@ enum replica = q{
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
                 auto backMatcher = 
-                    ThompsonMatcher!(Char, Allocator, typeof(s.loopBack))
+                    ThompsonMatcher!(Char, typeof(s.loopBack))
                     (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
                 backMatcher.freelist = freelist;
                 backMatcher.alloc = alloc;
@@ -4896,11 +5002,10 @@ enum replica = q{
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
-struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
+struct ThompsonMatcher(Char, Stream=Input!Char)
     if(is(Char : dchar))
 {
     alias const(Char)[] String;
-    alias FixedKickstart!Char Kickstart;
     enum threadAllocSize = 16;
     Thread* freelist;
     ThreadList clist, nlist;
@@ -4919,7 +5024,7 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
     static if(__traits(hasMember,Stream, "search"))
     {
         enum kicked = true;
-        Kickstart kickstart;
+        Kickstart!Char kickstart;
     }
     else
         enum kicked = false;
@@ -4967,11 +5072,11 @@ struct ThompsonMatcher(Char, Allocator=ChunkedAllocator, Stream=Input!Char)
         genCounter = 0;
         static if(kicked)
         {
-            kickstart = Kickstart(re.ir);//TODO: supply allocator here as well
+            kickstart = Kickstart!Char(re.ir);//TODO: supply allocator here as well
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
-    this(S)(ThompsonMatcher!(Char,Allocator,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
+    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
     {
         s = stream;
         re = matcher.re;

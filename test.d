@@ -325,7 +325,7 @@ unittest
             foreach(a, tvd; tv)
             {
                 uint c = tvd.result[0];
-                debug writeln(" Test #", a, " pattern: ", tvd.pattern);
+                debug writeln(" Test #", a, " pattern: ", tvd.pattern, " with Char = ", Char.stringof);
                 try
                 {
                     i = 1;
@@ -466,7 +466,7 @@ else
         test_body!match();
     }
 
-    //tests for accomulated std.regex issues
+    //tests for accomulated std.regex issues and other reg
     unittest
     {
         void test_body(alias matchFn)()
