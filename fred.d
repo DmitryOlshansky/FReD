@@ -2669,7 +2669,7 @@ L_ConstructLoop:
     //
     @property bool empty() const{ return prefix.empty; }
     //
-    @property uint length() const{ return prefix.length; }
+    @property uint length() const{ return cast(uint)prefix.length; }
     //
     size_t search(const(Char)[] str, size_t index)
     {
@@ -2978,7 +2978,7 @@ public:
     }
     @property bool empty() const {  return n_length == 0; }
     
-    @property uint length() const{ return n_length/charSize; }
+    @property uint length() const{ return cast(uint)n_length/charSize; }
     ///
     size_t search(const(Char)[] haystack, size_t idx)
     {
