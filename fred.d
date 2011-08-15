@@ -2225,9 +2225,11 @@ struct Parser(R, bool CTFE=false)
             {//fight off memory usage
                 put(Bytecode(IR.Charset, cast(uint)charsets.length));
                 charsets ~= set;
+                tries ~= Trie.init;
             }
             else
             {
+                
                 if(set.ivals.length > 8)
                 {//also CTFE memory overflow workaround
                     auto t  = getTrie(set);
@@ -2237,8 +2239,10 @@ struct Parser(R, bool CTFE=false)
                 else
                 {
                     put(Bytecode(IR.Charset, cast(uint)charsets.length));
-                    charsets ~= set;
+                    tries ~= Trie.init;
                 }
+                charsets ~= set;
+                assert(charsets.length == tries.length);
             }
         }
     }
@@ -2256,13 +2260,11 @@ struct Parser(R, bool CTFE=false)
 
         case 'd':   
             next(); 
-            put(Bytecode(IR.Charset, cast(uint)charsets.length)); 
-            charsets ~= unicodeNd;
+            charsetToIr(unicodeNd);
             break;
         case 'D':   
             next(); 
-            put(Bytecode(IR.Charset, cast(uint)charsets.length)); 
-            charsets ~= unicodeNd.dup.negate;//TODO: non-allocating  method
+            charsetToIr(unicodeNd.dup.negate);
             break;
         case 'b':   next(); put(Bytecode(IR.Wordboundary, 0)); break;
         case 'B':   next(); put(Bytecode(IR.Notwordboundary, 0)); break;
@@ -2272,7 +2274,7 @@ struct Parser(R, bool CTFE=false)
             break;
         case 'S':
             next();
-            charsetToIr(unicodeWhite_Space.dup.negate);//TODO: non-allocating  method
+            charsetToIr(unicodeWhite_Space.dup.negate);
             break;
         case 'w':
             next();
@@ -2620,16 +2622,16 @@ private:
             prefix ~= ch;
     }
 public:
-    this(Bytecode[] prog)
+    this(in RegEx re)
     {
         uint pc = 0;
         uint counter = 0;
 L_ConstructLoop:
         for(;;)
-            switch(prog[pc].code)
+            switch(re.ir[pc].code)
             {
                 case IR.Char:
-                    addChar(cast(dchar)prog[pc].data);
+                    addChar(cast(dchar)re.ir[pc].data);
                     pc += IRL!(IR.Char);
                     break;
                 case IR.GroupStart, IR.GroupEnd:
@@ -2639,13 +2641,13 @@ L_ConstructLoop:
                     pc += IRL!(IR.Wordboundary);
                     break;
                 case IR.RepeatStart, IR.RepeatQStart:
-                    pc += IRL!(IR.RepeatStart)+prog[pc].data;
+                    pc += IRL!(IR.RepeatStart)+re.ir[pc].data;
                     goto case IR.RepeatEnd;
                 case IR.RepeatEnd, IR.RepeatQEnd:
-                    uint len = prog[pc].data;
-                    uint step = prog[pc+2].raw;
-                    uint min = prog[pc+3].raw;
-                    uint max = prog[pc+4].raw;
+                    uint len = re.ir[pc].data;
+                    uint step = re.ir[pc+2].raw;
+                    uint min = re.ir[pc+3].raw;
+                    uint max = re.ir[pc+4].raw;
                     if(counter < min)
                     {
                         counter += step;
@@ -2676,7 +2678,7 @@ L_ConstructLoop:
     }
 }
 
-size_t effectiveSize(Char)()
+uint effectiveSize(Char)()
 {
     static if(is(Char == char))
         return 1;
@@ -2698,39 +2700,52 @@ private:
     uint[256] table;
     size_t n_length;
     enum charSize =  effectiveSize!Char();
-    
+    //maximum number of chars in charset to process
+    enum uint charsetThreshold = 16_000;
+
 public:
-    this(in Bytecode[] prog)
+    this(in RegEx re)
     {
         static struct Thread
         {
-            uint[256] tab;
+            uint[] tab;
             uint mask;
             uint idx;
             uint pc, counter, hops;
-            this(uint newPc, uint newCounter)
+            this(uint newPc, uint newCounter, uint[] table)
             {
                 pc = newPc;
                 counter = newCounter;
                 mask = 1;
                 idx = 0;
                 hops = 0;
-                tab[] = uint.max;
+                tab = table;
             }
-            void add(dchar ch)
+            
+            void setMask(uint idx, uint mask)
+            {
+                tab[idx] |= mask;
+            }
+            
+            void setInvMask(uint idx, uint mask)
+            {
+                tab[idx] &= ~mask;
+            }
+            
+            void set(alias setBits=setInvMask)(dchar ch)
             {
                 static if(charSize == 3)
                 {
                     uint val = ch, tmask = mask;
-                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
+                    setBits(val&0xFF, tmask);
                     tmask <<= 1;
                     val >>= 8;
-                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
+                    setBits(val&0xFF, tmask);
                     tmask <<= 1;    
                     val >>= 8;
-                    tab[cast(ubyte)(val&0xFF)] &= ~tmask;
-                    tmask <<= 1;  
                     assert(val <= 0x10);
+                    setBits(val, tmask);
+                    tmask <<= 1;  
                 }
                 else
                 {
@@ -2740,16 +2755,17 @@ public:
                     for(size_t i=0; i<total; i++, tmask<<=1)
                     {
                         static if(charSize == 1)
-                            tab[buf[i]] &= ~tmask;
+                            setBits(buf[i], tmask);
                         else static if(charSize == 2)
                         {
-                            tab[buf[i]&0xFF] &= ~tmask;
+                            setBits(buf[i]&0xFF, tmask);
                             tmask <<= 1;
-                            tab[buf[i]>>8] &= ~tmask;
+                            setBits(buf[i]>>8, tmask);
                         }
                     }
                 }
             }
+            void add(dchar ch){ return set!setInvMask(ch); }
             void advance(uint s)
             {
                 mask <<= s;
@@ -2757,7 +2773,7 @@ public:
             }
             @property bool full(){    return !mask; }
         }
-        static Thread fork(ref const(Thread) t, uint newPc, uint newCounter)
+        static Thread fork(Thread t, uint newPc, uint newCounter)
         {
             Thread nt = t;
             nt.pc = newPc;
@@ -2778,7 +2794,7 @@ public:
         }
         table[] =  uint.max;
         Thread[] trs;
-        Thread t = Thread(0, 0);
+        Thread t = Thread(0, 0, table);
         //TODO: locate first fixed char if any
         n_length = 32;
         for(;;)
@@ -2786,25 +2802,25 @@ public:
         L_Eval_Thread:
             for(;;)
             {
-                switch(prog[t.pc].code)
+                switch(re.ir[t.pc].code)
                 {
                 case IR.Char:
-                    uint s = charLen(prog[t.pc].data);
+                    uint s = charLen(re.ir[t.pc].data);
                     if(t.idx+s > n_length)
                         goto L_StopThread;
-                    t.add(prog[t.pc].data);
+                    t.add(re.ir[t.pc].data);
                     t.advance(s);
                     t.pc += IRL!(IR.Char);
                     break;
                 case IR.OrChar://assumes IRL!(OrChar) == 1
-                    uint len = prog[t.pc].sequence;
+                    uint len = re.ir[t.pc].sequence;
                     uint end = t.pc + len;
                     uint s = 0;
                     Thread tx;
                     for(uint npc = t.pc; npc<end; npc++)
                     {
-                        if(charLen(prog[npc].data) == s)
-                            tx.add(prog[npc].data);
+                        if(charLen(re.ir[npc].data) == s)
+                            tx.add(re.ir[npc].data);
                         else
                         {
                             if(tx.mask && tx.idx + s <= n_length)
@@ -2813,25 +2829,69 @@ public:
                                 trs ~= tx;
                             }
                             tx = fork(t, end, t.counter);
-                            s = charLen(prog[npc].data);
-                            tx.add(prog[npc].data);
+                            s = charLen(re.ir[npc].data);
+                            tx.add(re.ir[npc].data);
                         }
                     }
-                    t = tx;
                     if(tx.idx == t.idx && tx.idx + s <= n_length)// in case s was always the same
+                    {
+                        t = tx;
                         tx.advance(s);
+                    }
                     else
                         goto L_StopThread;
                     break;
+                case IR.Charset:
+                case IR.Trie:
+                    auto set = re.charsets[re.ir[t.pc].data];
+                    uint[4] s;
+                    uint numS;
+                    static if(charSize == 3)
+                    {
+                        s[0] = charSize;
+                        numS = 1;
+                    }
+                    else
+                    {
+                        static if(charSize == 1)
+                            static immutable codeBounds = [0x0, 0x7F, 0x80, 0x3FF, 0x400, 0xFFFF, 0x10000, 0x10FFFF];
+                        else // == 2
+                            static immutable codeBounds = [0x0, 0xFFFF, 0x10000, 0x10FFFF];
+                        auto srange = assumeSorted(set.ivals); 
+                        for(uint i = 0; i<codeBounds.length/2; i++)
+                        {
+                            auto start = srange.lowerBound(codeBounds[2*i]).length;
+                            auto end = srange.lowerBound(codeBounds[2*i+1]).length;
+                            if(end > start || (end == start && (end & 1)))
+                               s[numS++] = (i+1)*charSize;
+                        }
+                    }
+                    if(numS == 0 || t.idx + s[numS-1] > n_length)
+                        goto L_StopThread;
+                    auto  chars = set.chars;
+                    if(chars > charsetThreshold)
+                        goto L_StopThread;
+                    foreach(ch; set[])
+                    {
+                        //avoid surrogate pairs
+                        if(0xD800 <= ch && ch <= 0xDFFF)
+                            continue;
+                        t.add(ch);
+                    }
+                    for(uint i=0; i<numS; i++)
+                    {
+                        auto tx =  fork(t, t.pc + IRL!(IR.Charset), t.counter);
+                        tx.advance(s[i]);
+                        trs ~= tx;
+                    }     
+                    t = fetch(trs);
+                    break;
                 case IR.Any:
                     goto L_StopThread;
-                case IR.Charset:
-                    goto L_StopThread;
-                case IR.Trie:
-                    goto L_StopThread;
+                
                 case IR.GotoEndOr:
-                    t.pc += IRL!(IR.GotoEndOr)+prog[t.pc].data;
-                    assert(prog[t.pc].code == IR.OrEnd);
+                    t.pc += IRL!(IR.GotoEndOr)+re.ir[t.pc].data;
+                    assert(re.ir[t.pc].code == IR.OrEnd);
                     goto case;
                 case IR.OrEnd:
                     t.pc += IRL!(IR.OrEnd);
@@ -2840,29 +2900,29 @@ public:
                     t.pc += IRL!(IR.OrStart);
                     goto case;
                 case IR.Option:
-                    uint next = t.pc + prog[t.pc].data + IRL!(IR.Option);
+                    uint next = t.pc + re.ir[t.pc].data + IRL!(IR.Option);
                     //queue next Option
-                    if(prog[next].code == IR.Option)
+                    if(re.ir[next].code == IR.Option)
                     {
                         trs ~= fork(t, next, t.counter);
                     }
                     t.pc += IRL!(IR.Option);
                     break;
                 case IR.RepeatStart:case IR.RepeatQStart:
-                    t.pc += IRL!(IR.RepeatStart)+prog[t.pc].data;
+                    t.pc += IRL!(IR.RepeatStart)+re.ir[t.pc].data;
                     goto case IR.RepeatEnd;
                 case IR.RepeatEnd:
                 case IR.RepeatQEnd:
-                    uint len = prog[t.pc].data;
-                    uint step = prog[t.pc+2].raw;
-                    uint min = prog[t.pc+3].raw;
+                    uint len = re.ir[t.pc].data;
+                    uint step = re.ir[t.pc+2].raw;
+                    uint min = re.ir[t.pc+3].raw;
                     if(t.counter < min)
                     {
                         t.counter += step;
                         t.pc -= len;
                         break;
                     }
-                    uint max = prog[t.pc+4].raw;
+                    uint max = re.ir[t.pc+4].raw;
                     if(t.counter < max)
                     {
                         trs ~= fork(t, t.pc - len, t.counter + step);
@@ -2876,11 +2936,11 @@ public:
                     }
                     break;
                 case IR.InfiniteStart, IR.InfiniteQStart:
-                    t.pc += prog[t.pc].data + IRL!(IR.InfiniteStart);
+                    t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
                     goto case IR.InfiniteEnd; // both Q and non-Q
                 case IR.InfiniteEnd:
                 case IR.InfiniteQEnd:
-                    uint len = prog[t.pc].data;
+                    uint len = re.ir[t.pc].data;
                     uint pc1, pc2; //branches to take in priority order
                     if(++t.hops == 32)
                         goto L_StopThread;
@@ -2896,13 +2956,12 @@ public:
                     t.pc += IRL!(IR.Bol);
                     break;
                 case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                    t.pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + prog[t.pc].data;
+                    t.pc += IRL!(IR.LookaheadStart) + IRL!(IR.LookaheadEnd) + re.ir[t.pc].data;
                     break;
                 default:
                 L_StopThread:
-                    assert(prog[t.pc].code >= 0x80);
-                    debug (fred_search) writeln("ShiftOr stumbled on ",prog[t.pc].mnemonic);
-                    table[] &= t.tab[];
+                    assert(re.ir[t.pc].code >= 0x80);
+                    debug (fred_search) writeln("ShiftOr stumbled on ",re.ir[t.pc].mnemonic);
                     n_length = min(t.idx, n_length);
                     break L_Eval_Thread;
                 }
@@ -2913,12 +2972,9 @@ public:
         }
         debug(fred_search)
         {
-            for(size_t i=0; i<table.length; i+=4)
-            {
-                writefln("%32b %32b %32b %32b",table[i], table[i+1], table[i+2], table[i+3]);
-            }
+            dump(table[]);
             writeln("Min length: ", n_length);
-        }   
+        }
     }
     @property bool empty() const {  return n_length == 0; }
     
@@ -2960,6 +3016,14 @@ public:
         }
         return data.length;
     }
+    
+    static void dump(uint[] table)
+    {
+        for(size_t i=0; i<table.length; i+=4)
+        {
+            writefln("%32b %32b %32b %32b",table[i], table[i+1], table[i+2], table[i+3]);
+        } 
+    }
 }
 
 unittest
@@ -2970,20 +3034,20 @@ unittest
         {
             alias v Char;
             alias immutable(v)[] String;
-            auto r = regex(`abc[a-z]`);
-            auto kick = Kick!Char(r.ir);
+            auto r = regex(`abc$`);
+            auto kick = Kick!Char(r);
             assert(kick.length == 3, text(Kick.stringof," ",v.stringof, " == ", kick.length));
             auto r2 = regex(`(abc){2}a+`);
-            kick = Kick!Char(r2.ir);
+            kick = Kick!Char(r2);
             assert(kick.length == 7, text(Kick.stringof,v.stringof," == ", kick.length));
             auto r3 = regex(`\b(a{2}b{3}){2,4}`);
-            kick = Kick!Char(r3.ir);
+            kick = Kick!Char(r3);
             assert(kick.length == 10, text(Kick.stringof,v.stringof," == ", kick.length));
             auto r4 = regex(`\ba{2}c\bxyz`);
-            kick = Kick!Char(r4.ir);
+            kick = Kick!Char(r4);
             assert(kick.length == 6, text(Kick.stringof,v.stringof, " == ", kick.length));
             auto r5 = regex(`\ba{2}c\b`);
-            kick = Kick!Char(r5.ir);
+            kick = Kick!Char(r5);
             size_t x = kick.search("aabaacaa", 0);
             assert(x == 3, text(Kick.stringof,v.stringof," == ", kick.length));
             x = kick.search("aabaacaa", x+1);
@@ -2997,13 +3061,13 @@ unittest
             alias v Char;
             alias immutable(v)[] String;
             auto r = regex(`abc[a-z]`);
-            auto kick = Kick!Char(r.ir);
+            auto kick = Kick!Char(r);
             auto x = kick.search(to!String("abbabca"), 0);
             assert(x == 3, text("real x is ", x));
         
             auto r2 = regex(`(ax|bd|cdy)`);
             String s2 = to!String("abdcdyabax");
-            kick = Kick!Char(r2.ir);
+            kick = Kick!Char(r2);
             x = kick.search(s2, 0);
             assert(x == 1, text("real x is ", x));
             x = kick.search(s2, x+1);
@@ -3011,9 +3075,9 @@ unittest
             x = kick.search(s2, x+1);
             assert(x == 8, text("real x is ", x));
             auto rdot = regex(`...`);
-            kick = Kick!Char(rdot.ir);
+            kick = Kick!Char(rdot);
             assert(kick.length == 0);
-            kick = Kick!Char(regex(`a(b+|c+)x`).ir);
+            kick = Kick!Char(regex(`a(b+|c+)x`));
             assert(kick.length == 3);
             assert(kick.search("ababx",0) == 2);
             assert(kick.search("abaacca",0) == 3);
@@ -3156,7 +3220,6 @@ template BacktrackingMatcher(alias hardcoded)
         Group[] groupStack;//array list
         Group[] matches, backrefed;
         Allocator* alloc;
-        void delegate() searchFn;
         static if(__traits(hasMember,Stream, "search"))
         {
             enum kicked = true;
@@ -3206,7 +3269,7 @@ template BacktrackingMatcher(alias hardcoded)
             groupStack[0 .. re.ngroup] = Group.init;
             backrefed = new Group[re.ngroup];
             static if(kicked)
-                kickstart = Kickstart!Char(re.ir);
+                kickstart = Kickstart!Char(re);
         }
         ///lookup next match, fills matches with indices into input
         bool match(Group matches[])
@@ -3225,10 +3288,11 @@ template BacktrackingMatcher(alias hardcoded)
                 states = alloc.uninitializedArray!(State[])(initialStack);
                 groupStack = alloc.uninitializedArray!(Group[])(initialStack);
             }
+            
             static if(kicked)
-                searchFn = kickstart.empty ? &this.next :&this.search;
+                auto searchFn = kickstart.empty ? &this.next :&this.search;
             else
-                searchFn = &this.next;
+                auto searchFn = &this.next;
             for(;;)
             {
                 
@@ -5028,7 +5092,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     }
     else
         enum kicked = false;
-    bool delegate() searchFn;
     /// true if it's start of input
     @property bool atStart(){   return index == 0; }
     /// true if it's end of input
@@ -5072,7 +5135,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         genCounter = 0;
         static if(kicked)
         {
-            kickstart = Kickstart!Char(re.ir);//TODO: supply allocator here as well
+            kickstart = Kickstart!Char(re);//TODO: supply allocator here as well
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
@@ -5106,10 +5169,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
            return false;
         static if(kicked)
         {
-            searchFn = kickstart.empty ? &this.next : &this.search;
+            auto searchFn = kickstart.empty ? &this.next : &this.search;
         }
         else
-            searchFn = &this.next;
+            auto searchFn = &this.next;
         if(!matched)
         {
            searchFn();

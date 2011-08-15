@@ -239,6 +239,7 @@ unittest
         TestVectors(  "[abc[pq]xyz[rs]]{4}",         "cqxr",      "y",   "$&",     "cqxr"),
         TestVectors(  "[abcdf--[ab&&[bcd]][acd]]",   "abcdefgh",  "y",   "$&",     "f"),
 //unicode blocks & properties:
+        TestVectors(  `\P{Inlatin1suppl ement}`, "\u00c2!", "y", "$&", "!"),
         TestVectors(  `\p{InLatin-1 Supplement}\p{in-mathematical-operators}\P{Inlatin1suppl ement}`, "\u00c2\u2200\u00c3\u2203.", "y", "$&", "\u00c3\u2203."),
         TestVectors(  `[-+*/\p{in-mathematical-operators}]{2}`,    "a+\u2212",    "y",    "$&",    "+\u2212"),
         TestVectors(  `\p{Ll}+`,                      "XabcD",    "y",  "$&",      "abc"),
@@ -312,7 +313,7 @@ unittest
     void run_tests(alias matchFn)()
     {
         int i;
-        foreach(Char; TypeTuple!(char, wchar, dchar))
+        foreach(Char; TypeTuple!( char, dchar))
         {
             alias immutable(Char)[] String;
             String produceExpected(M,Range)(auto ref M m, Range fmt)
@@ -334,7 +335,7 @@ unittest
                 catch (RegexException e)
                 {
                     i = 0;
-                    //debug writeln(e.msg);
+                    debug writeln(e.msg);
                 }
 
                 assert((c == 'c') ? !i : i, "failed to compile pattern "~tvd.pattern);
@@ -607,52 +608,48 @@ int main(string[] argv)
 {
     if(argv.length < 2)
     {
-        writefln("regex test\nUsage %s <compile | exec> \n"
-                 "Patterns to test and input are read from STDIN by line till empty one\n",argv[0]);
-        return 0;
+        writefln("regex test\nUsage %s <compile | exec> args..\n"
+                 "Patterns to test and input are read from args \n",argv[0]);
+        return 1;
     }
     switch(argv[1])
     {
     case "compile":
-        string s;
-        for(;;)
+        if(argv.length < 3)
         {
-            s = strip(readln());
-            if(s.empty)
-                break;
-            write(s);
-            try
-            {
-                auto re = regex(s);
-                write(" OK \n");
-                re.print();
-            }
-            catch(Exception ex)
-            {
-                write(" FAIL\n",ex.msg);
-            }
-            writeln();
+            writeln("Wrong number of arguments paased for compile command");
+            return 1;
         }
+        string s = argv[2];
+        try
+        {
+            auto re = regex(s);
+            write(" OK \n");
+            re.print();
+        }
+        catch(Exception ex)
+        {
+            write(" FAIL\n",ex.msg);
+        }
+        writeln();
     break;
     case "exec":
-        for(;;)
+        if(argv.length < 4)
         {
-            try{
-                write("Test pattern:");
-                stdout.flush();
-                auto pat = strip(readln());
-                if(pat.empty)
-                    return 0;
-                write("Test input:");
-                stdout.flush();
-                auto inp = strip(readln());
-                auto m = match(inp, regex(pat));
-                writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m.captures);
-            }
-            catch(Exception ex)
-            {
-                writeln("FAIL\n",ex.msg);
-            }
+            writeln("Wrong number of arguments paased for exec command");
+            return 1;
+        }
+        try{
+            auto pat = argv[2];
+            if(pat.empty)
+                return 0;
+            auto inp = argv[3];
+            auto m = match(to!wstring(inp), regex(pat));
+            writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m.captures);
+        }
+        catch(Exception ex)
+        {
+            writeln("FAIL\n",ex.msg);
         }
     break;
     default:
