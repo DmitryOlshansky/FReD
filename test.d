@@ -317,7 +317,7 @@ unittest
     void run_tests(alias matchFn)()
     {
         int i;
-        foreach(Char; TypeTuple!( char, dchar))
+        foreach(Char; TypeTuple!( char, wchar, dchar))
         {
             alias immutable(Char)[] String;
             String produceExpected(M,Range)(auto ref M m, Range fmt)
