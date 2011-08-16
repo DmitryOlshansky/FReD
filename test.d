@@ -14,11 +14,11 @@ unittest
     auto r1 = regex("abc");
     auto r2 = regex("(gylba)");
     assert(match("abcdef", r1).hit == "abc");
-    assert(match("wida",r2));
+    assert(!match("wida",r2));
     assert(bmatch("abcdef", r1).hit == "abc");
-    assert(bmatch("wida", r2));
-    assert(!match("abc", "abc".dup));
-    assert(!bmatch("abc", "abc".dup));
+    assert(!bmatch("wida", r2));
+    assert(match("abc", "abc".dup));
+    assert(bmatch("abc", "abc".dup));
 }
 
 /* The test vectors in this file are altered from Henry Spencer's regexp
@@ -317,7 +317,7 @@ unittest
     void run_tests(alias matchFn)()
     {
         int i;
-        foreach(Char; TypeTuple!( char, dchar))
+        foreach(Char; TypeTuple!( char, wchar, dchar))
         {
             alias immutable(Char)[] String;
             String produceExpected(M,Range)(auto ref M m, Range fmt)
@@ -525,11 +525,11 @@ else
             //regression on .*
             auto re = regex("c.*|d");
             auto m = matchFn("mm", re);
-            assert(m);
+            assert(!m);
             debug writeln("!!! FReD REGRESSION test done "~matchFn.stringof~" !!!");
             auto rprealloc = regex(`((.){5}.{1,10}){5}`);
             auto arr = array(replicate('0',100));
-            auto m2 = matchFn(arr, re);
+            auto m2 = matchFn(arr, rprealloc);
             assert(m2);
         }
         test_body!bmatch();

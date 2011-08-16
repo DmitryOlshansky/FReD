@@ -5862,7 +5862,7 @@ public:
     ///test of this match object is empty
     @property bool empty(){ return _captures._empty; }
     ///same as .empty, provided for convience in conditional expressions
-    T opCast(T:bool)(){ return empty; }
+    T opCast(T:bool)(){ return !empty; }
     ///
     @property auto captures(){ return _captures; }
    
