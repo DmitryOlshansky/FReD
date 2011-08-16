@@ -15,7 +15,7 @@ import fred_uni;//unicode property tables
 import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
-       std.functional, std.exception;
+       std.functional, std.exception, std.regionallocator;
 import core.bitop;
 import ascii = std.ascii;
 import std.string : representation;
@@ -371,91 +371,8 @@ static void moveAllAlt(T)(T[] src, T[] dest)
         moveAll(src, dest);
 }
 
-///Chunked allocator a simplistic sort of heirachical allocator
-struct ChunkedAllocator
-{
-private:
-    struct Chunk
-    {
-        Chunk* next;
-        size_t[1] data;
-    }
-    Chunk* head;
-    void incCount()
-    {    
-        auto pcnt = (cast(size_t*)head)-1;
-        ++*pcnt;
-    }
-    void decCount()
-    {
-        auto pcnt = (cast(size_t*)head)-1;
-        if(!--*pcnt)
-            dispose();
-    }
-    size_t getCount()
-    {
-        return *((cast(size_t*)head)-1);
-    }
-    void dispose()
-    {
-        Chunk* p = head;
-        void* q;
-        debug(fred_allocation) writeln("ChunkedAllocator disposed");
-        if(p)
-        {
-            q = (cast(void*)p) - size_t.sizeof;
-            p = p.next;
-            free(q);
-        }
-        while(p)
-        {
-            q = p;
-            p = p.next;
-            free(q);
-        }
-    }
-public:
-    void[] allocate(size_t size)
-    {
-        Chunk* chunk;
-        if(!head)
-        {
-            debug(fred_allocation) writeln("ChunkedAllocator first allocation");
-            auto start = enforce(malloc(size + Chunk.sizeof));
-            chunk = cast(Chunk*) (start + size_t.sizeof);//leave space for ref counter
-            head = chunk;
-            head.next = null;
-            (cast(size_t*)head)[-1] = 1;
-        }
-        else
-        {
-            chunk = cast(Chunk*)enforce(malloc(size + Chunk.sizeof - size_t.sizeof));
-            chunk.next = head.next;
-            head.next = chunk;
-        }
-        debug(fred_allocation) writefln("Chunked allocator: allocated %s bytes", size);
-        return (cast(void*)chunk.data.ptr)[0 .. size];
-    }
-    T newArray(T)(size_t n)
-    {
-        alias typeof(T.init[0]) E;
-        auto arr =  (cast(E*)allocate(n*E.sizeof))[0..n];
-        arr[] = E.init;
-        return arr;
-    }
-    this(this)
-    {
-        if(head)
-            incCount();
-    }
-    ~this()
-    {
-       if(head)
-           decCount();
-    }
-}
 // default allocator to use
-alias ChunkedAllocator Allocator;
+alias RegionAllocator Allocator;
 
 ///Regular expression engine/parser options:
 /// global - search  nonoverlapping matches in input
@@ -2538,18 +2455,6 @@ struct RegEx
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
 	///
-	uint lookupNamedGroup(String)(String name) 
-	{
-		//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
-        uint fnd;
-        for(fnd = 0; fnd<dict.length; fnd++)
-            if(equal(dict[fnd].name,name))
-                break;
-        if(fnd == dict.length)
-               throw new Exception("out of range");
-		return dict[fnd].group;
-	}
-	///
     this(S,bool x)(Parser!(S,x) p)
     {
         if(__ctfe)//CTFE something funky going on with array
@@ -2571,6 +2476,20 @@ struct RegEx
         debug validate();
     }
 }
+
+//
+uint lookupNamedGroup(String)(NamedGroup[] dict,String name) 
+{
+	//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
+    uint fnd;
+    for(fnd = 0; fnd<dict.length; fnd++)
+        if(equal(dict[fnd].name,name))
+            break;
+    if(fnd == dict.length)
+            throw new Exception("out of range");
+	return dict[fnd].group;
+}
+
 ///same as RegEx, but also contains pointer to generated  machine code of the  matcher
 struct NativeRegEx(alias Fn)
 {
@@ -5150,9 +5069,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         s = stream;
         alloc = allocator;
         threadSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
+        reserve(re.threadCount);
         if(re.hotspotTableSize)
             merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
-        reserve(re.threadCount);
         genCounter = 0;
         static if(kicked)
         {
@@ -5823,49 +5742,68 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     }
 }
 
-//
+///
 struct Captures(R)
-//    if(isSomeString!R)
+    if(isSomeString!R)
 {
-    R input;
-    Group[] matches;
+private:
+    R _input;
+    bool _empty;
+    enum smallString = 3;
+    union
+    {
+        Group[] big_matches;
+        Group[smallString] small_matches;
+    }
     uint f, b;
-    RegEx re;
+    uint ngroup;
+    NamedGroup[] names;
     this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
     {
-        input = rmatch.input;
-        matches = rmatch.matches;
-        re = rmatch.engine.re;
-        b = cast(uint)matches.length;
+        _input = rmatch._input;
+        ngroup = rmatch._engine.re.ngroup;
+        names = rmatch._engine.re.dict;
+        newMatches();
+        b = ngroup;
         f = 0;
     }
+    @property Group[] matches()
+    {
+       return ngroup > smallString ? big_matches : small_matches[0..ngroup];
+    }
+    void newMatches()
+    {
+        if(ngroup > smallString)
+            big_matches = new Group[ngroup];
+    }
+public:
     ///
     @property R pre() 
     {
-        return empty ? input[] : input[0 .. matches[0].begin];
+        return _empty ? _input[] : _input[0 .. matches[0].begin];
     }
     ///
     @property R post() 
     {
-        return empty ? input[] : input[matches[0].end .. $];
+        return _empty ? _input[] : _input[matches[0].end .. $];
     }
     ///
     @property R hit() 
     {
-        assert(!empty);
-        return input[matches[0].begin .. matches[0].end];
+        assert(!_empty);
+        return _input[matches[0].begin .. matches[0].end];
     }
     ///iteration means
     @property R front() 
     {
         assert(!empty);
-        return input[matches[f].begin .. matches[f].end];
+        return _input[matches[f].begin .. matches[f].end];
     }
     ///ditto
     @property R back() 
     {
         assert(!empty);
-        return input[matches[b-1].begin .. matches[b-1].end];
+        return _input[matches[b-1].begin .. matches[b-1].end];
     }
     ///ditto
     void popFront()
@@ -5880,20 +5818,20 @@ struct Captures(R)
         --b;   
     }
     ///ditto
-    @property bool empty() const { return f >= b; }
+    @property bool empty() const { return _empty || f >= b; }
     
     R opIndex()(size_t i) /*const*/ //@@@BUG@@@
     {
         assert(f+i < b,"requested submatch number is out of range");
         assert(matches[f+i].begin <= matches[f+i].end, text("wrong match: ", matches[f+i].begin, "..", matches[f+i].end));
-        return input[matches[f+i].begin..matches[f+i].end];
+        return _input[matches[f+i].begin..matches[f+i].end];
     }
     
     R opIndex(String)(String i) /*const*/ //@@@BUG@@@
         if(isSomeString!String)
     {
-        size_t index = re.lookupNamedGroup(i);
-        return opIndex(index);
+        size_t index = lookupNamedGroup(names, i);
+        return opIndex(index - f);
     }
     @property size_t length() const { return b-f;  }
 }
@@ -5904,23 +5842,22 @@ struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
 {
 private:
-    R input;
-    Group[] matches;
-    bool _empty;
-    uint flags;
-    NamedGroup[] named;
     alias Unqual!(typeof(R.init[0])) Char;
     alias Engine!Char EngineType;
-    EngineType engine;
-    ChunkedAllocator alloc;
+    EngineType _engine;
+    Allocator _alloc;
+    R _input;
+    Captures!R _captures;
 public:
     ///
-    this(RegEx prog, R _input)
+    this(RegEx prog, R input)
     {
-        input = _input;
-        matches = new Group[prog.ngroup];
-        engine = EngineType(prog, Input!Char(input), &alloc);
-        _empty = !engine.match(matches);
+        _input = input;
+        auto stack = RegionAllocatorStack(1<<20, GCScan.no);
+        _alloc = stack.newRegionAllocator();        
+        _engine = EngineType(prog, Input!Char(input), &_alloc);
+        _captures = Captures!R(this);
+        _captures._empty = !_engine.match(_captures.matches);
     }
     this(this)
     {
@@ -5929,18 +5866,17 @@ public:
     ///
     @property R pre()
     {
-        return empty ? input[] : input[0 .. matches[0].begin];
+        return _captures.pre;
     }
     ///
     @property R post()
     {
-        return empty ? input[] : input[matches[0].end .. $];
+        return _captures.post;
     }
     ///
     @property R hit()
     {
-        assert(!empty);
-        return input[matches[0].begin .. matches[0].end];
+        return _captures.hit;
     }
     ///@@@BUG@@@ 6199,  should be ref to avoid postblits
     @property auto front()
@@ -5950,15 +5886,16 @@ public:
     ///
     void popFront()
     { //previous one can have escaped references from Capture object
-        matches = new Group[matches.length];
-        _empty = !engine.match(matches);
+        _engine.alloc = &_alloc;
+        _captures.newMatches();
+        _captures._empty = !_engine.match(_captures.matches);
     }
     ///test of this match object is empty
-    @property bool empty(){ return _empty; }
+    @property bool empty(){ return _captures._empty; }
     ///same as .empty, provided for convience in conditional expressions
     T opCast(T:bool)(){ return empty; }
     ///
-    @property auto captures(){ return Captures!R(this); }
+    @property auto captures(){ return _captures; }
    
 }
 

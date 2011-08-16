@@ -640,10 +640,10 @@ public:
     /**
     Assignment of one RegionAllocator to another is disabled.
     */
-    void opAssign(RegionAllocator rhs) @disable {
+    /*void opAssign(RegionAllocator rhs) @disable {
         // BUGS:  DMD Bug 6330:  @disable doesn't do anything.
-        assert(0);
-    }
+        //assert(0);
+    }*/
 
     /**
     Allocates $(D nBytes) bytes on the $(D RegionAllocatorStack) used by this
