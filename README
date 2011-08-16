@@ -15,13 +15,14 @@ Building
 --------------------------
 Building existing projects should be as simple as:
     - replace all std.regex with fred
-    - recompile adding fred.d and fred_uni.d to the list of compiled files
+    - recompile adding fred.d and fred_uni.d and std\regionallocator
+      to the list of compiled files
 
 E.g. to compile testsuite (no static regex):
-dmd -unittest fred.d fred_uni.d test.d
+dmd -unittest fred.d fred_uni.d test.d std\regionallocator.d
 
 same for static regex only:
-dmd -version=fred_ct -unittest fred.d fred_uni.d test.d
+dmd -version=fred_ct -unittest fred.d fred_uni.d test.d std\regionallocator.d
 
 (the reason for separation is the compilation speed of the latter)
 If you just need a test tool to give you a head start, you can compile fred_r.d from bench, usage is:
@@ -54,7 +55,7 @@ Syntax
 --------------------------
 I'd really hate to reiterate all the trivia here. But sure, it will be a nice and big table in DDoc later on.
 To get an idea of syntax seek column ECMScript here http://www.regular-expressions.info/refflavors.html
-(but in it's behavior it's very similar to .Net)
+(but in its behavior it's very similar to .Net)
 and add this one to the mix  http://www.regular-expressions.info/refunicode.html
 Notable "extra" features :
     - lookbehind with full regex syntax (except another lookaround)
@@ -69,7 +70,7 @@ Subtle moments:
     - \b, \B, \d, \w, etc are Unicode aware and use full sets of characters
     - backreferences must be locally unique e.g. (\w+)\1 is not localy unique, while \b(\w+)\b\1 is (note the anchor on both sides!)
 
-I not opposed to getting multiple syntax profiles (a-la Boost), but for the moment it's out the scope of project.
+I'm not opposed to getting multiple syntax profiles (a-la Boost), but for the moment it's out the scope of project.
 
 Notes for testers
 --------------------------
