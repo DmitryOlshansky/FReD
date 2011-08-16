@@ -1229,11 +1229,6 @@ struct Stack(T, bool CTFE=false)
         assert(!empty);
         return stack.data[$-1];
     }
-    @property void top(T val)
-    {
-        assert(!empty);
-        stack.data[$-1] = val;
-    }
     @property size_t length() {  return stack.data.length; }
     T pop()
     {
@@ -2506,45 +2501,47 @@ bool endOfLine(dchar ch, bool seenCr)
 
 ///Test if bytecode starting at pc in program 're' can match given codepoint
 ///Returns: length of matched atom if test is positive, 0 - can't tell, -1 if doesn't match
-int quickTestFwd(uint pc, dchar front, RegEx re)
+int quickTestFwd(uint pc, dchar front, const ref RegEx re)
 {
     static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
-    if(pc >= re.ir.length)
-        return pc;
-    switch(re.ir[pc].code)
-    {
-    case IR.OrChar:
-        uint len = re.ir[pc].sequence;
-        uint end = pc + len;
-        if(re.ir[pc].data != front && re.ir[pc+1].data != front)
+    for(;;)
+        switch(re.ir[pc].code)
         {
-            for(pc = pc+2; pc<end; pc++)
-                if(re.ir[pc].data == front)
-                    break;
-            if(pc == end)
+        case IR.OrChar:
+            uint len = re.ir[pc].sequence;
+            uint end = pc + len;
+            if(re.ir[pc].data != front && re.ir[pc+1].data != front)
+            {
+                for(pc = pc+2; pc<end; pc++)
+                    if(re.ir[pc].data == front)
+                        break;
+                if(pc == end)
+                    return -1;
+            }
+            return 0;
+        case IR.Char:
+            if(front == re.ir[pc].data)
+                return 0;
+            else
                 return -1;
+        case IR.Any:
+            return 0;
+        case IR.Charset:
+            if(re.charsets[re.ir[pc].data][front])
+                return 0;
+            else
+                return -1;
+        case IR.GroupStart, IR.GroupEnd:
+            pc += IRL!(IR.GroupStart);
+            break;
+        case IR.Trie:
+            if(re.tries[re.ir[pc].data][front])
+                return IRL!(IR.Trie);
+            else
+                return -1;
+        default:
+            return 0;
         }
-        return cast(int)len;
-    case IR.Char:
-        if(front == re.ir[pc].data)
-            return IRL!(IR.Char);
-        else
-            return -1;
-    case IR.Any:
-        return IRL!(IR.Any);
-    case IR.Charset:
-        if(re.charsets[re.ir[pc].data][front])
-            return IRL!(IR.Charset);
-        else
-            return -1;
-    case IR.Trie:
-        if(re.tries[re.ir[pc].data][front])
-            return IRL!(IR.Trie);
-        else
-            return -1;
-    default:
-        return 0;
-    }
 }
 ///simple minded get-me-to-the-prefix kickstart
 struct FixedKickstart(Char)
@@ -3140,10 +3137,11 @@ template BacktrackingMatcher(alias hardcoded)
             size_t index;
             uint pc, counter, infiniteNesting;
         }
+        static assert(State.sizeof % size_t.sizeof == 0);
+        enum stateSize = State.sizeof / size_t.sizeof;
+        enum initialStack = 2^^16;
         alias const(Char)[] String;
         RegEx re;           //regex program
-        enum initialStack = 2^^12;
-        enum dirtyBit = 1<<31;
         //Stream state
         Stream s;
         size_t index;
@@ -3153,12 +3151,9 @@ template BacktrackingMatcher(alias hardcoded)
         //backtracking machine state
         uint pc, counter;
         uint lastState = 0;          //top of state stack
-        uint lastGroup = 0;       //ditto for matches
-        bool matchesDirty; //flag, true if there are unsaved changes to matches
         size_t[] trackers;
         uint infiniteNesting;
-        State[] states;
-        Group[] groupStack;//array list
+        size_t[] memory;
         Group[] matches, backrefed;
         Allocator* alloc;
         static if(__traits(hasMember,Stream, "search"))
@@ -3202,13 +3197,9 @@ template BacktrackingMatcher(alias hardcoded)
             alloc = allocator;
             next();
             exhausted = false;
-            trackers = new size_t[re.ngroup+1];
-            states = new State[initialStack];
-            groupStack = new Group[initialStack];
-            //setup first frame for incremental match storage
-            assert(groupStack.length >= matches.length);
-            groupStack[0 .. re.ngroup] = Group.init;
-            backrefed = new Group[re.ngroup];
+            trackers = alloc.newArray!(size_t[])(re.ngroup+1);
+            memory = new size_t[initialStack*(stateSize + re.ngroup)];
+            backrefed = alloc.newArray!(Group[])(re.ngroup);
             static if(kicked)
                 kickstart = Kickstart!Char(re);
         }
@@ -3281,11 +3272,9 @@ template BacktrackingMatcher(alias hardcoded)
             counter = 0;
             lastState = 0;
             infiniteNesting = -1;// intentional
-            matchesDirty = false;
-            lastGroup = cast(uint)matches.length;  //incremental matching      
             auto start = s._index;
             debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
-            while(pc<re.ir.length)
+            for(;;)
             {
                 debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, s._index);
                 switch(re.ir[pc].code)
@@ -3522,7 +3511,6 @@ template BacktrackingMatcher(alias hardcoded)
                     matches[n].begin = index;//the first is sliced out
                     if(re.ir[pc].backreference)
                         backrefed[n].begin = index;
-                    matchesDirty = true;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc += IRL!(IR.GroupStart);
                     break;
@@ -3531,7 +3519,6 @@ template BacktrackingMatcher(alias hardcoded)
                     matches[n].end = index;//the first is sliced out
                     if(re.ir[pc].backreference)
                         backrefed[n].end = index;
-                    matchesDirty = true;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc += IRL!(IR.GroupEnd);
                     break;
@@ -3542,8 +3529,7 @@ template BacktrackingMatcher(alias hardcoded)
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
                     auto x = this;
                     x.pc = 0;
-                    x.states = new State[initialStack/8];
-                    x.groupStack = new Group[initialStack/8];
+                    x.memory = new size_t[initialStack*(stateSize+me-ms)];
                     x.re.ngroup =  me - ms;
                     x.matches = matches[ms .. me];
                     x.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
@@ -3555,7 +3541,6 @@ template BacktrackingMatcher(alias hardcoded)
                     else
                     {
                         pc += IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd);
-                        matchesDirty = ms != me;
                     }
                     break;
                 case IR.LookbehindStart:
@@ -3573,7 +3558,6 @@ template BacktrackingMatcher(alias hardcoded)
                     else
                     {
                         pc += IRL!(IR.LookbehindStart)+len+IRL!(IR.LookbehindEnd);
-                        matchesDirty = ms != me;
                     }
                     break;
                 case IR.Backref:
@@ -3606,61 +3590,42 @@ template BacktrackingMatcher(alias hardcoded)
                     }
                 }
             }
-            return true;
+            assert(0);
         }
         }
         /*
-            helper function saves engine state
+            helper function, saves engine state
         */
         void pushState(uint pc, uint counter)
         {
-            if(matchesDirty)
-            {
-                if(lastGroup >= groupStack.length)
-                    groupStack.length *= 2;
-                lastGroup += matches.length;
-                groupStack[lastGroup-matches.length .. lastGroup] = matches[];
-                debug(fred_matching)
-                {
-                    writeln("Saved matches");
-                    foreach(i, m; matches)
-                        writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
-                }
-            }
-            if(lastState >= states.length)
-                states.length *= 2;
-            states[lastState++] = State(index, matchesDirty ? pc | dirtyBit : pc , counter, infiniteNesting);
-            matchesDirty = false;
+            if(lastState + stateSize + matches.length >= memory.length)
+                memory.length *= 2;
+            *cast(State*)&memory[lastState] = State(index, pc, counter, infiniteNesting);
+            lastState += stateSize;
+            memory[lastState..lastState+2*matches.length] = cast(size_t[])matches[];
+            lastState += 2*matches.length;
             debug(fred_matching)
                 writefln("Saved(pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
         }
-        //helper function restores engine state        
+        //helper function, restores engine state        
         bool popState()
         {
             if(!lastState)
                 return false;
-            auto state = states[--lastState];
+            lastState -= 2*matches.length;
+            auto pm = cast(size_t[])matches;
+            pm[] = memory[lastState .. lastState+2*matches.length];
+            lastState -= stateSize;
+            State* state = cast(State*)&memory[lastState];
             index = state.index;
             pc = state.pc;
             counter = state.counter;
             infiniteNesting = state.infiniteNesting;
-            if(pc & dirtyBit)
+            debug(fred_matching)
             {
-                pc ^= dirtyBit;
-                matches[] = groupStack[lastGroup-matches.length .. lastGroup];
-                lastGroup -= matches.length;
-                matchesDirty = false;
-                debug(fred_matching)
-                {
-                    writefln("Restored matches", front, s[index .. s.lastIndex]);
-                    foreach(i, m; matches)
-                        writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
-                }
-            }
-            else if(matchesDirty)// since last save there were changes not saved onces
-            {
-                matches[] = groupStack[lastGroup-matches.length .. lastGroup];//take from previous save point
-                matchesDirty = false;
+                writefln("Restored matches", front, s[index .. s.lastIndex]);
+                foreach(i, m; matches)
+                    writefln("Sub(%d) : %s..%s", i, m.begin, m.end);
             }
             s.reset(index);
             next();
@@ -3678,11 +3643,7 @@ template BacktrackingMatcher(alias hardcoded)
             counter = 0;
             lastState = 0;
             infiniteNesting = -1;// intentional
-            matchesDirty = false;
             //setup first frame for incremental match storage
-            assert(groupStack.length >= matches.length);
-            groupStack[0 .. matches.length] = Group.init;
-            lastGroup += matches.length;
             auto start = index;
             debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
             for(;;)
@@ -3929,7 +3890,6 @@ template BacktrackingMatcher(alias hardcoded)
                     matches[n].begin = index;
                     if(re.ir[pc].backreference)
                         backrefed[n].begin = index;
-                    matchesDirty = true;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc --;
                     break;
@@ -3938,7 +3898,6 @@ template BacktrackingMatcher(alias hardcoded)
                     matches[n].end = index;
                     if(re.ir[pc].backreference)
                         backrefed[n].end = index;
-                    matchesDirty = true;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc --;
                     break;
@@ -4369,7 +4328,6 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
                 matches[$$].begin = index;
                 if(re.ir[pc].backreference)
                         backrefed[$$].begin = index;
-                matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u starts at %u", $$+1, index);
                 goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
@@ -4381,7 +4339,6 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
                 matches[$$].end = index;
                 if(re.ir[pc].backreference)
                         backrefed[$$].end = index;
-                matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u ends at %u", $$+1, index);
                 goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
@@ -4424,8 +4381,6 @@ string ctGenRegEx(Bytecode[] ir)
         counter = 0;
         lastState = 0;
         infiniteNesting = -1;// intentional
-        matchesDirty = false;
-        lastGroup = cast(uint)matches.length;        
         auto start = s._index;
         debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]); 
     StartLoop:
