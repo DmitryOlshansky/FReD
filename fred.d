@@ -669,14 +669,16 @@ public:
             for(size_t i=1; i<ivals.length; i++)
                 ivals[i-1] = ivals[i];//moveAll(ivals[1..$], ivals[0..$-1]);
             ivals = ivals[0..$-1];
-            assumeSafeAppend(ivals);
+            if(!__ctfe)
+                assumeSafeAppend(ivals);
         }
         if(ivals[$-1] != endOfRange)
             insertInPlaceAlt(ivals, ivals.length, endOfRange);
         else
         {
             ivals = ivals[0..$-1] ;
-            assumeSafeAppend(ivals);
+            if(!__ctfe)
+                assumeSafeAppend(ivals);
         }
         assert(!(ivals.length & 1));
         return this;
@@ -2135,29 +2137,19 @@ struct Parser(R, bool CTFE=false)
         else
         {
             //TODO: better heuristic
-            version(fred_ct)
-            {//fight off memory usage
-                put(Bytecode(IR.Charset, cast(uint)charsets.length));
-                charsets ~= set;
-                tries ~= Trie.init;
+            if(set.ivals.length > 8)
+            {//also CTFE memory overflow workaround
+                auto t  = getTrie(set);
+                put(Bytecode(IR.Trie, cast(uint)tries.length));
+                tries ~= t;
             }
             else
             {
-                
-                if(set.ivals.length > 8)
-                {//also CTFE memory overflow workaround
-                    auto t  = getTrie(set);
-                    put(Bytecode(IR.Trie, cast(uint)tries.length));
-                    tries ~= t;
-                }
-                else
-                {
-                    put(Bytecode(IR.Charset, cast(uint)charsets.length));
-                    tries ~= Trie.init;
-                }
-                charsets ~= set;
-                assert(charsets.length == tries.length);
+                put(Bytecode(IR.Charset, cast(uint)charsets.length));
+                tries ~= Trie.init;
             }
+            charsets ~= set;
+            assert(charsets.length == tries.length);
         }
     }
     ///parse and generate IR for escape stand alone escape sequence
@@ -3139,7 +3131,7 @@ template BacktrackingMatcher(alias hardcoded)
         }
         static assert(State.sizeof % size_t.sizeof == 0);
         enum stateSize = State.sizeof / size_t.sizeof;
-        enum initialStack = 2^^16;
+        enum initialStack = 1<<16;
         alias const(Char)[] String;
         RegEx re;           //regex program
         //Stream state
@@ -3189,6 +3181,13 @@ template BacktrackingMatcher(alias hardcoded)
             else
                 next();
         }
+        
+        void newStack()
+        {
+            auto chunk = alloc.newArray!(size_t[])(initialStack*(stateSize + 2*re.ngroup)+1);
+            chunk[0] = cast(size_t)(memory.ptr);
+            memory = chunk[1..$];
+        }
         ///
         this(RegEx program, Stream stream, Allocator* allocator)
         {
@@ -3198,7 +3197,7 @@ template BacktrackingMatcher(alias hardcoded)
             next();
             exhausted = false;
             trackers = alloc.newArray!(size_t[])(re.ngroup+1);
-            memory = new size_t[initialStack*(stateSize + re.ngroup)];
+            newStack();
             backrefed = alloc.newArray!(Group[])(re.ngroup);
             static if(kicked)
                 kickstart = Kickstart!Char(re);
@@ -3528,9 +3527,12 @@ template BacktrackingMatcher(alias hardcoded)
                     auto save = index;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
                     auto x = this;
+                    auto a = newRegionAllocator();
                     x.pc = 0;
-                    x.memory = new size_t[initialStack*(stateSize+me-ms)];
+                    x.alloc = &a;
                     x.re.ngroup =  me - ms;
+                    x.memory = null;
+                    x.newStack();
                     x.matches = matches[ms .. me];
                     x.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
                     bool match = x.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
@@ -3550,7 +3552,8 @@ template BacktrackingMatcher(alias hardcoded)
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
                     prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
                     prog.ngroup = me - ms;
-                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, alloc);
+                    auto a = newRegionAllocator();
+                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
                     backMatcher.matches = matches[ms .. me];
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
@@ -3599,7 +3602,10 @@ template BacktrackingMatcher(alias hardcoded)
         void pushState(uint pc, uint counter)
         {
             if(lastState + stateSize + matches.length >= memory.length)
-                memory.length *= 2;
+            {
+                newStack();
+                lastState = 0;
+            }
             *cast(State*)&memory[lastState] = State(index, pc, counter, infiniteNesting);
             lastState += stateSize;
             memory[lastState..lastState+2*matches.length] = cast(size_t[])matches[];
@@ -3611,7 +3617,15 @@ template BacktrackingMatcher(alias hardcoded)
         bool popState()
         {
             if(!lastState)
-                return false;
+            {
+                size_t* prev = memory.ptr-1;
+                prev = cast(size_t*)*prev;//take out hidden pointer
+                if(!prev)
+                    return false;
+                immutable size = initialStack*(stateSize + 2*re.ngroup);
+                memory = prev[0..size];
+                lastState = size;
+            }
             lastState -= 2*matches.length;
             auto pm = cast(size_t[])matches;
             pm[] = memory[lastState .. lastState+2*matches.length];

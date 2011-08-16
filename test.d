@@ -15,7 +15,6 @@ unittest
     auto r2 = regex("(gylba)");
     assert(match("abcdef", r1).hit == "abc");
     assert(match("wida",r2));
-    writeln(bmatch("abcdef", r1).hit);
     assert(bmatch("abcdef", r1).hit == "abc");
     assert(bmatch("wida", r2));
     assert(!match("abc", "abc".dup));
