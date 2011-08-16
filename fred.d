@@ -3142,7 +3142,7 @@ template BacktrackingMatcher(alias hardcoded)
         bool seenCr;
         //backtracking machine state
         uint pc, counter;
-        uint lastState = 0;          //top of state stack
+        size_t lastState = 0;          //top of state stack
         size_t[] trackers;
         uint infiniteNesting;
         size_t[] memory;
