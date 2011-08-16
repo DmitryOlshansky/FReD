@@ -46,6 +46,9 @@ enum IR:uint {
     Any               = 0b1_00001_00, /// any character
     Charset           = 0b1_00010_00, /// a most generic charset [...]
     Trie              = 0b1_00011_00, /// charset implemented as Trie
+    /// match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
+    /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
+    /// the drawback of this representation is that it is difficult to detect a jump in the middle of it
     OrChar            = 0b1_00100_00,
     Nop               = 0b1_00101_00, /// no operation (padding)
     End               = 0b1_00110_00, /// end of program
@@ -60,9 +63,6 @@ enum IR:uint {
     GotoEndOr         = 0b1_01111_00, /// end of an option (length of the rest)
     //... any additional atoms here   
     
-    /// match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
-    /// OrChar holds in upper two bits of data total number of OrChars in this _sequence_
-    /// the drawback of this representation is that it is difficult to detect a jump in the middle of it
     
 
     OrStart           = 0b1_00000_01, /// start of alternation group  (length)
@@ -463,6 +463,8 @@ alias ChunkedAllocator Allocator;
 /// freeform - ignore whitespace in pattern, to match space use [ ] or \s
 enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8, multiline = 0x10 };
 alias TypeTuple!('g', 'i', 'x', 'U', 'm') RegexOptionNames;//do not reorder this list
+static assert( RegexOption.max < 0x80);
+enum RegexInfo : uint { oneShot = 0x80 };
 
 private enum NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
 //multiply-add, throws exception on overflow
@@ -2383,6 +2385,25 @@ struct RegEx
             return 0;
         return backrefed[n/32] & (1<<(n&31));
     }
+    void checkIfOneShot()
+    {
+        if(flags & RegexOption.multiline)
+            return;
+    L_CheckLoop:
+        for(uint i=0; i<ir.length; i+=ir[i].length)
+        {
+            switch(ir[i].code)
+            {
+                case IR.Bol:
+                    flags |= RegexInfo.oneShot;
+                    break L_CheckLoop;
+                case IR.GroupStart, IR.GroupEnd, IR.Eol, IR.Wordboundary, IR.Notwordboundary:
+                    break;
+                default:
+                    break L_CheckLoop;
+            }
+        }
+    }
     /++
         lightweight post process step - no GC allocations (TODO!),
         only essentials
@@ -2461,6 +2482,7 @@ struct RegEx
                 threadCount += counterRange.top;
             }            
         }
+        checkIfOneShot();
         debug(fred_allocation) writefln("IR processed, max threads: %d", threadCount);
     }
     /// IR code validator - proper nesting, illegal instructions, etc.
@@ -3271,7 +3293,7 @@ template BacktrackingMatcher(alias hardcoded)
             static if(kicked)
                 kickstart = Kickstart!Char(re);
         }
-        ///lookup next match, fills matches with indices into input
+        ///lookup next match, fill matches with indices into input
         bool match(Group matches[])
         {            
             debug(fred_matching)
@@ -3281,14 +3303,18 @@ template BacktrackingMatcher(alias hardcoded)
             if(exhausted) //all matches collected
                 return false;
             this.matches = matches;
-            version(none)
+            if(re.flags & RegexInfo.oneShot)
             {
-                RegionAllocator alloc = newRegionAllocator();
-                trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
-                states = alloc.uninitializedArray!(State[])(initialStack);
-                groupStack = alloc.uninitializedArray!(Group[])(initialStack);
+                exhausted = true;
+                size_t start = index;
+                auto m = matchImpl();
+                if(m)
+                {
+                    matches[0].begin = start;
+                    matches[0].end = index;
+                }
+                return m;
             }
-            
             static if(kicked)
                 auto searchFn = kickstart.empty ? &this.next :&this.search;
             else
@@ -3416,10 +3442,10 @@ template BacktrackingMatcher(alias hardcoded)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && !wordTrie[front])
+                    if(atStart && wordTrie[front])
                         goto L_backtrack;
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !wordTrie[back])
+                            && wordTrie[back])
                         goto L_backtrack;
                     else if(s.loopBack.nextChar(back, index))
                     {
@@ -3734,13 +3760,6 @@ template BacktrackingMatcher(alias hardcoded)
             lastState = 0;
             infiniteNesting = -1;// intentional
             matchesDirty = false;
-            version(none)
-            {
-                RegionAllocator alloc = newRegionAllocator();
-                trackers = alloc.uninitializedArray!(size_t[])(re.ngroup+1);  //TODO: it's smaller, make parser count nested infinite loops
-                states = alloc.uninitializedArray!(State[])(initialStack);
-                groupStack = alloc.uninitializedArray!(Group[])(initialStack);
-            }
             //setup first frame for incremental match storage
             assert(groupStack.length >= matches.length);
             groupStack[0 .. matches.length] = Group.init;
@@ -3823,10 +3842,10 @@ template BacktrackingMatcher(alias hardcoded)
                     dchar back;
                     size_t bi;
                     //at start & end of input
-                    if(atStart && !wordTrie[front])
+                    if(atStart && wordTrie[front])
                         goto L_backtrack;
                     else if(atEnd && s.loopBack.nextChar(back, bi)
-                            && !wordTrie[back])
+                            && wordTrie[back])
                         goto L_backtrack;
                     else if(s.loopBack.nextChar(back, index))
                     {
@@ -4375,10 +4394,10 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordTrie[front])
+                if(atStart && wordTrie[front])
                     goto L_backtrack;
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordTrie[back])
+                        && wordTrie[back])
                     goto L_backtrack;
                 else if(s.loopBack.nextChar(back, index))
                 {
@@ -4430,10 +4449,10 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             case $$:
                 matches[$$].begin = index;
                 if(re.ir[pc].backreference)
-                        backrefed[n].begin = index;
+                        backrefed[$$].begin = index;
                 matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u starts at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1);
+                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -4442,10 +4461,10 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
             case $$:
                 matches[$$].end = index;
                 if(re.ir[pc].backreference)
-                        backrefed[n].end = index;
+                        backrefed[$$].end = index;
                 matchesDirty = true;
                 debug(fred_matching) writefln("IR group #%u ends at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1);
+                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -4587,7 +4606,9 @@ struct ThreadList
     }
 }
 
-enum SingleShot { Fwd, Bwd };
+//direction parameter for thompson one-shot match evaluator 
+enum OneShot { Fwd, Bwd };
+
 enum replica = q{
             debug(fred_matching)
             {
@@ -4641,7 +4662,7 @@ enum replica = q{
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordTrie[front])
+                if(atStart && wordTrie[front])
                 {
                     recycle(t);
                     t = worklist.fetch();
@@ -4650,7 +4671,7 @@ enum replica = q{
                     goto L_NotWordboundary;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordTrie[back])
+                        && wordTrie[back])
                 {
                     recycle(t);
                     t = worklist.fetch();
@@ -4917,7 +4938,7 @@ enum replica = q{
                 backMatcher.backrefed = t.matches;
                 //backMatch
                 backMatcher.next(); //load first character from behind
-                bool match = backMatcher.matchOneShot!(SingleShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                bool match = backMatcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
                 freelist = backMatcher.freelist;
                 if(match)
                 {
@@ -4954,7 +4975,7 @@ enum replica = q{
                 fwdMatcher.index = index;
                 fwdMatcher.re.ngroup = me - ms;
                 fwdMatcher.backrefed = t.matches;
-                bool nomatch = fwdMatcher.matchOneShot!(SingleShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                bool nomatch = fwdMatcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
                 freelist = fwdMatcher.freelist;
                 s.reset(index);
                 next();
@@ -5167,6 +5188,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         if(exhausted)
            return false;
+        if(re.flags & RegexInfo.oneShot)
+        {
+            next();
+            exhausted = true;
+            return matchOneShot!(OneShot.Fwd)(matches);
+        }
         static if(kicked)
         {
             auto searchFn = kickstart.empty ? &this.next : &this.search;
@@ -5186,12 +5213,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         if(!atEnd)// if no char 
             for(;;)
             {
-                /*debug(fred_allocation)
-                {
-                    foreach(x; clist[])
-                        foreach(y; clist[])
-                            assert(x is y || x.pc != y.pc || x.counter != y.counter);
-                }*/
                 genCounter++;
                 debug(fred_matching)
                 {
@@ -5295,14 +5316,14 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             
     }
     ///match the input, evaluating IR without searching
-    bool matchOneShot(SingleShot direction)(Group[] matches, uint startPc=0)
+    bool matchOneShot(OneShot direction)(Group[] matches, uint startPc=0)
     {
         debug(fred_matching)
         {
             writefln("---------------single shot match %s----------------- ", 
-                     direction == SingleShot.Fwd ? "forward" : "backward");
+                     direction == OneShot.Fwd ? "forward" : "backward");
         }
-        static if(direction == SingleShot.Fwd)
+        static if(direction == OneShot.Fwd)
             alias eval evalFn;
         else
             alias evalBack evalFn;
@@ -5311,17 +5332,18 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         if(!atEnd)// if no char 
         {
             auto startT = createStart(index);
-            static if(direction == SingleShot.Fwd)
+            static if(direction == OneShot.Fwd)
                 startT.pc = startPc;
             else
                 startT.pc = cast(uint)re.ir.length-IRL!(IR.LookbehindEnd);
+            genCounter++;
             evalFn!true(startT, matches);
             for(;;)
             {
                 genCounter++;
                 debug(fred_matching)
                 {
-                    static if(direction == SingleShot.Fwd) 
+                    static if(direction == OneShot.Fwd) 
                         writefln("Threaded matching (forward) threads at  %s",  s[index..s.lastIndex]);
                     else
                         writefln("Threaded matching (backward) threads at  %s", retro(s[index..s.lastIndex]));
@@ -5350,7 +5372,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         genCounter++; //increment also on each end
         debug(fred_matching) writefln("Threaded matching (%s) threads at end",
-                                      direction == SingleShot.Fwd ? "forward" : "backward");
+                                      direction == OneShot.Fwd ? "forward" : "backward");
         //try out all zero-width posibilities
         for(Thread* t = clist.fetch(); t; t = clist.fetch())
         {
@@ -5409,14 +5431,14 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 dchar back;
                 size_t bi;
                 //at start & end of input
-                if(atStart && !wordTrie[front])
+                if(atStart && wordTrie[front])
                 {
                     recycle(t);
                     t = worklist.fetch();
                     break;
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && !wordTrie[back])
+                        && wordTrie[back])
                 {
                     recycle(t);
                     t = worklist.fetch();

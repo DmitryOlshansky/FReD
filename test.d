@@ -269,7 +269,7 @@ unittest
         TestVectors(    `\b\w+\b`,  " abde4 ",  "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  " abde4",   "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  "abde4 ",   "y", "$&", "abde4"),
-// ^, $, mutliline :
+// ^, $, \b, \B, multiline :
         TestVectors(    `\r.*?$`,    "abc\r\nxy", "y", "$&", "\r\nxy", "m"),
         TestVectors(    `^a$^b$`,    "a\r\nb\n",  "n", "$&", "-", "m"),
         TestVectors(    `^a$\r\n^b$`,"a\r\nb\n",  "y", "$&", "a\r\nb", "m"),
@@ -280,6 +280,10 @@ unittest
         TestVectors(    `^x$`,       "\u2028x",   "y", "$&", "x", "m"),   
         TestVectors(    `^x$`,       "\u2029x",   "y", "$&", "x", "m"),   
         TestVectors(    `^x$`,       "\u0085x",   "y", "$&", "x", "m"),   
+        TestVectors(    `\b^.`,      "ab",        "y", "$&", "a"),
+        TestVectors(    `\B^.`,      "ab",        "n", "-",  "-"),
+        TestVectors(    `^ab\Bc\B`,  "\r\nabcd",  "y", "$&", "abc", "m"),
+        TestVectors(    `^.*$`,      "12345678",  "y", "$&", "12345678"),
 // luckily obtained regression on incremental matching in backtracker
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
