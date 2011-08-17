@@ -2097,10 +2097,6 @@ struct Parser(R, bool CTFE=false)
                 enforce(!opstack.empty, "unmatched ']'");
                 opstack.pop();
                 next();
-              /*  writeln("After ] ", current, pat);
-                writeln(opstack.stack.data);
-                writeln(map!"a.intervals"(vstack.stack.data));
-                writeln("---");*/
                 if(opstack.empty)
                     break L_CharsetLoop;
                 auto pair  = parseCharTerm();
@@ -2145,6 +2141,7 @@ struct Parser(R, bool CTFE=false)
                     put(Bytecode(IR.Char, set.ivals[0]));
                     break;
                 case 0:
+                    error("empty charset not allowed");
                     break;
                 default:
                     foreach(ch; set[])
@@ -2552,79 +2549,171 @@ int quickTestFwd(uint pc, dchar front, const ref RegEx re)
             return 0;
         }
 }
-///simple minded get-me-to-the-prefix kickstart
-struct FixedKickstart(Char)
+
+struct SampleGenerator(Char)
 {
-private:
-    Char[] prefix;
-    void addChar(dchar ch)
+    import std.random;
+    const(RegEx) re;
+    Appender!(char[]) app;
+    uint limit, seed;
+    Xorshift gen;
+
+    this(in RegEx r, uint threshold, uint randomSeed)
     {
-        Char[dchar.sizeof/Char.sizeof] buf;
-        static if(!is(dchar : Char))
-        {      
-            size_t len = encode(buf, ch);
-            prefix ~= buf[0..len];
-        }
-        else
-            prefix ~= ch;
+        re = r;
+        limit = threshold;
+        seed = randomSeed;
+        app = appender!(Char[])();
+        compose();
     }
-public:
-    this(in RegEx re)
+    
+    uint rand(uint x)
+    {  
+        uint r = gen.front % x;
+        gen.popFront();
+        return r;
+    }
+
+    void compose()
     {
-        uint pc = 0;
-        uint counter = 0;
-L_ConstructLoop:
+        uint pc = 0, counter = 0, dataLenOld = uint.max;
         for(;;)
+        {
             switch(re.ir[pc].code)
             {
-                case IR.Char:
-                    addChar(cast(dchar)re.ir[pc].data);
+            case IR.Char:
+                    formattedWrite(app,"%s", cast(dchar)re.ir[pc].data);
                     pc += IRL!(IR.Char);
                     break;
-                case IR.GroupStart, IR.GroupEnd:
-                    pc += IRL!(IR.GroupStart);
+                case IR.OrChar:
+                    uint len = re.ir[pc].sequence;
+                    formattedWrite(app, "%s", cast(dchar)re.ir[pc + rand(len)].data);
+                    pc += len;
                     break;
-                case IR.Wordboundary, IR.Notwordboundary:
-                    pc += IRL!(IR.Wordboundary);
+                case IR.Charset:
+                case IR.Trie:
+                    auto set = re.charsets[re.ir[pc].data];
+                    auto x = rand(set.ivals.length/2);
+                    auto y = rand(set.ivals[x*2+1] - set.ivals[2*x]);
+                    formattedWrite(app, "%s", cast(dchar)(set.ivals[2*x]+y));
+                    pc += IRL!(IR.Charset);
                     break;
-                case IR.RepeatStart, IR.RepeatQStart:
+                case IR.Any:
+                    uint x;
+                    do
+                    {
+                        x = rand(0x11_000);
+                    }while(!isValidDchar(x));
+                    formattedWrite(app, "%s", cast(dchar)x);
+                    pc += IRL!(IR.Any);
+                    break;
+                case IR.GotoEndOr:
+                    pc += IRL!(IR.GotoEndOr)+re.ir[pc].data;
+                    assert(re.ir[pc].code == IR.OrEnd);
+                    goto case;
+                case IR.OrEnd:
+                    pc += IRL!(IR.OrEnd);
+                    break;
+                case IR.OrStart:
+                    pc += IRL!(IR.OrStart);
+                    goto case;
+                case IR.Option:
+                    uint next = pc + re.ir[pc].data + IRL!(IR.Option);
+                    uint nOpt = 0;
+                    //queue next Option
+                    while(re.ir[next].code == IR.Option)
+                    {
+                        nOpt++;
+                        next += re.ir[next].data + IRL!(IR.Option);
+                    }
+                    nOpt++;
+                    //writeln("nOpt = ", nOpt);
+                    nOpt = rand(nOpt);
+                    //writeln("picked nOpt = ", nOpt);
+                    for(;nOpt; nOpt--)
+                    {
+                        pc += re.ir[pc].data + IRL!(IR.Option);
+                    }
+                    assert(re.ir[pc].code == IR.Option);
+                    pc += IRL!(IR.Option);
+                    break;
+                case IR.RepeatStart:case IR.RepeatQStart:
                     pc += IRL!(IR.RepeatStart)+re.ir[pc].data;
                     goto case IR.RepeatEnd;
-                case IR.RepeatEnd, IR.RepeatQEnd:
+                case IR.RepeatEnd:
+                case IR.RepeatQEnd:
                     uint len = re.ir[pc].data;
                     uint step = re.ir[pc+2].raw;
                     uint min = re.ir[pc+3].raw;
-                    uint max = re.ir[pc+4].raw;
                     if(counter < min)
                     {
                         counter += step;
                         pc -= len;
+                        break;
                     }
-                    else if(counter < max)
-                        break L_ConstructLoop;
+                    uint max = re.ir[pc+4].raw;
+                    if(counter < max)
+                    {
+                        if(app.data.length < limit && rand(3) > 0)
+                        {
+                            pc -= len;
+                            counter += step;
+                        }
+                        else
+                        {
+                            counter = counter%step;
+                            pc += IRL!(IR.RepeatEnd);
+                        }
+                    }
                     else
                     {
                         counter = counter%step;
                         pc += IRL!(IR.RepeatEnd);
                     }
                     break;
-                
+                case IR.InfiniteStart, IR.InfiniteQStart:
+                    pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
+                    goto case IR.InfiniteEnd; // both Q and non-Q
+                case IR.InfiniteEnd:
+                case IR.InfiniteQEnd:
+                    uint len = re.ir[pc].data;
+                    if(app.data.length == dataLenOld)
+                    {
+                        pc += IRL!(IR.InfiniteEnd);
+                        break;
+                    }
+                    dataLenOld = app.data.length;
+                    if(app.data.length < limit && rand(3) > 0)
+                        pc = pc - len;
+                    else
+                        pc = pc + IRL!(IR.InfiniteEnd);
+                    break;
+                case IR.GroupStart, IR.GroupEnd:
+                    pc += IRL!(IR.GroupStart);
+                    break;
+                case IR.Bol, IR.Wordboundary, IR.Notwordboundary:
+                case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
                 default:
-                    break L_ConstructLoop;
+                    return;
             }
+        }
     }
-    //
-    @property bool empty() const{ return prefix.empty; }
-    //
-    @property uint length() const{ return cast(uint)prefix.length; }
-    //
-    size_t search(const(Char)[] str, size_t index)
+        
+    @property Char[] front()
     {
-        auto x = find(str[index..$], prefix).length;
-        return str.length - x;
+        return app.data;
+    }
+    
+    @property empty(){  return false; }
+    
+    void popFront()
+    {
+        app.shrinkTo(0);
+        compose();
     }
 }
 
+//utility for shiftOr, returns a minimum number of bytes to test in a Char
 uint effectiveSize(Char)()
 {
     static if(is(Char == char))
@@ -2762,29 +2851,29 @@ public:
                 case IR.OrChar://assumes IRL!(OrChar) == 1
                     uint len = re.ir[t.pc].sequence;
                     uint end = t.pc + len;
-                    uint s = 0;
-                    Thread tx;
-                    for(uint npc = t.pc; npc<end; npc++)
+                    uint[Bytecode.MaxSequence] s;
+                    uint numS;
+                    for(uint i = 0; i<len; i++)
                     {
-                        if(charLen(re.ir[npc].data) == s)
-                            tx.add(re.ir[npc].data);
-                        else
+                        auto x = charLen(re.ir[t.pc+i].data);
+                        if(countUntil(s[0..numS], x) < 0)
+                           s[numS++] = x;
+                    }
+                    for(uint i = t.pc; i < end; i++)
+                    {
+                        t.add(re.ir[i].data);
+                    }
+                    for(uint i=0; i<numS; i++)
+                    {
+                        auto tx = fork(t, t.pc + len, t.counter);
+                        if(tx.idx + s[i] <= n_length)
                         {
-                            if(tx.mask && tx.idx + s <= n_length)
-                            {
-                                tx.advance(s);
-                                trs ~= tx;
-                            }
-                            tx = fork(t, end, t.counter);
-                            s = charLen(re.ir[npc].data);
-                            tx.add(re.ir[npc].data);
+                            tx.advance(s[i]);
+                            trs ~= tx;
                         }
                     }
-                    if(tx.idx == t.idx && tx.idx + s <= n_length)// in case s was always the same
-                    {
-                        t = tx;
-                        tx.advance(s);
-                    }
+                    if(!trs.empty)
+                        t = fetch(trs);
                     else
                         goto L_StopThread;
                     break;
@@ -2828,10 +2917,16 @@ public:
                     for(uint i=0; i<numS; i++)
                     {
                         auto tx =  fork(t, t.pc + IRL!(IR.Charset), t.counter);
-                        tx.advance(s[i]);
-                        trs ~= tx;
-                    }     
-                    t = fetch(trs);
+                        if(tx.idx + s[i] <= n_length)
+                        {
+                            tx.advance(s[i]);
+                            trs ~= tx;
+                        }
+                    }
+                    if(!trs.empty)
+                        t = fetch(trs);
+                    else
+                        goto L_StopThread;
                     break;
                 case IR.Any:
                     goto L_StopThread;
@@ -3032,16 +3127,11 @@ unittest
             
         }
     }
-    test_fixed!(FixedKickstart)();
     test_fixed!(ShiftOr)();
     test_flex!(ShiftOr)();
 }
 
-//pick a default kickstart method
-version(fred_simpleKickstart)
-    alias FixedKickstart Kickstart;
-else
-    alias ShiftOr Kickstart;
+alias ShiftOr Kickstart;
         
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
 /*struct Regex(Char)
@@ -5891,13 +5981,13 @@ auto regex(S, S2=string)(S pattern, S2 flags=[])
 {
     if(!__ctfe)
     {
-        auto parser = Parser!(typeof(pattern))(pattern, flags);
+        auto parser = Parser!(Unqual!(typeof(pattern)))(pattern, flags);
         Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
         return r;
     }
     else
     {
-        auto parser = Parser!(typeof(pattern), true)(pattern, flags);
+        auto parser = Parser!(Unqual!(typeof(pattern)), true)(pattern, flags);
         Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
         return r;
     }

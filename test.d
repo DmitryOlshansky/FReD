@@ -641,7 +641,7 @@ int main(string[] argv)
         string s = argv[2];
         try
         {
-            auto re = regex(s);
+            auto re = regex(s, argv.length > 3 ? argv[3] : "");
             write(" OK \n");
             re.print();
         }
@@ -662,7 +662,7 @@ int main(string[] argv)
             if(pat.empty)
                 return 0;
             auto inp = argv[3];
-            auto m = match(to!wstring(inp), regex(pat));
+            auto m = match(to!string(inp), regex(pat, argv.length > 4 ? argv[4] : ""));
             writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m.captures);
         }
         catch(Exception ex)
