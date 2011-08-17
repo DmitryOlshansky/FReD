@@ -246,7 +246,8 @@ unittest
         TestVectors(  `\p{Lu}+`,                      "абвГДЕ",   "y",  "$&",      "ГДЕ"),
         TestVectors(  `^\p{Currency Symbol}\p{Sc}`    "$₤",       "y",  "$&",      "$₤"),  
         TestVectors(  `\p{Common}\p{Thai}`            "!ฆ",       "y",  "$&",      "!ฆ"), 
-        TestVectors(  `[\d\s]*\D`,     "12 \t3\U00001680\u0F20_2",        "y",  "$&", "12 \t3\U00001680\u0F20_"),
+        TestVectors(  `[\d\s]*\D`,  "12 \t3\U00001680\u0F20_2",   "y",  "$&", "12 \t3\U00001680\u0F20_"), 
+        TestVectors(  `[c-wф]фф`, "ффф", "y", "$&", "ффф"),
 //case insensitive:
         TestVectors(   `^abcdEf$`,           "AbCdEF"               "y",   "$&", "AbCdEF",      "i"),
         TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",           "y",   "$&", "рУсскИй ЯзЫк",     "i"),

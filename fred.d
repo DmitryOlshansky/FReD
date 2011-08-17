@@ -683,17 +683,19 @@ public:
         assert(!(ivals.length & 1));
         return this;
     }
+    
     /// test if ch is present in this set
     bool opIndex(dchar ch) const
-    {
-        //debug(fred_charset) writeln(ivals);
-        auto svals = assumeSorted!"a <= b"(ivals);
-        auto s = svals.lowerBound(cast(uint)ch).length;
-        //debug(fred_charset) writeln("Test at ", fnd);
-        return s & 1;
+    {//linear search is in fact faster (given that length is fixed under threshold)
+        for(size_t i=1; i<ivals.length; i+=2)
+            if(ch < ivals[i])
+                return ch >= ivals[i-1];
+        return false;
     }
+    
     /// true if set is empty
     @property bool empty() const {   return ivals.empty; }
+    
     /// print out in [\uxxxx-\uyyyy...] style
     void printUnicodeSet(void delegate(const(char)[])sink) const
     {
@@ -705,16 +707,19 @@ public:
                 formattedWrite(sink, "\\U%08x-\\U%08x", ivals[i], ivals[i+1]-1);
         sink("]");
     }
+    
     /// deep copy this Charset
     @property Charset dup() const
     {
         return Charset(ivals.dup);
     }
+    
     /// full range from start to end
     @property uint extent() const
     {
         return ivals.empty ? 0 : ivals[$-1] - ivals[0];
     }
+    
     /// number of codepoints in this charset
     @property uint chars() const
     {
@@ -724,16 +729,19 @@ public:
             ret += ivals[i+1] - ivals[i];
         return ret;
     }
+    
     /// troika for hash map
     bool opEquals(ref const Charset set) const
     {
         return ivals == set.ivals;
     }
+    
     ///ditto
     int opCmp(ref const Charset set) const
     {
         return cmp(cast(const(uint)[])ivals, cast(const(uint)[])set.ivals);
     }
+    
     ///ditto
     hash_t toHash() const
     {
@@ -742,6 +750,7 @@ public:
             hash = 31*ivals[0] + 17*ivals[$-1];
         return hash;
     }
+    
     struct Range
     {
         const(uint)[] ivals;
@@ -770,6 +779,7 @@ public:
         }
     }
     static assert(isInputRange!Range);
+    
     Range opSlice() const
     {
         return Range(this);
@@ -1767,8 +1777,10 @@ struct Parser(R, bool CTFE=false)
             next();
         }
     }
+    
     //Charset operations relatively in order of priority
     enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union, None };
+    
     // parse unit of charset spec, most notably escape sequences and char ranges
     // also fetches next set operation
     Tuple!(Charset,Operator) parseCharTerm()
@@ -2018,15 +2030,18 @@ struct Parser(R, bool CTFE=false)
         }
         return tuple(set, op);
     }
+    
+    alias Stack!(Charset,CTFE) ValStack;
+    alias Stack!(Operator,CTFE) OpStack;
     /**
         Parse and store IR for charset
     */
     void parseCharset()
     {
-        Stack!(Charset, CTFE) vstack;
-        Stack!(Operator, CTFE) opstack;
+        ValStack vstack;
+        OpStack opstack;
         //
-        static bool apply(Operator op, ref Stack!(Charset,CTFE) stack)
+        static bool apply(Operator op, ref ValStack stack)
         {
             switch(op)
             {
@@ -2058,7 +2073,7 @@ struct Parser(R, bool CTFE=false)
             }
             return true;
         }
-        static bool unrollWhile(alias cond)(ref Stack!(Charset, CTFE) vstack, ref Stack!(Operator, CTFE) opstack)
+        static bool unrollWhile(alias cond)(ref ValStack vstack, ref OpStack opstack)
         {
             while(cond(opstack.top))
             {
@@ -2890,10 +2905,10 @@ public:
                     else
                     {
                         static if(charSize == 1)
-                            static immutable codeBounds = [0x0, 0x7F, 0x80, 0x3FF, 0x400, 0xFFFF, 0x10000, 0x10FFFF];
+                            static immutable codeBounds = [0x0, 0x7F, 0x80, 0x7FF, 0x800, 0xFFFF, 0x10000, 0x10FFFF];
                         else // == 2
                             static immutable codeBounds = [0x0, 0xFFFF, 0x10000, 0x10FFFF];
-                        auto srange = assumeSorted(set.ivals); 
+                        auto srange = assumeSorted!"a<=b"(set.ivals); 
                         for(uint i = 0; i<codeBounds.length/2; i++)
                         {
                             auto start = srange.lowerBound(codeBounds[2*i]).length;
@@ -2917,11 +2932,8 @@ public:
                     for(uint i=0; i<numS; i++)
                     {
                         auto tx =  fork(t, t.pc + IRL!(IR.Charset), t.counter);
-                        if(tx.idx + s[i] <= n_length)
-                        {
-                            tx.advance(s[i]);
-                            trs ~= tx;
-                        }
+                        tx.advance(s[i]);
+                        trs ~= tx;
                     }
                     if(!trs.empty)
                         t = fetch(trs);
