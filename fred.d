@@ -477,7 +477,7 @@ struct Charset
     uint[] ivals;
     ///
 public:
-    ref add(Interval inter)
+    ref Charset add(Interval inter)
     {
         debug(fred_charset) writeln("Inserting ",inter);
         if(ivals.empty)
@@ -487,7 +487,7 @@ public:
         }
         auto svals = assumeSorted(ivals);
         auto s = svals.lowerBound(inter.begin).length;
-        auto e = svals.lowerBound(inter.end).length;//TODO: could do slightly better
+        auto e = s+svals[s..svals.length].lowerBound(inter.end).length;//TODO: could do slightly better
         debug(fred_charset)  writeln("Indexes: ", s,"  ", e);
         if(s & 1)
         {
@@ -507,11 +507,10 @@ public:
                     e+=2;
             }
         }
-        for(size_t i=1;i<ivals.length; i++)
-            assert(ivals[i-1] < ivals[i]);
-        debug(fred_charset) writeln("Before ", ivals);
+        debug(fred_charset)
+            for(size_t i=1;i<ivals.length; i++)
+                assert(ivals[i-1] < ivals[i]);
         replaceInPlaceAlt(ivals, s, e, inter.begin ,inter.end);
-        debug(fred_charset) writeln("After", ivals);
         return this;
     }
     ///
@@ -683,14 +682,24 @@ public:
         assert(!(ivals.length & 1));
         return this;
     }
-    
-    /// test if ch is present in this set
+
+    /// test if ch is present in this set, unrolled linear search
     bool opIndex(dchar ch) const
-    {//linear search is in fact faster (given that length is fixed under threshold)
+    {
+        assert(ivals.length <= maxCharsetUsed);
+        //linear search is in fact faster (given that length is fixed under threshold)
         for(size_t i=1; i<ivals.length; i+=2)
             if(ch < ivals[i])
                 return ch >= ivals[i-1];
         return false;
+    }
+    
+    /// test if ch is present in this set, binary search
+    bool bsearch(dchar ch)const
+    {
+        auto svals = assumeSorted!"a <= b"(ivals);
+        auto s = svals.lowerBound(cast(uint)ch).length;
+        return s & 1;
     }
     
     /// true if set is empty
@@ -917,6 +926,8 @@ struct BasicTrie(uint prefixBits)
         return t;
     }
 }
+//heuristic value determines maximum charset length suitable for linear search
+enum maxCharsetUsed = 6;
 
 alias BasicTrie!8 Trie;
 Trie[const(Charset)] trieCache;
@@ -1007,7 +1018,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
 {
     assert(range.length >= 5);
     range[0] = ch;
-    if(evenUpper[ch])//simple version
+    if(evenUpper.bsearch(ch))//simple version
     {
         range[1] = ch ^ 1;
         return range[0..2];
@@ -1016,7 +1027,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
     for(s=0;s < n; s++)
     {
         foreach(i, v; commonCaseTable)
-            if(v.set[range[s]] && !canFind(range[0..n], range[s]+cast(int)v.delta))
+            if(v.set.bsearch(range[s]) && !canFind(range[0..n], range[s]+cast(int)v.delta))
             {
 
                 range[n++] = range[s]+v.delta;
@@ -1069,6 +1080,7 @@ auto memoizeExpr(string expr)()
         slot =  mixin(expr);
     return slot;
 }
+
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
@@ -1212,6 +1224,7 @@ const(Charset) getUnicodeSet(in char[] name, bool negated,  bool casefold)
     }
     return cast(const Charset)s;
 }
+
 
 /// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T, bool CTFE=false)
@@ -2166,11 +2179,12 @@ struct Parser(R, bool CTFE=false)
         else
         {
             //TODO: better heuristic
-            if(set.ivals.length > 8)
+            if(set.ivals.length > maxCharsetUsed)
             {//also CTFE memory overflow workaround
                 auto t  = getTrie(set);
                 put(Bytecode(IR.Trie, cast(uint)tries.length));
                 tries ~= t;
+                debug(fred_allocation) writeln("Trie generated");
             }
             else
             {
@@ -2275,7 +2289,7 @@ struct Parser(R, bool CTFE=false)
             if(current != '-' && current != ' ' && current != '_')
                 result[k++] = cast(char)ascii.toLower(current);
         enforce(k != MAX_PROPERTY, "invalid property name");
-		auto s = getUnicodeSet(result[0..k], negated, false);//TODO: speed up casefold map, cast(bool)(re_flags & RegexOption.casefold));
+		auto s = getUnicodeSet(result[0..k], negated, cast(bool)(re_flags & RegexOption.casefold));//TODO: speed up casefold map, cast(bool)(re_flags & RegexOption.casefold));
 		enforce(!s.empty, "unrecognized unicode property spec");
 		enforce(current == '}', "} expected ");
 		next();
@@ -4459,10 +4473,11 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].begin = index;
-                if(re.ir[pc].backreference)
-                        backrefed[$$].begin = index;
-                debug(fred_matching) writefln("IR group #%u starts at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
+                $$;
+                debug(fred_matching) writefln("IR group #%u starts at %u", $$, index);
+                goto case;`, addr, ir[0].data
+            , ir[0].backreference ? ctSub("backrefed[$$].start = index", ir[0].data) : ""
+            , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -4470,10 +4485,11 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].end = index;
-                if(re.ir[pc].backreference)
-                        backrefed[$$].end = index;
-                debug(fred_matching) writefln("IR group #%u ends at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
+                $$;
+                debug(fred_matching) writefln("IR group #%u ends at %u", $$, index);
+                goto case;`, addr, ir[0].data
+            , ir[0].backreference ? ctSub("backrefed[$$].end = index", ir[0].data) : ""
+            , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
         break;
