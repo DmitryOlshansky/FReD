@@ -465,6 +465,20 @@ else
             foreach(m; matchFn(s, r1))
                 test ~= m.hit;
             assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
+            auto free_reg = regex(`
+                                  
+                abc
+                \s+
+                "
+                (
+                        [^"]+
+                    |   \\ "
+                )+
+                "
+                z
+            `, "x");
+            auto m = match(`abc  "quoted string with \" inside"z`,free_reg);
+            assert(m);
             debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
         }
         test_body!bmatch();

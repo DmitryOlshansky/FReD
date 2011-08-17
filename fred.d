@@ -1265,8 +1265,9 @@ struct Parser(R, bool CTFE=false)
         pat = origin = pattern;
         if(!__ctfe)
             ir.reserve(pat.length);
-        next();
         parseFlags(flags);
+        _current = ' ';//a safe default for freeform parsing
+        next(); 
         if(__ctfe)
             parseRegex();
         else
@@ -1283,43 +1284,54 @@ struct Parser(R, bool CTFE=false)
         put(Bytecode(IR.End, 0));
 
     }
+    
     void markBackref(uint n)
     {   
         if(n/32 >= backrefed.length)
             backrefed.length = n/32 + 1;
         backrefed[n/32] |= 1<<(n & 31);
     }
+    
     @property dchar current(){ return _current; }
-    bool next()
+    
+    bool _next()
     {
         if(pat.empty)
         {
             empty =  true;
             return false;
         }
-        if(__ctfe)
-        {
-            size_t idx=0;
-            _current = decode(pat, idx);
-            pat = pat[idx..$];
-        }
-        else
-        {
-            _current = pat.front;
-            pat.popFront();
-        }
+        //for CTFEability
+        size_t idx=0;
+        _current = decode(pat, idx);
+        pat = pat[idx..$];
         return true;
     }
+    
     void skipSpace()
     {
-        while(isWhite(current) && next()){ }
+        while(isWhite(current) && _next()){ }
     }
+    
+    bool next()
+    {
+        if(re_flags & RegexOption.freeform)
+        {
+            bool r = _next();
+            skipSpace();
+            return r;
+        }
+        else
+            return _next();
+    }
+        
     void restart(R newpat)
     {
         pat = newpat;
         empty = false;
         next();
     }
+    
     void put(Bytecode code)
     {  
         if(__ctfe)
@@ -1329,7 +1341,9 @@ struct Parser(R, bool CTFE=false)
         else
             ir ~= code; 
     }
+    
     void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
+    
     uint parseDecimal()
     {
         uint r=0;
@@ -1343,6 +1357,7 @@ struct Parser(R, bool CTFE=false)
         }
         return r;
     }
+    
     // parse control code of form \cXXX, c assumed to be the current symbol
     dchar parseControlCode()
     {
@@ -1351,6 +1366,7 @@ struct Parser(R, bool CTFE=false)
             "Only letters are allowed after \\c");
         return current & 0x1f;
     }
+    
     /**
 
     */
@@ -1377,6 +1393,7 @@ struct Parser(R, bool CTFE=false)
             }
         }
     }
+    
     /**
         Parse and store IR for regex pattern
     */
@@ -1722,7 +1739,7 @@ struct Parser(R, bool CTFE=false)
             parseCharset();
             break;
         case '\\':
-            enforce(next(), "Unfinished escape sequence");
+            enforce(_next(), "Unfinished escape sequence");
             parseEscape();
             break;
         case '^':
