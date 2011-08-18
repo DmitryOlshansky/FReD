@@ -193,6 +193,16 @@ struct Bytecode
         assert(code == IR.GroupStart || code == IR.GroupEnd);
         return cast(bool)(raw & (1<<23));
     }
+    void setLocalRef()
+    {
+        assert(code == IR.Backref);
+        raw = raw | (1<<23);
+    }
+    @property bool localRef() const
+    {
+        assert(code == IR.Backref);
+        return cast(bool)(raw & (1<<23));
+    }
     /// human readable name of instruction
     @property string mnemonic() const
     {
@@ -244,8 +254,8 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.RepeatEnd, IR.RepeatQEnd: //backward-jump instructions
         uint len = irb[pc].data;
-        formattedWrite(output, " pc=>%u min=%u max=%u step=%u",
-                pc-len, irb[pc+3].raw, irb[pc+4].raw, irb[pc+2].raw);
+        formattedWrite(output, " pc=>%u min=%u max=%u step=%u"
+                , pc-len, irb[pc+3].raw, irb[pc+4].raw, irb[pc+2].raw);
         break;
     case IR.InfiniteEnd, IR.InfiniteQEnd, IR.OrEnd: //ditto
         uint len = irb[pc].data;
@@ -276,7 +286,9 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.Backref: case IR.Charset: case IR.Trie:
         uint n = irb[pc].data;
-        formattedWrite(output, " %u",  n);
+        formattedWrite(output, " %u",  n); 
+        if(irb[pc].code == IR.Backref)
+            formattedWrite(output, " %s", irb[pc].localRef ? "local" : "global");
         break;
     default://all data-free instructions
     }
@@ -423,7 +435,7 @@ struct NamedGroup
     uint group;
 }
 
-///holds pir of start-end markers for a submatch
+///holds pair of start-end markers for a submatch
 struct Group
 {
     size_t begin, end;
@@ -1273,10 +1285,11 @@ struct Parser(R, bool CTFE=false)
     R pat, origin;       //keep full pattern for pretty printing error messages
     Bytecode[] ir;       //resulting bytecode
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
-    Stack!(uint,CTFE) fixupStack;  //stack of opened start instructions
+    Stack!(uint, CTFE) fixupStack;  //stack of opened start instructions
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
-    uint ngroup = 1, nesting = 0;
+    Stack!(uint,CTFE) groupStack;
+    uint nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(Charset)[] charsets;  //
     const(Trie)[] tries; //
@@ -1397,6 +1410,7 @@ struct Parser(R, bool CTFE=false)
     {
         foreach(ch; flags)//flags are ASCII anyway
         {
+        L_FlagSwitch:
             switch(ch)
             {
                 
@@ -1406,7 +1420,7 @@ struct Parser(R, bool CTFE=false)
                             if(re_flags & mixin("RegexOption."~op))
                                 throw new RegexException(text("redundant flag specified: ",ch));
                             re_flags |= mixin("RegexOption."~op);
-                            break;
+                            break L_FlagSwitch;
                 }
                 default:
                     if(__ctfe)
@@ -1423,7 +1437,7 @@ struct Parser(R, bool CTFE=false)
     void parseRegex()
     {
         fixupStack.push(0);
-        auto subSave = ngroup;
+        groupStack.push(1);//0 - whole match
         auto maxCounterDepth = counterDepth;
         uint fix;//fixup pointer
         
@@ -1448,15 +1462,11 @@ struct Parser(R, bool CTFE=false)
                         next();
                         break;
                     case '=':
-                        put(Bytecode(IR.LookaheadStart, 0));
-                        put(Bytecode.fromRaw(0));
-                        put(Bytecode.fromRaw(0));
+                        genLookaround(IR.LookaheadStart);
                         next();
                         break;
                     case '!':
-                        put(Bytecode(IR.NeglookaheadStart, 0));
-                        put(Bytecode.fromRaw(0));
-                        put(Bytecode.fromRaw(0));
+                        genLookaround(IR.NeglookaheadStart);
                         next();
                         break;
                     case 'P':
@@ -1471,7 +1481,7 @@ struct Parser(R, bool CTFE=false)
                         if(current != '>')
                             error("Expected '>' closing named group");
                         next();
-                        nglob = ngroup++;
+                        nglob = groupStack.top++;
                         auto t = NamedGroup(name, nglob);
                         
                         if(__ctfe)
@@ -1493,17 +1503,9 @@ struct Parser(R, bool CTFE=false)
                     case '<':
                         next();
                         if(current == '=')
-                        {
-                            put(Bytecode(IR.LookbehindStart, 0));
-                            put(Bytecode.fromRaw(0));
-                            put(Bytecode.fromRaw(0));
-                        }
+                            genLookaround(IR.LookbehindStart);
                         else if(current == '!')
-                        {
-                            put(Bytecode(IR.NeglookbehindStart, 0));
-                            put(Bytecode.fromRaw(0));
-                            put(Bytecode.fromRaw(0));
-                        }
+                            genLookaround(IR.NeglookbehindStart);
                         else
                             error("'!' or '=' expected after '<'");
                         next();
@@ -1514,7 +1516,7 @@ struct Parser(R, bool CTFE=false)
                 }
                 else
                 {
-                    nglob = ngroup++; //put local index
+                    nglob = groupStack.top++;
                     put(Bytecode(IR.GroupStart, nglob));
                 }
                 break;
@@ -1530,7 +1532,7 @@ struct Parser(R, bool CTFE=false)
                     parseQuantifier(fix);
                     break;
                 case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                    ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+                    fixLookaround(fix);
                     put(ir[fix].paired);
                     break;
                 case IR.Option: // | xxx )
@@ -1545,8 +1547,8 @@ struct Parser(R, bool CTFE=false)
                         parseQuantifier(fix);
                         break;
                     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                        fixupStack.pop();
-                        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+                        fix = fixupStack.pop();
+                        fixLookaround(fix);
                         put(ir[fix].paired);
                         break;
                     default://(?:xxx)
@@ -1590,18 +1592,18 @@ struct Parser(R, bool CTFE=false)
         if(fixupStack.length != 1)
         {
             fix = fixupStack.pop();
-            enforce(ir[fix].code == IR.Option,"LR syntax error");
+            enforce(ir[fix].code == IR.Option,"no matching ')'");
             finishAlternation(fix);
-            enforce(fixupStack.length == 1, "LR syntax error");
+            enforce(fixupStack.length == 1, "no matching ')'");
         }
     }
-    //helper function, finilizes IR.Option, fix points to the first option of sequence
+    //helper function, finalizes IR.Option, fix points to the first option of sequence
     void finishAlternation(uint fix)
     {
-        enforce(ir[fix].code == IR.Option, "LR syntax error");
+        enforce(ir[fix].code == IR.Option, "no matching ')'");
         ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.OrStart));
         fix = fixupStack.pop();
-        enforce(ir[fix].code == IR.OrStart, "LR syntax error");
+        enforce(ir[fix].code == IR.OrStart, "no matching ')'");
         ir[fix] = Bytecode(IR.OrStart, cast(uint)ir.length - fix - IRL!(IR.OrStart));
         put(Bytecode(IR.OrEnd, cast(uint)ir.length - fix - IRL!(IR.OrStart)));
         uint pc = fix + IRL!(IR.OrStart);
@@ -1642,7 +1644,6 @@ struct Parser(R, bool CTFE=false)
             enforce(next(), "Unexpected end of regex pattern");
             enforce(ascii.isDigit(current), "First number required in repetition");
             min = parseDecimal();
-            //skipSpace();
             if(current == '}')
                 max = min;
             else if(current == ',')
@@ -1789,6 +1790,27 @@ struct Parser(R, bool CTFE=false)
                 put(Bytecode(IR.Char, current));
             next();
         }
+    }
+    
+    // generate code for start of lookaround: (?= (?! (?<= (?<!
+    void genLookaround(IR opcode)
+    {
+        put(Bytecode(opcode, 0));
+        put(Bytecode.fromRaw(0));
+        put(Bytecode.fromRaw(0));
+        groupStack.push(0);
+    }
+    
+    //fixup lookaround with start at offset fix
+    void fixLookaround(uint fix)
+    {
+        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+        auto g = groupStack.pop();
+        assert(!groupStack.empty);
+        ir[fix+1] = Bytecode.fromRaw(groupStack.top);
+        // groups are cumulative across lookarounds
+        ir[fix+2] = Bytecode.fromRaw(groupStack.top+g);
+        groupStack.top += g;
     }
     
     //Charset operations relatively in order of priority
@@ -2178,7 +2200,6 @@ struct Parser(R, bool CTFE=false)
         }
         else
         {
-            //TODO: better heuristic
             if(set.ivals.length > maxCharsetUsed)
             {//also CTFE memory overflow workaround
                 auto t  = getTrie(set);
@@ -2256,18 +2277,29 @@ struct Parser(R, bool CTFE=false)
             next();
             put(Bytecode(IR.Char, 0));//NUL character
             break;
-        case '1': .. case '9': //TODO: use $ instead of \ for backreference
+        case '1': .. case '9': 
             uint nref = cast(uint)current - '0';
-            enforce(nref <  ngroup, "Backref to unseen group");
+            uint maxBackref;
+            foreach(v; groupStack.stack.data)
+                maxBackref += v;
+            uint localLimit = maxBackref - groupStack.top;
+            enforce(nref < maxBackref, "Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
-            while(nref < ngroup && next() && ascii.isDigit(current))
+            while(nref < maxBackref && next() && ascii.isDigit(current))
             {
                 nref = nref * 10 + current - '0';
             }
-            if(nref >= ngroup)
+            if(nref >= maxBackref)
                 nref /= 10;
-            put(Bytecode(IR.Backref, nref));
+            
+            if(nref >= localLimit)
+            {
+                put(Bytecode(IR.Backref, nref-localLimit));
+                ir[$-1].setLocalRef();
+            }
+            else
+                put(Bytecode(IR.Backref, nref));
             markBackref(nref);
             break;
         default:
@@ -2289,7 +2321,7 @@ struct Parser(R, bool CTFE=false)
             if(current != '-' && current != ' ' && current != '_')
                 result[k++] = cast(char)ascii.toLower(current);
         enforce(k != MAX_PROPERTY, "invalid property name");
-		auto s = getUnicodeSet(result[0..k], negated, cast(bool)(re_flags & RegexOption.casefold));//TODO: speed up casefold map, cast(bool)(re_flags & RegexOption.casefold));
+		auto s = getUnicodeSet(result[0..k], negated, false);//cast(bool)(re_flags & RegexOption.casefold));
 		enforce(!s.empty, "unrecognized unicode property spec");
 		enforce(current == '}', "} expected ");
 		next();
@@ -2369,7 +2401,6 @@ struct RegEx
         }
         auto counterRange = FixedStack!uint(new uint[maxCounterDepth+1], -1);
         counterRange.push(1);
-        auto laRange = FixedStack!(Tuple!(uint,uint))(new Tuple!(uint,uint)[ngroup+1], -1);
         for(uint i=0; i<ir.length; i+=ir[i].length)
         {
             if(ir[i].hotspot)
@@ -2395,34 +2426,13 @@ struct RegEx
                 counterRange.pop();
                 break;
             case IR.GroupStart:
-                if(!laRange.empty)
-                {//inside lookaround
-                    laRange.top = tuple(min(laRange.top[0], ir[i].data), max(laRange.top[1], ir[i].data));
-                    ir[i] = Bytecode(IR.GroupStart, ir[i].data - laRange.top[0]);
-                }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
                 threadCount += counterRange.top;
                 break;
             case IR.GroupEnd:
-                if(!laRange.empty)
-                {//inside lookaround
-                    ir[i] = Bytecode(IR.GroupEnd, ir[i].data - laRange.top[0]);
-                }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
-                threadCount += counterRange.top;
-                break;
-            case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                laRange.push(tuple(uint.max, 0u));
-                threadCount += counterRange.top;
-                break;
-            case IR.LookaheadEnd, IR.NeglookaheadEnd, IR.LookbehindEnd, IR.NeglookbehindEnd:
-                auto ofs = i - ir[i].data - IRL!(IR.LookaheadStart);
-                assert(ir[ofs].isStart);
-                auto slice = laRange.pop();
-                ir[ofs+1] = Bytecode.fromRaw(slice[0] == uint.max ? 0 : slice[0]);
-                ir[ofs+2] = Bytecode.fromRaw(slice[1] == 0 ? 0 : slice[1] + 1);
                 threadCount += counterRange.top;
                 break;
             default:  
@@ -2447,24 +2457,8 @@ struct RegEx
             }
             else if(ir[pc].isAtom)
             {
-                switch(ir[pc].code)
-                {
-                case IR.GroupStart:
-                    uint n = ir[pc].data;
-                    uint mask = 1u<<(n & 31);
-                    assert(!(groupBits[n>>5] & mask), text("Wrong group ordering ", pc));
-                    groupBits[n>>5] |= mask;
-                    break;
-                case IR.GroupEnd:
-                    uint n = ir[pc].data;
-                    uint mask = 1u<<(n & 31);
-                    assert((groupBits[n>>5] & mask), text("Wrong group ordering ", pc));
-                    groupBits[n>>5] ^= mask;
-                    break;
-                default:
-                }
+                
             }
-            
             else
                assert(0, text("Unknown type of instruction at pc=", pc));
         }
@@ -2492,7 +2486,7 @@ struct RegEx
         else
             ir = p.ir;
         dict = p.dict;
-        ngroup = p.ngroup;
+        ngroup = p.groupStack.top;
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
         charsets = p.charsets;
@@ -3331,7 +3325,7 @@ template BacktrackingMatcher(alias hardcoded)
             exhausted = false;
             trackers = alloc.newArray!(size_t[])(re.ngroup+1);
             newStack();
-            backrefed = alloc.newArray!(Group[])(re.ngroup);
+            backrefed = null;
             static if(kicked)
                 kickstart = Kickstart!Char(re);
         }
@@ -3640,17 +3634,13 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.GroupStart:
                     uint n = re.ir[pc].data;
-                    matches[n].begin = index;//the first is sliced out
-                    if(re.ir[pc].backreference)
-                        backrefed[n].begin = index;
+                    matches[n].begin = index;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc += IRL!(IR.GroupStart);
                     break;
                 case IR.GroupEnd:
                     uint n = re.ir[pc].data;
-                    matches[n].end = index;//the first is sliced out
-                    if(re.ir[pc].backreference)
-                        backrefed[n].end = index;
+                    matches[n].end = index;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc += IRL!(IR.GroupEnd);
                     break;
@@ -3659,16 +3649,16 @@ template BacktrackingMatcher(alias hardcoded)
                     uint len = re.ir[pc].data;
                     auto save = index;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    auto x = this;
+                    auto matcher = this;
                     auto a = newRegionAllocator();
-                    x.pc = 0;
-                    x.alloc = &a;
-                    x.re.ngroup =  me - ms;
-                    x.memory = null;
-                    x.newStack();
-                    x.matches = matches[ms .. me];
-                    x.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
-                    bool match = x.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
+                    matcher.alloc = &a;
+                    matcher.re.ngroup =  me - ms;
+                    matcher.memory = null;
+                    matcher.newStack();
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed = backrefed.empty ? matches : backrefed;
+                    matcher.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
+                    bool match = matcher.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
                     s.reset(save);
                     next();
                     if(!match)
@@ -3688,6 +3678,7 @@ template BacktrackingMatcher(alias hardcoded)
                     auto a = newRegionAllocator();
                     auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
                     backMatcher.matches = matches[ms .. me];
+                    backMatcher.backrefed  = backrefed.empty ? matches : backrefed;
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
                         goto L_backtrack;
@@ -3698,7 +3689,9 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Backref:
                     uint n = re.ir[pc].data;
-                    auto referenced = s[backrefed[n].begin .. backrefed[n].end];
+                    auto referenced = re.ir[pc].localRef 
+                            ? s[matches[n].begin .. matches[n].end] 
+                            : s[backrefed[n].begin .. backrefed[n].end];
                     while(!atEnd && !referenced.empty && front == referenced.front)
                     {
                         next();
@@ -3729,9 +3722,8 @@ template BacktrackingMatcher(alias hardcoded)
             assert(0);
         }
         }
-        /*
-            helper function, saves engine state
-        */
+        
+        //helper function, saves engine state
         void pushState(uint pc, uint counter)
         {
             if(lastState + stateSize + matches.length >= memory.length)
@@ -3746,6 +3738,7 @@ template BacktrackingMatcher(alias hardcoded)
             debug(fred_matching)
                 writefln("Saved(pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
         }
+        
         //helper function, restores engine state        
         bool popState()
         {
@@ -3780,6 +3773,7 @@ template BacktrackingMatcher(alias hardcoded)
                 writefln("Backtracked (pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
             return true;
         }
+        
         /++
             Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
             Results are stored in matches
@@ -3790,7 +3784,6 @@ template BacktrackingMatcher(alias hardcoded)
             counter = 0;
             lastState = 0;
             infiniteNesting = -1;// intentional
-            //setup first frame for incremental match storage
             auto start = index;
             debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
             for(;;)
@@ -3886,7 +3879,6 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.Bol:
                     dchar back;
                     size_t bi;
-                    //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         pc--;
                     else if((re.flags & RegexOption.multiline) 
@@ -4035,26 +4027,63 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.GroupStart:
                     uint n = re.ir[pc].data;
                     matches[n].begin = index;
-                    if(re.ir[pc].backreference)
-                        backrefed[n].begin = index;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc --;
                     break;
                 case IR.GroupEnd:  
                     uint n = re.ir[pc].data;
                     matches[n].end = index;
-                    if(re.ir[pc].backreference)
-                        backrefed[n].end = index;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc --;
                     break;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart:
+                    assert(0);
                 case IR.LookaheadEnd:
                 case IR.NeglookaheadEnd:
+                    uint len = re.ir[pc].data;
+                    pc -= len + IRL!(IR.LookaheadStart);
+                    auto prog = re;
+                    uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
+                    prog.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
+                    prog.ngroup = me - ms;
+                    auto a = newRegionAllocator();
+                    auto matcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed  = backrefed.empty ? matches : backrefed;
+                    bool match = matcher.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
+                    if(!match)
+                        goto L_backtrack;
+                    else
+                    {
+                        pc --;
+                    }
+                    break;
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
-                    assert(0, "No lookaround in look back");
+                    uint len = re.ir[pc].data;
+                    pc -= len + IRL!(IR.LookbehindStart);
+                    auto save = index;
+                    uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
+                    auto matcher = this;
+                    auto a = newRegionAllocator();
+                    matcher.alloc = &a;
+                    matcher.re.ngroup =  me - ms;
+                    matcher.memory = null;
+                    matcher.newStack();
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed = backrefed.empty ? matches : backrefed;
+                    matcher.re.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
+                    bool match = matcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
+                    s.reset(save);
+                    next();
+                    if(!match)
+                        goto L_backtrack;
+                    else
+                    {
+                        pc --;
+                    }
+                    break;
                 case IR.Backref:
                     uint n = re.ir[pc].data;
                     auto referenced = s[backrefed[n].begin .. backrefed[n].end];
@@ -4473,10 +4502,8 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].begin = index;
-                $$;
                 debug(fred_matching) writefln("IR group #%u starts at %u", $$, index);
-                goto case;`, addr, ir[0].data
-            , ir[0].backreference ? ctSub("backrefed[$$].start = index", ir[0].data) : ""
+                goto case;`, addr, ir[0].data 
             , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
@@ -4485,10 +4512,8 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].end = index;
-                $$;
                 debug(fred_matching) writefln("IR group #%u ends at %u", $$, index);
                 goto case;`, addr, ir[0].data
-            , ir[0].backreference ? ctSub("backrefed[$$].end = index", ir[0].data) : ""
             , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
@@ -4900,21 +4925,15 @@ enum replica = q{
                 uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].begin = index;
                 t.pc += IRL!(IR.GroupStart);
-                //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                 goto L_GroupStart;
             case IR.GroupEnd:  
                 uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].end = index;
                 t.pc += IRL!(IR.GroupEnd);
-                //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                 goto L_GroupEnd;
             case IR.Backref:
                 uint n = re.ir[t.pc].data;
-                Group* source;
-                if(n >= re.ngroup)
-                    source = backrefed.ptr;
-                else
-                    source = t.matches.ptr;
+                Group* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
                 {
@@ -4952,17 +4971,15 @@ enum replica = q{
                 goto L_Backref;
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
-                auto backMatcher = 
+                auto matcher = 
                     ThompsonMatcher!(Char, typeof(s.loopBack))
-                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
-                backMatcher.freelist = freelist;
-                backMatcher.alloc = alloc;
-                backMatcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
-                backMatcher.backrefed = t.matches;
+                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
+                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 //backMatch
-                backMatcher.next(); //load first character from behind
-                bool match = backMatcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
-                freelist = backMatcher.freelist;
+                matcher.next(); //load first character from behind
+                bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                freelist = matcher.freelist;
                 if(match)
                 {
                     recycle(t);
@@ -4992,14 +5009,13 @@ enum replica = q{
                 uint len = re.ir[t.pc].data;
                 uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
                 bool positive = re.ir[t.pc].code == IR.LookaheadStart;
-                auto fwdMatcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s, alloc);
-                fwdMatcher.freelist = freelist;
-                fwdMatcher.front = front;
-                fwdMatcher.index = index;
-                fwdMatcher.re.ngroup = me - ms;
-                fwdMatcher.backrefed = t.matches;
-                bool nomatch = fwdMatcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
-                freelist = fwdMatcher.freelist;
+                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s);
+                matcher.front = front;
+                matcher.index = index;
+                matcher.re.ngroup = me - ms;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = matcher.freelist;
                 s.reset(index);
                 next();
                 if(nomatch)
@@ -5042,7 +5058,6 @@ enum replica = q{
                 case IR.Char:
                     if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc += IRL!(IR.Char);
                         nlist.insertBack(t);
                     }
@@ -5107,6 +5122,7 @@ enum replica = q{
 
             }
         };
+
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
@@ -5183,15 +5199,16 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
-    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
+    this(S)(ref ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
     {
         s = stream;
         re = matcher.re;
         re.ir = piece;
-        alloc = allocator;
+        alloc = matcher.alloc;
         threadSize = matcher.threadSize;
         merge = matcher.merge;
         genCounter = matcher.genCounter;
+        freelist = matcher.freelist;
     }
     ///
     this(this)
@@ -5483,7 +5500,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             case IR.Bol:
                 dchar back;
                 size_t bi;
-                //TODO: multiline & attributes, unicode line terminators
                 if(atStart)
                     t.pc--;
                 else if((re.flags & RegexOption.multiline) 
@@ -5658,7 +5674,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Backref:
                 uint n = re.ir[t.pc].data;
-                auto source = n >= re.ngroup ? backrefed.ptr : t.matches.ptr;
+                auto source = re.ir[t.pc].localRef ?  t.matches.ptr : backrefed.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
                 {
@@ -5668,7 +5684,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 {
                     size_t idx = source[n].begin + t.uopCounter;
                     size_t end = source[n].end;
-                    if(s[idx..end].front == front)//TODO: could be a BUG in backward matching
+                    if(s[idx..end].front == front)//could be a BUG in backward matching
                     {
                         t.uopCounter += std.utf.stride(s[idx..end], 0);
                         if(t.uopCounter + source[n].begin == source[n].end)
@@ -5700,11 +5716,56 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 return;
             case IR.LookaheadStart:
             case IR.NeglookaheadStart:
+                assert(0);
             case IR.LookaheadEnd:
             case IR.NeglookaheadEnd:
+                uint len = re.ir[t.pc].data;
+                t.pc -= len + IRL!(IR.LookaheadStart);
+                bool positive = re.ir[t.pc].code == IR.LookaheadStart;
+                auto matcher = ThompsonMatcher!(Char, typeof(s.loopBack))
+                    (this
+                    , re.ir[t.pc .. t.pc+len+IRL!(IR.LookbehindStart)+IRL!(IR.LookbehindEnd)]
+                    , s.loopBack);
+                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                matcher.next(); //fetch a char, since direction was reversed
+                bool match = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = matcher.freelist;
+                if(match)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                }
+                else
+                    t.pc--;
+                break;
             case IR.LookbehindEnd:
             case IR.NeglookbehindEnd:
-                assert(0, "No lookaround inside look back");
+                auto save = index;
+                uint len = re.ir[t.pc].data;
+                t.pc -= len + IRL!(IR.LookbehindStart);
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
+                bool positive = re.ir[t.pc].code == IR.LookbehindStart;
+                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookbehindStart)], s);
+                matcher.front = front;
+                matcher.index = index;
+                matcher.re.ngroup = me - ms;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                bool nomatch = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ positive;
+                freelist = matcher.freelist;
+                s.reset(index);
+                next();
+                if(nomatch)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    //
+                }
+                else
+                    t.pc--;
+                break;
             case IR.Nop:
                 t.pc--;
                 break;
@@ -5728,7 +5789,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.Char:
                     if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc--;
                         nlist.insertBack(t);
                     }
@@ -5827,7 +5887,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     Thread* fork(Thread* master, uint pc, uint counter)
     {
         auto t = allocate();
-        t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup]; //TODO: Small array optimization and/or COW
+        t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup];
         t.pc = pc;
         t.counter = counter;
         t.uopCounter = 0;
@@ -5837,7 +5897,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     Thread*  createStart(size_t index)
     {
         auto t = allocate();
-        t.matches.ptr[0..re.ngroup] = Group.init; //TODO: ditto
+        t.matches.ptr[0..re.ngroup] = Group.init;
         t.matches[0].begin = index;
         t.pc = 0;
         t.counter = 0;
