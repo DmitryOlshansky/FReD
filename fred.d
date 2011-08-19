@@ -1044,7 +1044,6 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
         idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
         slice = slice[0..idx];
         foreach(v; slice)
-        {
             if(ch < v.end)
             {
                 if(v.xor)
@@ -1060,7 +1059,6 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
                         range[i++] = t;
                 }
             }
-        }
     }
     return range[0..i];
 }
@@ -1075,27 +1073,34 @@ unittest
 }
 
 //
-void caseEnclose(ref CodepointSet set)
+CodepointSet caseEnclose(in CodepointSet set)
 {
-    
+    CodepointSet n;
     for(size_t i=0;i<set.ivals.length; i+=2)
     {
         CommonCaseEntry cs;
-        cs.start = set.ivals[i];
-        cs.end = set.ivals[i+1];
+        cs.start = set.ivals[i+1]-1;
+        cs.end = set.ivals[i];
         auto idx = assumeSorted!"a.end <= b.end"(commonCaseTable)
             .lowerBound(cs).length;
+        
         immutable(CommonCaseEntry)[] slice = commonCaseTable[idx..$];
         idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
         slice = slice[0..idx];
         if(!slice.empty)
         {
             dchar[6] r;
-            foreach(ch; iota(set.ivals[i], set.ivals[i+1]))
-                foreach(v; getCommonCasing(ch, r[]))
-                    set.add(ch);
+            for(uint ch = set.ivals[i]; ch <set.ivals[i+1]; ch++)
+            {
+                auto rng = getCommonCasing(ch, r[]);
+                foreach(v; rng)
+                    n.add(v);
+            }
         }
+        else
+            n.add(Interval(cs.end,cs.start-1));
     }
+    return n;
 }
 
 //property for \w character class
@@ -1194,7 +1199,7 @@ const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
             foreach(v; range)
                 n.add(v);
         }*/
-        caseEnclose(s);
+        s = caseEnclose(s);
     }       
     if(negated)
         s.negate();
