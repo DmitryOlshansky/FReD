@@ -1,28 +1,74 @@
 //Written in the D Programming Language
 /**
-    stress.d a tool to do automated stress tests of FReD's parser
+    stress.d a tool to do automated stress tests of FReD
 */
 module stress;
 
 import fred;
-import std.stdio, std.string, std.array, std.exception, std.conv, std.random;
+import std.stdio, std.range, std.string, std.array, std.exception, std.conv, std.random;
 
+version(backtracking)
+	alias bmatch matchFn;
+else version(thompson)
+	alias match matchFn;
+else
+	static assert(0, "Use -version=backtracking or -version=thompson");
+
+void testRegex(Char)(in Char[] pat, RegEx r, int iterations, int length, uint seed)
+{
+    auto gen = SampleGenerator!(Char)(r, length, seed);
+    foreach(s; take(gen, iterations))
+    {
+        auto m = matchFn(s, r);
+        enforce(!m.empty,
+                text("having seed=", seed, " failed to match sample ", s
+                     , " for pattern ", pat));
+    }
+}
 
 int main(string[] args)
 {
-    void usage()
+    static void usage()
     {
-        writeln("FReD stress test tool\nUsage: \n\tstress command <args>\n",
-                "Commands:\n",
-                "permutation: tests all permutations of terms up to max_pattern_length\n",
-                "\targs are: \"term1 term2 ... termN\" max_pattern_length\n",
-                "random: tests given number of random combination of terms of specified length",
-                "\targs are: \"term1 term2 ... termN\" length iterations [seed]");
+        writeln(
+            "FReD stress test tool\nUsage: \n\tstress command <args> ",
+            "[<exec-test iterations> <exec test sample length>] [seed]\n",
+            "Commands:\n",
+            "permutation: tests all permutations of terms up to max_pattern_length \n",
+            "\targs are: \"term1 term2 ... termN\" max_pattern_length\n",
+            "random: tests given number of random combination of terms of specified length",
+            "\targs are: \"term1 term2 ... termN\" length iterations ",
+        );
     }
+
     if(args.length < 3)
     {
         usage();
         return 1;
+    }
+    bool exec_test;
+    int exec_iter, exec_len;
+    uint exec_seed;
+    int numExceptions = 0;
+    void test_body(Char)(Char[] data)
+    {
+        try
+        {
+            auto r = regex(data);
+            if(exec_test)
+                testRegex(data, r, exec_iter, exec_len, exec_seed);
+            r = regex(data, "i");
+            if(exec_test)
+                testRegex(data, r, exec_iter, exec_len, exec_seed);
+        }
+        catch(RegexException ex)
+        {
+            numExceptions++;
+        }
+        catch(Throwable t)
+        {
+            writeln("@@@BUG@@@: ", data, t.msg);
+        }
     }
     if(args[1] == "permutation")
     {
@@ -30,7 +76,18 @@ int main(string[] args)
         int maxLen = to!int(args[3]);
         enforce(maxLen > 0);
         int[] index = new int[maxLen];
-        auto numExceptions = 0;
+
+        exec_test = args.length > 4;
+        exec_seed = unpredictableSeed;
+        if(exec_test)
+        {
+            enforce(args.length == 7 || args.length == 6
+                    , "Wrong num of args for optional exe-test");
+            exec_iter = to!int(args[4]);
+            exec_len = to!int(args[5]);
+            if(args.length == 7)
+                exec_seed = to!uint(args[6]);
+        }
         for(int pat=1;pat<=maxLen;pat++)
         {
             auto app = appender!(char[])();
@@ -59,24 +116,11 @@ int main(string[] args)
                 {
                     app.put(alphabet[index[i]]);
                 }
-                try{
-                    auto r = regex(app.data);
-                    r = regex(app.data, "i");
-                }
-                catch(RegexException ex)
-                {
-                    numExceptions++;
-                    writeln(app.data);
-                }
-                catch(Throwable t)
-                {
-                    writeln("@@@BUG@@@: ", app.data);
-                    throw t;
-                }
+                test_body(app.data);
                 //writeln(app.data);
                 app.shrinkTo(0);
                 //writeln(index[0..pat]);
-                index[0]++;   
+                index[0]++;
             }
         }
         writefln("Complete with %d exceptions caught", numExceptions);
@@ -87,13 +131,24 @@ int main(string[] args)
         int len = to!int(args[3]);
         int iterations = to!int(args[4]);
         auto rnd = Xorshift(0);
-        
-        auto seed = args.length < 6 ? unpredictableSeed() : to!uint(args[5]);
+        uint seed;
+        exec_test = args.length > 6;
+        if(exec_test)
+        {
+            enforce(args.length == 8 || args.length == 7
+                    , "Wrong num of args for optional exe-test");
+            exec_iter = to!int(args[5]);
+            exec_len = to!int(args[6]);
+            if(args.length == 8)
+                exec_seed = seed = to!uint(args[7]);
+            else
+                exec_seed = seed = unpredictableSeed();
+        }
+        else
+            seed = args.length < 6 ? unpredictableSeed() : to!uint(args[5]);
         rnd.seed(seed);
         writeln("Random test using seed ", seed);
         enforce(len > 0);
-        auto numExceptions = 0;
-        
         auto app = appender!(char[])();
         for(int i=0; i<iterations; i++)
         {
@@ -102,22 +157,8 @@ int main(string[] args)
                 app.put(alphabet[rnd.front()%alphabet.length]);
                 rnd.popFront();
             }
-            try
-            {
-                auto r = regex(app.data);
-                r = regex(app.data, "i");
-            }
-            catch(RegexException)
-            {
-                debug writeln(app.data);
-            }
-            catch(Throwable t)
-            {
-                writeln("@@@BUG@@@: ", app.data);
-                throw t;
-            }
+            test_body(app.data);
             app.shrinkTo(0);
-            debug stderr.writeln(i);
             //writeln(app.data);
         }
         writefln("Complete with %d exceptions caught", numExceptions);

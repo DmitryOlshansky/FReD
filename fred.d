@@ -193,6 +193,16 @@ struct Bytecode
         assert(code == IR.GroupStart || code == IR.GroupEnd);
         return cast(bool)(raw & (1<<23));
     }
+    void setLocalRef()
+    {
+        assert(code == IR.Backref);
+        raw = raw | (1<<23);
+    }
+    @property bool localRef() const
+    {
+        assert(code == IR.Backref);
+        return cast(bool)(raw & (1<<23));
+    }
     /// human readable name of instruction
     @property string mnemonic() const
     {
@@ -244,8 +254,8 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.RepeatEnd, IR.RepeatQEnd: //backward-jump instructions
         uint len = irb[pc].data;
-        formattedWrite(output, " pc=>%u min=%u max=%u step=%u",
-                pc-len, irb[pc+3].raw, irb[pc+4].raw, irb[pc+2].raw);
+        formattedWrite(output, " pc=>%u min=%u max=%u step=%u"
+                , pc-len, irb[pc+3].raw, irb[pc+4].raw, irb[pc+2].raw);
         break;
     case IR.InfiniteEnd, IR.InfiniteQEnd, IR.OrEnd: //ditto
         uint len = irb[pc].data;
@@ -276,7 +286,9 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.Backref: case IR.Charset: case IR.Trie:
         uint n = irb[pc].data;
-        formattedWrite(output, " %u",  n);
+        formattedWrite(output, " %u",  n); 
+        if(irb[pc].code == IR.Backref)
+            formattedWrite(output, " %s", irb[pc].localRef ? "local" : "global");
         break;
     default://all data-free instructions
     }
@@ -423,7 +435,7 @@ struct NamedGroup
     uint group;
 }
 
-///holds pir of start-end markers for a submatch
+///holds pair of start-end markers for a submatch
 struct Group
 {
     size_t begin, end;
@@ -477,7 +489,7 @@ struct Charset
     uint[] ivals;
     ///
 public:
-    ref add(Interval inter)
+    ref Charset add(Interval inter)
     {
         debug(fred_charset) writeln("Inserting ",inter);
         if(ivals.empty)
@@ -487,7 +499,7 @@ public:
         }
         auto svals = assumeSorted(ivals);
         auto s = svals.lowerBound(inter.begin).length;
-        auto e = svals.lowerBound(inter.end).length;//TODO: could do slightly better
+        auto e = s+svals[s..svals.length].lowerBound(inter.end).length;//TODO: could do slightly better
         debug(fred_charset)  writeln("Indexes: ", s,"  ", e);
         if(s & 1)
         {
@@ -507,11 +519,10 @@ public:
                     e+=2;
             }
         }
-        for(size_t i=1;i<ivals.length; i++)
-            assert(ivals[i-1] < ivals[i]);
-        debug(fred_charset) writeln("Before ", ivals);
+        debug(fred_charset)
+            for(size_t i=1;i<ivals.length; i++)
+                assert(ivals[i-1] < ivals[i]);
         replaceInPlaceAlt(ivals, s, e, inter.begin ,inter.end);
-        debug(fred_charset) writeln("After", ivals);
         return this;
     }
     ///
@@ -683,17 +694,29 @@ public:
         assert(!(ivals.length & 1));
         return this;
     }
-    /// test if ch is present in this set
+
+    /// test if ch is present in this set, unrolled linear search
     bool opIndex(dchar ch) const
     {
-        //debug(fred_charset) writeln(ivals);
+        assert(ivals.length <= maxCharsetUsed);
+        //linear search is in fact faster (given that length is fixed under threshold)
+        for(size_t i=1; i<ivals.length; i+=2)
+            if(ch < ivals[i])
+                return ch >= ivals[i-1];
+        return false;
+    }
+    
+    /// test if ch is present in this set, binary search
+    bool bsearch(dchar ch)const
+    {
         auto svals = assumeSorted!"a <= b"(ivals);
         auto s = svals.lowerBound(cast(uint)ch).length;
-        //debug(fred_charset) writeln("Test at ", fnd);
         return s & 1;
     }
+    
     /// true if set is empty
     @property bool empty() const {   return ivals.empty; }
+    
     /// print out in [\uxxxx-\uyyyy...] style
     void printUnicodeSet(void delegate(const(char)[])sink) const
     {
@@ -705,16 +728,19 @@ public:
                 formattedWrite(sink, "\\U%08x-\\U%08x", ivals[i], ivals[i+1]-1);
         sink("]");
     }
+    
     /// deep copy this Charset
     @property Charset dup() const
     {
         return Charset(ivals.dup);
     }
+    
     /// full range from start to end
     @property uint extent() const
     {
         return ivals.empty ? 0 : ivals[$-1] - ivals[0];
     }
+    
     /// number of codepoints in this charset
     @property uint chars() const
     {
@@ -724,16 +750,19 @@ public:
             ret += ivals[i+1] - ivals[i];
         return ret;
     }
+    
     /// troika for hash map
     bool opEquals(ref const Charset set) const
     {
         return ivals == set.ivals;
     }
+    
     ///ditto
     int opCmp(ref const Charset set) const
     {
         return cmp(cast(const(uint)[])ivals, cast(const(uint)[])set.ivals);
     }
+    
     ///ditto
     hash_t toHash() const
     {
@@ -742,6 +771,7 @@ public:
             hash = 31*ivals[0] + 17*ivals[$-1];
         return hash;
     }
+    
     struct Range
     {
         const(uint)[] ivals;
@@ -770,6 +800,7 @@ public:
         }
     }
     static assert(isInputRange!Range);
+    
     Range opSlice() const
     {
         return Range(this);
@@ -907,6 +938,8 @@ struct BasicTrie(uint prefixBits)
         return t;
     }
 }
+//heuristic value determines maximum charset length suitable for linear search
+enum maxCharsetUsed = 6;
 
 alias BasicTrie!8 Trie;
 Trie[const(Charset)] trieCache;
@@ -997,7 +1030,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
 {
     assert(range.length >= 5);
     range[0] = ch;
-    if(evenUpper[ch])//simple version
+    if(evenUpper.bsearch(ch))//simple version
     {
         range[1] = ch ^ 1;
         return range[0..2];
@@ -1006,7 +1039,7 @@ dchar[] getCommonCasing(dchar ch, dchar[] range)
     for(s=0;s < n; s++)
     {
         foreach(i, v; commonCaseTable)
-            if(v.set[range[s]] && !canFind(range[0..n], range[s]+cast(int)v.delta))
+            if(v.set.bsearch(range[s]) && !canFind(range[0..n], range[s]+cast(int)v.delta))
             {
 
                 range[n++] = range[s]+v.delta;
@@ -1059,6 +1092,7 @@ auto memoizeExpr(string expr)()
         slot =  mixin(expr);
     return slot;
 }
+
 /++
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
@@ -1203,6 +1237,7 @@ const(Charset) getUnicodeSet(in char[] name, bool negated,  bool casefold)
     return cast(const Charset)s;
 }
 
+
 /// basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T, bool CTFE=false)
 {
@@ -1250,10 +1285,11 @@ struct Parser(R, bool CTFE=false)
     R pat, origin;       //keep full pattern for pretty printing error messages
     Bytecode[] ir;       //resulting bytecode
     uint re_flags = 0;   //global flags e.g. multiline + internal ones
-    Stack!(uint,CTFE) fixupStack;  //stack of opened start instructions
+    Stack!(uint, CTFE) fixupStack;  //stack of opened start instructions
     NamedGroup[] dict;   //maps name -> user group number
     //current num of group, group nesting level and repetitions step
-    uint ngroup = 1, nesting = 0;
+    Stack!(uint,CTFE) groupStack;
+    uint nesting = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(Charset)[] charsets;  //
     const(Trie)[] tries; //
@@ -1265,8 +1301,9 @@ struct Parser(R, bool CTFE=false)
         pat = origin = pattern;
         if(!__ctfe)
             ir.reserve(pat.length);
-        next();
         parseFlags(flags);
+        _current = ' ';//a safe default for freeform parsing
+        next(); 
         if(__ctfe)
             parseRegex();
         else
@@ -1283,43 +1320,54 @@ struct Parser(R, bool CTFE=false)
         put(Bytecode(IR.End, 0));
 
     }
+    
     void markBackref(uint n)
     {   
         if(n/32 >= backrefed.length)
             backrefed.length = n/32 + 1;
         backrefed[n/32] |= 1<<(n & 31);
     }
+    
     @property dchar current(){ return _current; }
-    bool next()
+    
+    bool _next()
     {
         if(pat.empty)
         {
             empty =  true;
             return false;
         }
-        if(__ctfe)
-        {
-            size_t idx=0;
-            _current = decode(pat, idx);
-            pat = pat[idx..$];
-        }
-        else
-        {
-            _current = pat.front;
-            pat.popFront();
-        }
+        //for CTFEability
+        size_t idx=0;
+        _current = decode(pat, idx);
+        pat = pat[idx..$];
         return true;
     }
+    
     void skipSpace()
     {
-        while(isWhite(current) && next()){ }
+        while(isWhite(current) && _next()){ }
     }
+    
+    bool next()
+    {
+        if(re_flags & RegexOption.freeform)
+        {
+            bool r = _next();
+            skipSpace();
+            return r;
+        }
+        else
+            return _next();
+    }
+        
     void restart(R newpat)
     {
         pat = newpat;
         empty = false;
         next();
     }
+    
     void put(Bytecode code)
     {  
         if(__ctfe)
@@ -1329,7 +1377,9 @@ struct Parser(R, bool CTFE=false)
         else
             ir ~= code; 
     }
+    
     void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
+    
     uint parseDecimal()
     {
         uint r=0;
@@ -1343,6 +1393,7 @@ struct Parser(R, bool CTFE=false)
         }
         return r;
     }
+    
     // parse control code of form \cXXX, c assumed to be the current symbol
     dchar parseControlCode()
     {
@@ -1351,6 +1402,7 @@ struct Parser(R, bool CTFE=false)
             "Only letters are allowed after \\c");
         return current & 0x1f;
     }
+    
     /**
 
     */
@@ -1358,6 +1410,7 @@ struct Parser(R, bool CTFE=false)
     {
         foreach(ch; flags)//flags are ASCII anyway
         {
+        L_FlagSwitch:
             switch(ch)
             {
                 
@@ -1367,7 +1420,7 @@ struct Parser(R, bool CTFE=false)
                             if(re_flags & mixin("RegexOption."~op))
                                 throw new RegexException(text("redundant flag specified: ",ch));
                             re_flags |= mixin("RegexOption."~op);
-                            break;
+                            break L_FlagSwitch;
                 }
                 default:
                     if(__ctfe)
@@ -1377,13 +1430,14 @@ struct Parser(R, bool CTFE=false)
             }
         }
     }
+    
     /**
         Parse and store IR for regex pattern
     */
     void parseRegex()
     {
         fixupStack.push(0);
-        auto subSave = ngroup;
+        groupStack.push(1);//0 - whole match
         auto maxCounterDepth = counterDepth;
         uint fix;//fixup pointer
         
@@ -1408,15 +1462,11 @@ struct Parser(R, bool CTFE=false)
                         next();
                         break;
                     case '=':
-                        put(Bytecode(IR.LookaheadStart, 0));
-                        put(Bytecode.fromRaw(0));
-                        put(Bytecode.fromRaw(0));
+                        genLookaround(IR.LookaheadStart);
                         next();
                         break;
                     case '!':
-                        put(Bytecode(IR.NeglookaheadStart, 0));
-                        put(Bytecode.fromRaw(0));
-                        put(Bytecode.fromRaw(0));
+                        genLookaround(IR.NeglookaheadStart);
                         next();
                         break;
                     case 'P':
@@ -1431,7 +1481,7 @@ struct Parser(R, bool CTFE=false)
                         if(current != '>')
                             error("Expected '>' closing named group");
                         next();
-                        nglob = ngroup++;
+                        nglob = groupStack.top++;
                         auto t = NamedGroup(name, nglob);
                         
                         if(__ctfe)
@@ -1453,17 +1503,9 @@ struct Parser(R, bool CTFE=false)
                     case '<':
                         next();
                         if(current == '=')
-                        {
-                            put(Bytecode(IR.LookbehindStart, 0));
-                            put(Bytecode.fromRaw(0));
-                            put(Bytecode.fromRaw(0));
-                        }
+                            genLookaround(IR.LookbehindStart);
                         else if(current == '!')
-                        {
-                            put(Bytecode(IR.NeglookbehindStart, 0));
-                            put(Bytecode.fromRaw(0));
-                            put(Bytecode.fromRaw(0));
-                        }
+                            genLookaround(IR.NeglookbehindStart);
                         else
                             error("'!' or '=' expected after '<'");
                         next();
@@ -1474,7 +1516,7 @@ struct Parser(R, bool CTFE=false)
                 }
                 else
                 {
-                    nglob = ngroup++; //put local index
+                    nglob = groupStack.top++;
                     put(Bytecode(IR.GroupStart, nglob));
                 }
                 break;
@@ -1490,7 +1532,7 @@ struct Parser(R, bool CTFE=false)
                     parseQuantifier(fix);
                     break;
                 case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                    ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+                    fixLookaround(fix);
                     put(ir[fix].paired);
                     break;
                 case IR.Option: // | xxx )
@@ -1505,8 +1547,8 @@ struct Parser(R, bool CTFE=false)
                         parseQuantifier(fix);
                         break;
                     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                        fixupStack.pop();
-                        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+                        fix = fixupStack.pop();
+                        fixLookaround(fix);
                         put(ir[fix].paired);
                         break;
                     default://(?:xxx)
@@ -1550,18 +1592,18 @@ struct Parser(R, bool CTFE=false)
         if(fixupStack.length != 1)
         {
             fix = fixupStack.pop();
-            enforce(ir[fix].code == IR.Option,"LR syntax error");
+            enforce(ir[fix].code == IR.Option,"no matching ')'");
             finishAlternation(fix);
-            enforce(fixupStack.length == 1, "LR syntax error");
+            enforce(fixupStack.length == 1, "no matching ')'");
         }
     }
-    //helper function, finilizes IR.Option, fix points to the first option of sequence
+    //helper function, finalizes IR.Option, fix points to the first option of sequence
     void finishAlternation(uint fix)
     {
-        enforce(ir[fix].code == IR.Option, "LR syntax error");
+        enforce(ir[fix].code == IR.Option, "no matching ')'");
         ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.OrStart));
         fix = fixupStack.pop();
-        enforce(ir[fix].code == IR.OrStart, "LR syntax error");
+        enforce(ir[fix].code == IR.OrStart, "no matching ')'");
         ir[fix] = Bytecode(IR.OrStart, cast(uint)ir.length - fix - IRL!(IR.OrStart));
         put(Bytecode(IR.OrEnd, cast(uint)ir.length - fix - IRL!(IR.OrStart)));
         uint pc = fix + IRL!(IR.OrStart);
@@ -1602,7 +1644,6 @@ struct Parser(R, bool CTFE=false)
             enforce(next(), "Unexpected end of regex pattern");
             enforce(ascii.isDigit(current), "First number required in repetition");
             min = parseDecimal();
-            //skipSpace();
             if(current == '}')
                 max = min;
             else if(current == ',')
@@ -1722,7 +1763,7 @@ struct Parser(R, bool CTFE=false)
             parseCharset();
             break;
         case '\\':
-            enforce(next(), "Unfinished escape sequence");
+            enforce(_next(), "Unfinished escape sequence");
             parseEscape();
             break;
         case '^':
@@ -1750,8 +1791,31 @@ struct Parser(R, bool CTFE=false)
             next();
         }
     }
+    
+    // generate code for start of lookaround: (?= (?! (?<= (?<!
+    void genLookaround(IR opcode)
+    {
+        put(Bytecode(opcode, 0));
+        put(Bytecode.fromRaw(0));
+        put(Bytecode.fromRaw(0));
+        groupStack.push(0);
+    }
+    
+    //fixup lookaround with start at offset fix
+    void fixLookaround(uint fix)
+    {
+        ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix - IRL!(IR.LookaheadStart));
+        auto g = groupStack.pop();
+        assert(!groupStack.empty);
+        ir[fix+1] = Bytecode.fromRaw(groupStack.top);
+        // groups are cumulative across lookarounds
+        ir[fix+2] = Bytecode.fromRaw(groupStack.top+g);
+        groupStack.top += g;
+    }
+    
     //Charset operations relatively in order of priority
     enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union, None };
+    
     // parse unit of charset spec, most notably escape sequences and char ranges
     // also fetches next set operation
     Tuple!(Charset,Operator) parseCharTerm()
@@ -2001,15 +2065,18 @@ struct Parser(R, bool CTFE=false)
         }
         return tuple(set, op);
     }
+    
+    alias Stack!(Charset,CTFE) ValStack;
+    alias Stack!(Operator,CTFE) OpStack;
     /**
         Parse and store IR for charset
     */
     void parseCharset()
     {
-        Stack!(Charset, CTFE) vstack;
-        Stack!(Operator, CTFE) opstack;
+        ValStack vstack;
+        OpStack opstack;
         //
-        static bool apply(Operator op, ref Stack!(Charset,CTFE) stack)
+        static bool apply(Operator op, ref ValStack stack)
         {
             switch(op)
             {
@@ -2041,7 +2108,7 @@ struct Parser(R, bool CTFE=false)
             }
             return true;
         }
-        static bool unrollWhile(alias cond)(ref Stack!(Charset, CTFE) vstack, ref Stack!(Operator, CTFE) opstack)
+        static bool unrollWhile(alias cond)(ref ValStack vstack, ref OpStack opstack)
         {
             while(cond(opstack.top))
             {
@@ -2080,10 +2147,6 @@ struct Parser(R, bool CTFE=false)
                 enforce(!opstack.empty, "unmatched ']'");
                 opstack.pop();
                 next();
-              /*  writeln("After ] ", current, pat);
-                writeln(opstack.stack.data);
-                writeln(map!"a.intervals"(vstack.stack.data));
-                writeln("---");*/
                 if(opstack.empty)
                     break L_CharsetLoop;
                 auto pair  = parseCharTerm();
@@ -2128,6 +2191,7 @@ struct Parser(R, bool CTFE=false)
                     put(Bytecode(IR.Char, set.ivals[0]));
                     break;
                 case 0:
+                    error("empty charset not allowed");
                     break;
                 default:
                     foreach(ch; set[])
@@ -2136,12 +2200,12 @@ struct Parser(R, bool CTFE=false)
         }
         else
         {
-            //TODO: better heuristic
-            if(set.ivals.length > 8)
+            if(set.ivals.length > maxCharsetUsed)
             {//also CTFE memory overflow workaround
                 auto t  = getTrie(set);
                 put(Bytecode(IR.Trie, cast(uint)tries.length));
                 tries ~= t;
+                debug(fred_allocation) writeln("Trie generated");
             }
             else
             {
@@ -2213,18 +2277,29 @@ struct Parser(R, bool CTFE=false)
             next();
             put(Bytecode(IR.Char, 0));//NUL character
             break;
-        case '1': .. case '9': //TODO: use $ instead of \ for backreference
+        case '1': .. case '9': 
             uint nref = cast(uint)current - '0';
-            enforce(nref <  ngroup, "Backref to unseen group");
+            uint maxBackref;
+            foreach(v; groupStack.stack.data)
+                maxBackref += v;
+            uint localLimit = maxBackref - groupStack.top;
+            enforce(nref < maxBackref, "Backref to unseen group");
             //perl's disambiguation rule i.e.
             //get next digit only if there is such group number
-            while(nref < ngroup && next() && ascii.isDigit(current))
+            while(nref < maxBackref && next() && ascii.isDigit(current))
             {
                 nref = nref * 10 + current - '0';
             }
-            if(nref >= ngroup)
+            if(nref >= maxBackref)
                 nref /= 10;
-            put(Bytecode(IR.Backref, nref));
+            
+            if(nref >= localLimit)
+            {
+                put(Bytecode(IR.Backref, nref-localLimit));
+                ir[$-1].setLocalRef();
+            }
+            else
+                put(Bytecode(IR.Backref, nref));
             markBackref(nref);
             break;
         default:
@@ -2246,7 +2321,7 @@ struct Parser(R, bool CTFE=false)
             if(current != '-' && current != ' ' && current != '_')
                 result[k++] = cast(char)ascii.toLower(current);
         enforce(k != MAX_PROPERTY, "invalid property name");
-		auto s = getUnicodeSet(result[0..k], negated, false);//TODO: speed up casefold map, cast(bool)(re_flags & RegexOption.casefold));
+		auto s = getUnicodeSet(result[0..k], negated, false);//cast(bool)(re_flags & RegexOption.casefold));
 		enforce(!s.empty, "unrecognized unicode property spec");
 		enforce(current == '}', "} expected ");
 		next();
@@ -2326,7 +2401,6 @@ struct RegEx
         }
         auto counterRange = FixedStack!uint(new uint[maxCounterDepth+1], -1);
         counterRange.push(1);
-        auto laRange = FixedStack!(Tuple!(uint,uint))(new Tuple!(uint,uint)[ngroup+1], -1);
         for(uint i=0; i<ir.length; i+=ir[i].length)
         {
             if(ir[i].hotspot)
@@ -2352,34 +2426,13 @@ struct RegEx
                 counterRange.pop();
                 break;
             case IR.GroupStart:
-                if(!laRange.empty)
-                {//inside lookaround
-                    laRange.top = tuple(min(laRange.top[0], ir[i].data), max(laRange.top[1], ir[i].data));
-                    ir[i] = Bytecode(IR.GroupStart, ir[i].data - laRange.top[0]);
-                }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
                 threadCount += counterRange.top;
                 break;
             case IR.GroupEnd:
-                if(!laRange.empty)
-                {//inside lookaround
-                    ir[i] = Bytecode(IR.GroupEnd, ir[i].data - laRange.top[0]);
-                }
                 if(isBackref(ir[i].data))
                     ir[i].setBackrefence();
-                threadCount += counterRange.top;
-                break;
-            case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
-                laRange.push(tuple(uint.max, 0u));
-                threadCount += counterRange.top;
-                break;
-            case IR.LookaheadEnd, IR.NeglookaheadEnd, IR.LookbehindEnd, IR.NeglookbehindEnd:
-                auto ofs = i - ir[i].data - IRL!(IR.LookaheadStart);
-                assert(ir[ofs].isStart);
-                auto slice = laRange.pop();
-                ir[ofs+1] = Bytecode.fromRaw(slice[0] == uint.max ? 0 : slice[0]);
-                ir[ofs+2] = Bytecode.fromRaw(slice[1] == 0 ? 0 : slice[1] + 1);
                 threadCount += counterRange.top;
                 break;
             default:  
@@ -2404,24 +2457,8 @@ struct RegEx
             }
             else if(ir[pc].isAtom)
             {
-                switch(ir[pc].code)
-                {
-                case IR.GroupStart:
-                    uint n = ir[pc].data;
-                    uint mask = 1u<<(n & 31);
-                    assert(!(groupBits[n>>5] & mask), text("Wrong group ordering ", pc));
-                    groupBits[n>>5] |= mask;
-                    break;
-                case IR.GroupEnd:
-                    uint n = ir[pc].data;
-                    uint mask = 1u<<(n & 31);
-                    assert((groupBits[n>>5] & mask), text("Wrong group ordering ", pc));
-                    groupBits[n>>5] ^= mask;
-                    break;
-                default:
-                }
+                
             }
-            
             else
                assert(0, text("Unknown type of instruction at pc=", pc));
         }
@@ -2449,7 +2486,7 @@ struct RegEx
         else
             ir = p.ir;
         dict = p.dict;
-        ngroup = p.ngroup;
+        ngroup = p.groupStack.top;
         maxCounterDepth = p.counterDepth;
         flags = p.re_flags;
         charsets = p.charsets;
@@ -2535,79 +2572,171 @@ int quickTestFwd(uint pc, dchar front, const ref RegEx re)
             return 0;
         }
 }
-///simple minded get-me-to-the-prefix kickstart
-struct FixedKickstart(Char)
+
+struct SampleGenerator(Char)
 {
-private:
-    Char[] prefix;
-    void addChar(dchar ch)
+    import std.random;
+    const(RegEx) re;
+    Appender!(char[]) app;
+    uint limit, seed;
+    Xorshift gen;
+
+    this(in RegEx r, uint threshold, uint randomSeed)
     {
-        Char[dchar.sizeof/Char.sizeof] buf;
-        static if(!is(dchar : Char))
-        {      
-            size_t len = encode(buf, ch);
-            prefix ~= buf[0..len];
-        }
-        else
-            prefix ~= ch;
+        re = r;
+        limit = threshold;
+        seed = randomSeed;
+        app = appender!(Char[])();
+        compose();
     }
-public:
-    this(in RegEx re)
+    
+    uint rand(uint x)
+    {  
+        uint r = gen.front % x;
+        gen.popFront();
+        return r;
+    }
+
+    void compose()
     {
-        uint pc = 0;
-        uint counter = 0;
-L_ConstructLoop:
+        uint pc = 0, counter = 0, dataLenOld = uint.max;
         for(;;)
+        {
             switch(re.ir[pc].code)
             {
-                case IR.Char:
-                    addChar(cast(dchar)re.ir[pc].data);
+            case IR.Char:
+                    formattedWrite(app,"%s", cast(dchar)re.ir[pc].data);
                     pc += IRL!(IR.Char);
                     break;
-                case IR.GroupStart, IR.GroupEnd:
-                    pc += IRL!(IR.GroupStart);
+                case IR.OrChar:
+                    uint len = re.ir[pc].sequence;
+                    formattedWrite(app, "%s", cast(dchar)re.ir[pc + rand(len)].data);
+                    pc += len;
                     break;
-                case IR.Wordboundary, IR.Notwordboundary:
-                    pc += IRL!(IR.Wordboundary);
+                case IR.Charset:
+                case IR.Trie:
+                    auto set = re.charsets[re.ir[pc].data];
+                    auto x = rand(set.ivals.length/2);
+                    auto y = rand(set.ivals[x*2+1] - set.ivals[2*x]);
+                    formattedWrite(app, "%s", cast(dchar)(set.ivals[2*x]+y));
+                    pc += IRL!(IR.Charset);
                     break;
-                case IR.RepeatStart, IR.RepeatQStart:
+                case IR.Any:
+                    uint x;
+                    do
+                    {
+                        x = rand(0x11_000);
+                    }while(!isValidDchar(x));
+                    formattedWrite(app, "%s", cast(dchar)x);
+                    pc += IRL!(IR.Any);
+                    break;
+                case IR.GotoEndOr:
+                    pc += IRL!(IR.GotoEndOr)+re.ir[pc].data;
+                    assert(re.ir[pc].code == IR.OrEnd);
+                    goto case;
+                case IR.OrEnd:
+                    pc += IRL!(IR.OrEnd);
+                    break;
+                case IR.OrStart:
+                    pc += IRL!(IR.OrStart);
+                    goto case;
+                case IR.Option:
+                    uint next = pc + re.ir[pc].data + IRL!(IR.Option);
+                    uint nOpt = 0;
+                    //queue next Option
+                    while(re.ir[next].code == IR.Option)
+                    {
+                        nOpt++;
+                        next += re.ir[next].data + IRL!(IR.Option);
+                    }
+                    nOpt++;
+                    //writeln("nOpt = ", nOpt);
+                    nOpt = rand(nOpt);
+                    //writeln("picked nOpt = ", nOpt);
+                    for(;nOpt; nOpt--)
+                    {
+                        pc += re.ir[pc].data + IRL!(IR.Option);
+                    }
+                    assert(re.ir[pc].code == IR.Option);
+                    pc += IRL!(IR.Option);
+                    break;
+                case IR.RepeatStart:case IR.RepeatQStart:
                     pc += IRL!(IR.RepeatStart)+re.ir[pc].data;
                     goto case IR.RepeatEnd;
-                case IR.RepeatEnd, IR.RepeatQEnd:
+                case IR.RepeatEnd:
+                case IR.RepeatQEnd:
                     uint len = re.ir[pc].data;
                     uint step = re.ir[pc+2].raw;
                     uint min = re.ir[pc+3].raw;
-                    uint max = re.ir[pc+4].raw;
                     if(counter < min)
                     {
                         counter += step;
                         pc -= len;
+                        break;
                     }
-                    else if(counter < max)
-                        break L_ConstructLoop;
+                    uint max = re.ir[pc+4].raw;
+                    if(counter < max)
+                    {
+                        if(app.data.length < limit && rand(3) > 0)
+                        {
+                            pc -= len;
+                            counter += step;
+                        }
+                        else
+                        {
+                            counter = counter%step;
+                            pc += IRL!(IR.RepeatEnd);
+                        }
+                    }
                     else
                     {
                         counter = counter%step;
                         pc += IRL!(IR.RepeatEnd);
                     }
                     break;
-                
+                case IR.InfiniteStart, IR.InfiniteQStart:
+                    pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
+                    goto case IR.InfiniteEnd; // both Q and non-Q
+                case IR.InfiniteEnd:
+                case IR.InfiniteQEnd:
+                    uint len = re.ir[pc].data;
+                    if(app.data.length == dataLenOld)
+                    {
+                        pc += IRL!(IR.InfiniteEnd);
+                        break;
+                    }
+                    dataLenOld = app.data.length;
+                    if(app.data.length < limit && rand(3) > 0)
+                        pc = pc - len;
+                    else
+                        pc = pc + IRL!(IR.InfiniteEnd);
+                    break;
+                case IR.GroupStart, IR.GroupEnd:
+                    pc += IRL!(IR.GroupStart);
+                    break;
+                case IR.Bol, IR.Wordboundary, IR.Notwordboundary:
+                case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
                 default:
-                    break L_ConstructLoop;
+                    return;
             }
+        }
     }
-    //
-    @property bool empty() const{ return prefix.empty; }
-    //
-    @property uint length() const{ return cast(uint)prefix.length; }
-    //
-    size_t search(const(Char)[] str, size_t index)
+        
+    @property Char[] front()
     {
-        auto x = find(str[index..$], prefix).length;
-        return str.length - x;
+        return app.data;
+    }
+    
+    @property empty(){  return false; }
+    
+    void popFront()
+    {
+        app.shrinkTo(0);
+        compose();
     }
 }
 
+//utility for shiftOr, returns a minimum number of bytes to test in a Char
 uint effectiveSize(Char)()
 {
     static if(is(Char == char))
@@ -2745,29 +2874,29 @@ public:
                 case IR.OrChar://assumes IRL!(OrChar) == 1
                     uint len = re.ir[t.pc].sequence;
                     uint end = t.pc + len;
-                    uint s = 0;
-                    Thread tx;
-                    for(uint npc = t.pc; npc<end; npc++)
+                    uint[Bytecode.MaxSequence] s;
+                    uint numS;
+                    for(uint i = 0; i<len; i++)
                     {
-                        if(charLen(re.ir[npc].data) == s)
-                            tx.add(re.ir[npc].data);
-                        else
+                        auto x = charLen(re.ir[t.pc+i].data);
+                        if(countUntil(s[0..numS], x) < 0)
+                           s[numS++] = x;
+                    }
+                    for(uint i = t.pc; i < end; i++)
+                    {
+                        t.add(re.ir[i].data);
+                    }
+                    for(uint i=0; i<numS; i++)
+                    {
+                        auto tx = fork(t, t.pc + len, t.counter);
+                        if(tx.idx + s[i] <= n_length)
                         {
-                            if(tx.mask && tx.idx + s <= n_length)
-                            {
-                                tx.advance(s);
-                                trs ~= tx;
-                            }
-                            tx = fork(t, end, t.counter);
-                            s = charLen(re.ir[npc].data);
-                            tx.add(re.ir[npc].data);
+                            tx.advance(s[i]);
+                            trs ~= tx;
                         }
                     }
-                    if(tx.idx == t.idx && tx.idx + s <= n_length)// in case s was always the same
-                    {
-                        t = tx;
-                        tx.advance(s);
-                    }
+                    if(!trs.empty)
+                        t = fetch(trs);
                     else
                         goto L_StopThread;
                     break;
@@ -2784,10 +2913,10 @@ public:
                     else
                     {
                         static if(charSize == 1)
-                            static immutable codeBounds = [0x0, 0x7F, 0x80, 0x3FF, 0x400, 0xFFFF, 0x10000, 0x10FFFF];
+                            static immutable codeBounds = [0x0, 0x7F, 0x80, 0x7FF, 0x800, 0xFFFF, 0x10000, 0x10FFFF];
                         else // == 2
                             static immutable codeBounds = [0x0, 0xFFFF, 0x10000, 0x10FFFF];
-                        auto srange = assumeSorted(set.ivals); 
+                        auto srange = assumeSorted!"a<=b"(set.ivals); 
                         for(uint i = 0; i<codeBounds.length/2; i++)
                         {
                             auto start = srange.lowerBound(codeBounds[2*i]).length;
@@ -2813,8 +2942,11 @@ public:
                         auto tx =  fork(t, t.pc + IRL!(IR.Charset), t.counter);
                         tx.advance(s[i]);
                         trs ~= tx;
-                    }     
-                    t = fetch(trs);
+                    }
+                    if(!trs.empty)
+                        t = fetch(trs);
+                    else
+                        goto L_StopThread;
                     break;
                 case IR.Any:
                     goto L_StopThread;
@@ -3015,16 +3147,11 @@ unittest
             
         }
     }
-    test_fixed!(FixedKickstart)();
     test_fixed!(ShiftOr)();
     test_flex!(ShiftOr)();
 }
 
-//pick a default kickstart method
-version(fred_simpleKickstart)
-    alias FixedKickstart Kickstart;
-else
-    alias ShiftOr Kickstart;
+alias ShiftOr Kickstart;
         
 ///std.regex-like Regex object wrapper, provided for backwards compatibility
 /*struct Regex(Char)
@@ -3198,7 +3325,7 @@ template BacktrackingMatcher(alias hardcoded)
             exhausted = false;
             trackers = alloc.newArray!(size_t[])(re.ngroup+1);
             newStack();
-            backrefed = alloc.newArray!(Group[])(re.ngroup);
+            backrefed = null;
             static if(kicked)
                 kickstart = Kickstart!Char(re);
         }
@@ -3507,17 +3634,13 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.GroupStart:
                     uint n = re.ir[pc].data;
-                    matches[n].begin = index;//the first is sliced out
-                    if(re.ir[pc].backreference)
-                        backrefed[n].begin = index;
+                    matches[n].begin = index;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc += IRL!(IR.GroupStart);
                     break;
                 case IR.GroupEnd:
                     uint n = re.ir[pc].data;
-                    matches[n].end = index;//the first is sliced out
-                    if(re.ir[pc].backreference)
-                        backrefed[n].end = index;
+                    matches[n].end = index;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc += IRL!(IR.GroupEnd);
                     break;
@@ -3526,16 +3649,16 @@ template BacktrackingMatcher(alias hardcoded)
                     uint len = re.ir[pc].data;
                     auto save = index;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    auto x = this;
+                    auto matcher = this;
                     auto a = newRegionAllocator();
-                    x.pc = 0;
-                    x.alloc = &a;
-                    x.re.ngroup =  me - ms;
-                    x.memory = null;
-                    x.newStack();
-                    x.matches = matches[ms .. me];
-                    x.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
-                    bool match = x.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
+                    matcher.alloc = &a;
+                    matcher.re.ngroup =  me - ms;
+                    matcher.memory = null;
+                    matcher.newStack();
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed = backrefed.empty ? matches : backrefed;
+                    matcher.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
+                    bool match = matcher.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
                     s.reset(save);
                     next();
                     if(!match)
@@ -3555,6 +3678,7 @@ template BacktrackingMatcher(alias hardcoded)
                     auto a = newRegionAllocator();
                     auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
                     backMatcher.matches = matches[ms .. me];
+                    backMatcher.backrefed  = backrefed.empty ? matches : backrefed;
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
                         goto L_backtrack;
@@ -3565,7 +3689,9 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Backref:
                     uint n = re.ir[pc].data;
-                    auto referenced = s[backrefed[n].begin .. backrefed[n].end];
+                    auto referenced = re.ir[pc].localRef 
+                            ? s[matches[n].begin .. matches[n].end] 
+                            : s[backrefed[n].begin .. backrefed[n].end];
                     while(!atEnd && !referenced.empty && front == referenced.front)
                     {
                         next();
@@ -3596,9 +3722,8 @@ template BacktrackingMatcher(alias hardcoded)
             assert(0);
         }
         }
-        /*
-            helper function, saves engine state
-        */
+        
+        //helper function, saves engine state
         void pushState(uint pc, uint counter)
         {
             if(lastState + stateSize + matches.length >= memory.length)
@@ -3613,6 +3738,7 @@ template BacktrackingMatcher(alias hardcoded)
             debug(fred_matching)
                 writefln("Saved(pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
         }
+        
         //helper function, restores engine state        
         bool popState()
         {
@@ -3647,6 +3773,7 @@ template BacktrackingMatcher(alias hardcoded)
                 writefln("Backtracked (pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
             return true;
         }
+        
         /++
             Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
             Results are stored in matches
@@ -3657,7 +3784,6 @@ template BacktrackingMatcher(alias hardcoded)
             counter = 0;
             lastState = 0;
             infiniteNesting = -1;// intentional
-            //setup first frame for incremental match storage
             auto start = index;
             debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
             for(;;)
@@ -3753,7 +3879,6 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.Bol:
                     dchar back;
                     size_t bi;
-                    //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         pc--;
                     else if((re.flags & RegexOption.multiline) 
@@ -3902,26 +4027,63 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.GroupStart:
                     uint n = re.ir[pc].data;
                     matches[n].begin = index;
-                    if(re.ir[pc].backreference)
-                        backrefed[n].begin = index;
                     debug(fred_matching)  writefln("IR group #%u starts at %u", n, index);
                     pc --;
                     break;
                 case IR.GroupEnd:  
                     uint n = re.ir[pc].data;
                     matches[n].end = index;
-                    if(re.ir[pc].backreference)
-                        backrefed[n].end = index;
                     debug(fred_matching) writefln("IR group #%u ends at %u", n, index);
                     pc --;
                     break;
                 case IR.LookaheadStart:
                 case IR.NeglookaheadStart:
+                    assert(0);
                 case IR.LookaheadEnd:
                 case IR.NeglookaheadEnd:
+                    uint len = re.ir[pc].data;
+                    pc -= len + IRL!(IR.LookaheadStart);
+                    auto prog = re;
+                    uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
+                    prog.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
+                    prog.ngroup = me - ms;
+                    auto a = newRegionAllocator();
+                    auto matcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed  = backrefed.empty ? matches : backrefed;
+                    bool match = matcher.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
+                    if(!match)
+                        goto L_backtrack;
+                    else
+                    {
+                        pc --;
+                    }
+                    break;
                 case IR.LookbehindEnd:
                 case IR.NeglookbehindEnd:
-                    assert(0, "No lookaround in look back");
+                    uint len = re.ir[pc].data;
+                    pc -= len + IRL!(IR.LookbehindStart);
+                    auto save = index;
+                    uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
+                    auto matcher = this;
+                    auto a = newRegionAllocator();
+                    matcher.alloc = &a;
+                    matcher.re.ngroup =  me - ms;
+                    matcher.memory = null;
+                    matcher.newStack();
+                    matcher.matches = matches[ms .. me];
+                    matcher.backrefed = backrefed.empty ? matches : backrefed;
+                    matcher.re.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
+                    bool match = matcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
+                    s.reset(save);
+                    next();
+                    if(!match)
+                        goto L_backtrack;
+                    else
+                    {
+                        pc --;
+                    }
+                    break;
                 case IR.Backref:
                     uint n = re.ir[pc].data;
                     auto referenced = s[backrefed[n].begin .. backrefed[n].end];
@@ -4340,10 +4502,9 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].begin = index;
-                if(re.ir[pc].backreference)
-                        backrefed[$$].begin = index;
-                debug(fred_matching) writefln("IR group #%u starts at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
+                debug(fred_matching) writefln("IR group #%u starts at %u", $$, index);
+                goto case;`, addr, ir[0].data 
+            , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -4351,10 +4512,9 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
         result.code ~= ctSub(`
             case $$:
                 matches[$$].end = index;
-                if(re.ir[pc].backreference)
-                        backrefed[$$].end = index;
-                debug(fred_matching) writefln("IR group #%u ends at %u", $$+1, index);
-                goto case;`, addr, ir[0].data-1, ir[0].data-1, ir[0].data-1);
+                debug(fred_matching) writefln("IR group #%u ends at %u", $$, index);
+                goto case;`, addr, ir[0].data
+            , ir[0].data, ir[0].data);
         result.addr = addr + 1;
         ir.popFront();
         break;
@@ -4765,21 +4925,15 @@ enum replica = q{
                 uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].begin = index;
                 t.pc += IRL!(IR.GroupStart);
-                //debug(fred_matching)  writefln("IR group #%u starts at %u", n, i);
                 goto L_GroupStart;
             case IR.GroupEnd:  
                 uint n = re.ir[t.pc].data;
                 t.matches.ptr[n].end = index;
                 t.pc += IRL!(IR.GroupEnd);
-                //debug(fred_matching) writefln("IR group #%u ends at %u", n, i);
                 goto L_GroupEnd;
             case IR.Backref:
                 uint n = re.ir[t.pc].data;
-                Group* source;
-                if(n >= re.ngroup)
-                    source = backrefed.ptr;
-                else
-                    source = t.matches.ptr;
+                Group* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
                 {
@@ -4817,17 +4971,15 @@ enum replica = q{
                 goto L_Backref;
             case IR.LookbehindStart:
             case IR.NeglookbehindStart:
-                auto backMatcher = 
+                auto matcher = 
                     ThompsonMatcher!(Char, typeof(s.loopBack))
-                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack, alloc);
-                backMatcher.freelist = freelist;
-                backMatcher.alloc = alloc;
-                backMatcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
-                backMatcher.backrefed = t.matches;
+                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
+                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 //backMatch
-                backMatcher.next(); //load first character from behind
-                bool match = backMatcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
-                freelist = backMatcher.freelist;
+                matcher.next(); //load first character from behind
+                bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                freelist = matcher.freelist;
                 if(match)
                 {
                     recycle(t);
@@ -4857,14 +5009,13 @@ enum replica = q{
                 uint len = re.ir[t.pc].data;
                 uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
                 bool positive = re.ir[t.pc].code == IR.LookaheadStart;
-                auto fwdMatcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s, alloc);
-                fwdMatcher.freelist = freelist;
-                fwdMatcher.front = front;
-                fwdMatcher.index = index;
-                fwdMatcher.re.ngroup = me - ms;
-                fwdMatcher.backrefed = t.matches;
-                bool nomatch = fwdMatcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
-                freelist = fwdMatcher.freelist;
+                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s);
+                matcher.front = front;
+                matcher.index = index;
+                matcher.re.ngroup = me - ms;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = matcher.freelist;
                 s.reset(index);
                 next();
                 if(nomatch)
@@ -4907,7 +5058,6 @@ enum replica = q{
                 case IR.Char:
                     if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc += IRL!(IR.Char);
                         nlist.insertBack(t);
                     }
@@ -4972,6 +5122,7 @@ enum replica = q{
 
             }
         };
+
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
@@ -5048,15 +5199,16 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
-    this(S)(ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream, Allocator* allocator)
+    this(S)(ref ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
     {
         s = stream;
         re = matcher.re;
         re.ir = piece;
-        alloc = allocator;
+        alloc = matcher.alloc;
         threadSize = matcher.threadSize;
         merge = matcher.merge;
         genCounter = matcher.genCounter;
+        freelist = matcher.freelist;
     }
     ///
     this(this)
@@ -5348,7 +5500,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             case IR.Bol:
                 dchar back;
                 size_t bi;
-                //TODO: multiline & attributes, unicode line terminators
                 if(atStart)
                     t.pc--;
                 else if((re.flags & RegexOption.multiline) 
@@ -5523,7 +5674,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Backref:
                 uint n = re.ir[t.pc].data;
-                auto source = n >= re.ngroup ? backrefed.ptr : t.matches.ptr;
+                auto source = re.ir[t.pc].localRef ?  t.matches.ptr : backrefed.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
                 {
@@ -5533,7 +5684,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 {
                     size_t idx = source[n].begin + t.uopCounter;
                     size_t end = source[n].end;
-                    if(s[idx..end].front == front)//TODO: could be a BUG in backward matching
+                    if(s[idx..end].front == front)//could be a BUG in backward matching
                     {
                         t.uopCounter += std.utf.stride(s[idx..end], 0);
                         if(t.uopCounter + source[n].begin == source[n].end)
@@ -5565,11 +5716,56 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 return;
             case IR.LookaheadStart:
             case IR.NeglookaheadStart:
+                assert(0);
             case IR.LookaheadEnd:
             case IR.NeglookaheadEnd:
+                uint len = re.ir[t.pc].data;
+                t.pc -= len + IRL!(IR.LookaheadStart);
+                bool positive = re.ir[t.pc].code == IR.LookaheadStart;
+                auto matcher = ThompsonMatcher!(Char, typeof(s.loopBack))
+                    (this
+                    , re.ir[t.pc .. t.pc+len+IRL!(IR.LookbehindStart)+IRL!(IR.LookbehindEnd)]
+                    , s.loopBack);
+                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                matcher.next(); //fetch a char, since direction was reversed
+                bool match = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = matcher.freelist;
+                if(match)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                }
+                else
+                    t.pc--;
+                break;
             case IR.LookbehindEnd:
             case IR.NeglookbehindEnd:
-                assert(0, "No lookaround inside look back");
+                auto save = index;
+                uint len = re.ir[t.pc].data;
+                t.pc -= len + IRL!(IR.LookbehindStart);
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
+                bool positive = re.ir[t.pc].code == IR.LookbehindStart;
+                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookbehindStart)], s);
+                matcher.front = front;
+                matcher.index = index;
+                matcher.re.ngroup = me - ms;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                bool nomatch = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ positive;
+                freelist = matcher.freelist;
+                s.reset(index);
+                next();
+                if(nomatch)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    //
+                }
+                else
+                    t.pc--;
+                break;
             case IR.Nop:
                 t.pc--;
                 break;
@@ -5593,7 +5789,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 case IR.Char:
                     if(front == re.ir[t.pc].data)
                     {
-                        // debug(fred_matching) writefln("IR.Char %s vs %s ", front, cast(dchar)re.ir[t.pc].data);
                         t.pc--;
                         nlist.insertBack(t);
                     }
@@ -5692,7 +5887,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     Thread* fork(Thread* master, uint pc, uint counter)
     {
         auto t = allocate();
-        t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup]; //TODO: Small array optimization and/or COW
+        t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup];
         t.pc = pc;
         t.counter = counter;
         t.uopCounter = 0;
@@ -5702,7 +5897,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     Thread*  createStart(size_t index)
     {
         auto t = allocate();
-        t.matches.ptr[0..re.ngroup] = Group.init; //TODO: ditto
+        t.matches.ptr[0..re.ngroup] = Group.init;
         t.matches[0].begin = index;
         t.pc = 0;
         t.counter = 0;
@@ -5874,13 +6069,13 @@ auto regex(S, S2=string)(S pattern, S2 flags=[])
 {
     if(!__ctfe)
     {
-        auto parser = Parser!(typeof(pattern))(pattern, flags);
+        auto parser = Parser!(Unqual!(typeof(pattern)))(pattern, flags);
         Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
         return r;
     }
     else
     {
-        auto parser = Parser!(typeof(pattern), true)(pattern, flags);
+        auto parser = Parser!(Unqual!(typeof(pattern)), true)(pattern, flags);
         Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
         return r;
     }
