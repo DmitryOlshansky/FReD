@@ -1083,9 +1083,9 @@ CodepointSet caseEnclose(in CodepointSet set)
         cs.end = set.ivals[i];
         auto idx = assumeSorted!"a.end <= b.end"(commonCaseTable)
             .lowerBound(cs).length;
-        
         immutable(CommonCaseEntry)[] slice = commonCaseTable[idx..$];
-        idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
+        idx = assumeSorted!"a.start <= b.start"(slice)
+            .lowerBound(cs).length;
         slice = slice[0..idx];
         if(!slice.empty)
         {
@@ -1098,7 +1098,7 @@ CodepointSet caseEnclose(in CodepointSet set)
             }
         }
         else
-            n.add(Interval(cs.end,cs.start-1));
+            n.add(Interval(cs.end,cs.start));
     }
     return n;
 }
