@@ -2756,14 +2756,14 @@ uint effectiveSize(Char)()
 struct ShiftOr(Char)
 {
 private:
-    uint[256] table;
+    uint[] table;
     size_t n_length;
     enum charSize =  effectiveSize!Char();
     //maximum number of chars in charset to process
     enum uint charsetThreshold = 16_000;
 
 public:
-    this(in RegEx re)
+    this(in RegEx re, uint[] memory)
     {
         static struct Thread
         {
@@ -2851,6 +2851,8 @@ public:
             assert(ch <= 0x10FFFF);
             return codeLength!Char(cast(dchar)ch)*charSize;
         }
+        assert(memory.length == 256);
+        table = memory;
         table[] =  uint.max;
         Thread[] trs;
         Thread t = Thread(0, 0, table);
@@ -3097,19 +3099,19 @@ unittest
             alias v Char;
             alias immutable(v)[] String;
             auto r = regex(`abc$`);
-            auto kick = Kick!Char(r);
+            auto kick = Kick!Char(r, new uint[256]);
             assert(kick.length == 3, text(Kick.stringof," ",v.stringof, " == ", kick.length));
             auto r2 = regex(`(abc){2}a+`);
-            kick = Kick!Char(r2);
+            kick = Kick!Char(r2, new uint[256]);
             assert(kick.length == 7, text(Kick.stringof,v.stringof," == ", kick.length));
             auto r3 = regex(`\b(a{2}b{3}){2,4}`);
-            kick = Kick!Char(r3);
+            kick = Kick!Char(r3, new uint[256]);
             assert(kick.length == 10, text(Kick.stringof,v.stringof," == ", kick.length));
             auto r4 = regex(`\ba{2}c\bxyz`);
-            kick = Kick!Char(r4);
+            kick = Kick!Char(r4, new uint[256]);
             assert(kick.length == 6, text(Kick.stringof,v.stringof, " == ", kick.length));
             auto r5 = regex(`\ba{2}c\b`);
-            kick = Kick!Char(r5);
+            kick = Kick!Char(r5, new uint[256]);
             size_t x = kick.search("aabaacaa", 0);
             assert(x == 3, text(Kick.stringof,v.stringof," == ", kick.length));
             x = kick.search("aabaacaa", x+1);
@@ -3123,13 +3125,13 @@ unittest
             alias v Char;
             alias immutable(v)[] String;
             auto r = regex(`abc[a-z]`);
-            auto kick = Kick!Char(r);
+            auto kick = Kick!Char(r, new uint[256]);
             auto x = kick.search(to!String("abbabca"), 0);
             assert(x == 3, text("real x is ", x));
         
             auto r2 = regex(`(ax|bd|cdy)`);
             String s2 = to!String("abdcdyabax");
-            kick = Kick!Char(r2);
+            kick = Kick!Char(r2, new uint[256]);
             x = kick.search(s2, 0);
             assert(x == 1, text("real x is ", x));
             x = kick.search(s2, x+1);
@@ -3137,9 +3139,9 @@ unittest
             x = kick.search(s2, x+1);
             assert(x == 8, text("real x is ", x));
             auto rdot = regex(`...`);
-            kick = Kick!Char(rdot);
+            kick = Kick!Char(rdot, new uint[256]);
             assert(kick.length == 0);
-            kick = Kick!Char(regex(`a(b+|c+)x`));
+            kick = Kick!Char(regex(`a(b+|c+)x`), new uint[256]);
             assert(kick.length == 3);
             assert(kick.search("ababx",0) == 2);
             assert(kick.search("abaacca",0) == 3);
@@ -3327,7 +3329,7 @@ template BacktrackingMatcher(alias hardcoded)
             newStack();
             backrefed = null;
             static if(kicked)
-                kickstart = Kickstart!Char(re);
+                kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
         }
         ///lookup next match, fill matches with indices into input
         bool match(Group matches[])
@@ -5195,7 +5197,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         genCounter = 0;
         static if(kicked)
         {
-            kickstart = Kickstart!Char(re);//TODO: supply allocator here as well
+            kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
