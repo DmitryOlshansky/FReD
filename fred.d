@@ -813,7 +813,8 @@ public:
         for(size_t i=1; i<ivals.length; i++)
             assert(ivals[i-1] < ivals[i]);
     }+/
-}
+}    
+
 ///
 struct BasicTrie(uint prefixBits)
     if(prefixBits > 4)
@@ -1025,35 +1026,39 @@ unittest
     assert(comparePropertyName("Al chemical Symbols", "Alphabetic Presentation Forms") == -1);
     assert(comparePropertyName("Basic Latin","basic-LaTin") == 0);
 }
-
+                        
 ///Gets array of all of common case eqivalents of given codepoint (fills provided array & returns a slice of it)
 dchar[] getCommonCasing(dchar ch, dchar[] range)
 {
     CommonCaseEntry cs;
-    size_t i=1;
+    size_t i=1, j=0;
     range[0] = ch;
-    cs.start = ch;
-    cs.end = ch;
-    auto idx = assumeSorted!"a.end <= b.end"(commonCaseTable)
-        .lowerBound(cs).length;
-    immutable(CommonCaseEntry)[] slice = commonCaseTable[idx..$];
-    idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
-    slice = slice[0..idx];
-    foreach(v; slice)
+    while(j < i)
     {
-        if(ch < v.end)
+        ch = range[j++];
+        cs.start = ch;
+        cs.end = ch;
+        auto idx = assumeSorted!"a.end <= b.end"(commonCaseTable)
+            .lowerBound(cs).length;
+        immutable(CommonCaseEntry)[] slice = commonCaseTable[idx..$];
+        idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
+        slice = slice[0..idx];
+        foreach(v; slice)
         {
-            if(v.xor)
+            if(ch < v.end)
             {
-                auto t = ch ^ v.delta;
-                if(countUntil(range[0..i], t) < 0)
-                    range[i++] = t;
-            }
-            else
-            {
-                auto t =  v.neg ? ch - v.delta : ch + v.delta;
-                if(countUntil(range[0..i], t) < 0)
-                    range[i++] = t;
+                if(v.xor)
+                {
+                    auto t = ch ^ v.delta;
+                    if(countUntil(range[0..i], t) < 0)
+                        range[i++] = t;
+                }
+                else
+                {
+                    auto t =  v.neg ? ch - v.delta : ch + v.delta;
+                    if(countUntil(range[0..i], t) < 0)
+                        range[i++] = t;
+                }
             }
         }
     }
@@ -1069,12 +1074,37 @@ unittest
     assert(getCommonCasing(0x10402, data) == [0x10402, 0x1042a]);
 }
 
+//
+void caseEnclose(ref CodepointSet set)
+{
+    
+    for(size_t i=0;i<set.ivals.length; i+=2)
+    {
+        CommonCaseEntry cs;
+        cs.start = set.ivals[i];
+        cs.end = set.ivals[i+1];
+        auto idx = assumeSorted!"a.end <= b.end"(commonCaseTable)
+            .lowerBound(cs).length;
+        immutable(CommonCaseEntry)[] slice = commonCaseTable[idx..$];
+        idx = assumeSorted!"a.start <= b.start"(slice).lowerBound(cs).length;
+        slice = slice[0..idx];
+        if(!slice.empty)
+        {
+            dchar[6] r;
+            foreach(ch; iota(set.ivals[i], set.ivals[i+1]))
+                foreach(v; getCommonCasing(ch, r[]))
+                    set.add(ch);
+        }
+    }
+}
+
 //property for \w character class
 @property CodepointSet wordCharacter()
 {
     return memoizeExpr!("CodepointSet.init.add(unicodeAlphabetic).add(unicodeMn).add(unicodeMc)
         .add(unicodeMe).add(unicodeNd).add(unicodePc)")();
 }
+
 @property Trie wordTrie()
 {
     return memoizeExpr!("Trie(wordCharacter)")();
@@ -1150,26 +1180,24 @@ const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
             auto range = assumeSorted!((x,y){ return ucmp(x.name, y.name) < 0; })(unicodeProperties); 
             auto eq = range.lowerBound(UnicodeProperty(cast(string)name,CodepointSet.init)).length;//TODO: hackish
             enforce(eq!=range.length && ucmp(name,range[eq].name)==0,"invalid property name");
-            s = cast(CodepointSet)range[eq].set;
+            s = range[eq].set.dup;
         }
     }
+    
     if(casefold)
     {
-        CodepointSet n;
+        /*CodepointSet n;
         dchar[5] buf;
         foreach(ch; s[])
         {
             auto range = getCommonCasing(ch, buf);
             foreach(v; range)
                 n.add(v);
-        }
-        return cast(const CodepointSet) (negated ? n.negate : n);
+        }*/
+        caseEnclose(s);
     }       
-    else if(negated)
-    {
-		s = s.dup;//tables are immutable
+    if(negated)
         s.negate();
-    }
     return cast(const CodepointSet)s;
 }
 

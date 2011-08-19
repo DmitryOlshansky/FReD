@@ -6,19 +6,18 @@ import fred, fred_uni;
 
 import std.stdio, std.string;
 
-void main(string argv[])
+int main(string argv[])
 {
-    if(argv.length < 1)
+    if(argv.length < 2)
     {
-        writeln("Dump charsets of regex object\nUsage CodepointSet regex1 ... regexN");
+        writeln("Dump charsets of regex object\nUsage charset regex1 [flags]");
+        return 1;
     }
-    foreach(s; argv[1..$])
+    auto r = regex(argv[1], argv.length > 2 ? argv[2] : "");
+    foreach(cset; r.charsets)
     {
-        auto r = regex(s);
-        foreach(cset; r.charsets)
-        {
-            cset.printUnicodeSet( (const(char)[] s){ write(s); }  );
-            writeln();
-        }
+        cset.printUnicodeSet( (const(char)[] s){ write(s); }  );
+        writeln();
     }
+    return 0;
 }
