@@ -1,6 +1,6 @@
 //Written in the D programming language
 /**
-    charset  utility for analyzing unicode charsets of a given regex
+    CodepointSet  utility for analyzing unicode charsets of a given regex
 */
 import fred, fred_uni;
 
@@ -10,7 +10,7 @@ void main(string argv[])
 {
     if(argv.length < 1)
     {
-        writeln("Dump charsets of regex object\nUsage charset regex1 ... regexN");
+        writeln("Dump charsets of regex object\nUsage CodepointSet regex1 ... regexN");
     }
     foreach(s; argv[1..$])
     {
