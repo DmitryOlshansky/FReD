@@ -3496,7 +3496,7 @@ template BacktrackingMatcher(alias hardcoded)
                     if(re.ir[pc].code == IR.InfiniteEnd)
                     {
                         test = quickTestFwd(pc+IRL!(IR.InfiniteEnd), front, re);
-                        if(test >= 0)//TODO: can do better if > 0 
+                        if(test >= 0)
                             pushState(pc+IRL!(IR.InfiniteEnd), counter);
                         infiniteNesting++;
                         pc -= len;
@@ -3504,7 +3504,7 @@ template BacktrackingMatcher(alias hardcoded)
                     else
                     {
                         test = quickTestFwd(pc - len, front, re);
-                        if(test >= 0)//TODO: can do better if > 0 
+                        if(test >= 0)
                         {
                             infiniteNesting++;
                             pushState(pc - len, counter);
@@ -4628,472 +4628,6 @@ struct ThreadList
 //direction parameter for thompson one-shot match evaluator 
 enum OneShot { Fwd, Bwd };
 
-enum replica = q{
-            debug(fred_matching)
-            {
-                writef("\tpc=%s [", t.pc);
-                foreach(x; worklist[])
-                    writef(" %s ", x.pc);
-                writeln("]");
-            }
-            switch(re.ir[t.pc].code)
-            {
-            case IR.End:
-                finish(t, matches);
-                matches[0].end = index; //fix endpoint of the whole match
-                recycle(t);
-                //cut off low priority threads
-                recycle(clist);
-                recycle(worklist);
-                debug(fred_matching) writeln("Finished thread ", matches);
-                return;
-            case IR.Wordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && wordTrie[front])
-                {
-                    t.pc += IRL!(IR.Wordboundary);
-                    goto L_Wordboundary;
-                }
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordTrie[back])
-                {
-                    t.pc += IRL!(IR.Wordboundary);
-                    goto L_Wordboundary;
-                }
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front] != 0;
-                    bool ab = wordTrie[back] != 0;
-                    if(af ^ ab)
-                    {
-                        t.pc += IRL!(IR.Wordboundary);
-                        goto L_Wordboundary;
-                    }
-                }
-                recycle(t);
-                t = worklist.fetch();
-                if(!t)
-                    return;
-                goto L_Wordboundary;
-            case IR.Notwordboundary:
-                dchar back;
-                size_t bi;
-                //at start & end of input
-                if(atStart && wordTrie[front])
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_NotWordboundary;
-                }
-                else if(atEnd && s.loopBack.nextChar(back, bi)
-                        && wordTrie[back])
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_NotWordboundary;
-                }
-                else if(s.loopBack.nextChar(back, index))
-                {
-                    bool af = wordTrie[front] != 0;
-                    bool ab = wordTrie[back]  != 0;
-                    if(af ^ ab)
-                    {
-                        recycle(t);
-                        t = worklist.fetch();
-                        if(!t)
-                            return;
-                        goto L_NotWordboundary;
-                    }    
-                }
-                t.pc += IRL!(IR.Wordboundary);
-                goto L_NotWordboundary;
-            case IR.Bol:
-                dchar back;
-                size_t bi;
-                if(atStart)
-                    t.pc += IRL!(IR.Bol);
-                else if((re.flags & RegexOption.multiline) 
-                    && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, seenCr))
-                {
-                    t.pc += IRL!(IR.Bol);
-                }
-                else
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                }
-                goto L_Bol;
-            case IR.Eol:
-                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
-                //no matching inside \r\n
-                if(atEnd || ((re.flags & RegexOption.multiline) 
-                    && endOfLine(front, seenCr)))
-                {
-                    t.pc += IRL!(IR.Eol);
-                }
-                else
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                }
-                goto L_Eol;
-            case IR.InfiniteStart, IR.InfiniteQStart:
-                t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
-                goto case IR.InfiniteEnd; // both Q and non-Q
-            case IR.RepeatStart, IR.RepeatQStart:
-                t.pc += re.ir[t.pc].data + IRL!(IR.RepeatStart);
-                goto case IR.RepeatEnd; // both Q and non-Q
-            case IR.RepeatEnd:
-            case IR.RepeatQEnd:
-                // len, step, min, max
-                uint len = re.ir[t.pc].data;
-                uint step =  re.ir[t.pc+2].raw;
-                uint min = re.ir[t.pc+3].raw;
-                if(t.counter < min)
-                {
-                    t.counter += step;
-                    t.pc -= len;
-                    goto L_Repeat;
-                }
-                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
-                }
-                else
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_RepeatFetch;
-                }
-                uint max = re.ir[t.pc+4].raw;
-                if(t.counter < max)
-                {
-                    if(re.ir[t.pc].code == IR.RepeatEnd)
-                    {
-                        //queue out-of-loop thread
-                        worklist.insertFront(fork(t, t.pc + IRL!(IR.RepeatEnd),  t.counter % step));
-                        t.counter += step;
-                        t.pc -= len;
-                    }
-                    else
-                    {
-                        //queue into-loop thread
-                        worklist.insertFront(fork(t, t.pc - len,  t.counter + step));
-                        t.counter %= step;
-                        t.pc += IRL!(IR.RepeatEnd);
-                    }
-                }
-                else
-                {
-                    t.counter %= step;
-                    t.pc += IRL!(IR.RepeatEnd);
-                }
-                goto L_Repeat;
-            case IR.InfiniteEnd:
-            case IR.InfiniteQEnd:
-                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
-                }
-                else
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_InfiniteFetch;
-                }
-                uint len = re.ir[t.pc].data;
-                uint pc1, pc2; //branches to take in priority order
-                if(re.ir[t.pc].code == IR.InfiniteEnd)
-                {
-                    pc1 = t.pc - len;
-                    pc2 = t.pc + IRL!(IR.InfiniteEnd);
-                }
-                else
-                {
-                    pc1 = t.pc + IRL!(IR.InfiniteEnd);
-                    pc2 = t.pc - len;
-                }
-                static if(withInput)
-                {
-                    int test = quickTestFwd(pc1, front, re);
-                    if(test > 0)
-                    {
-                        nlist.insertBack(fork(t, pc1 + test, t.counter));
-                        t.pc = pc2;
-                    }
-                    else if(test == 0)
-                    {
-                        worklist.insertFront(fork(t, pc2, t.counter));
-                        t.pc = pc1;
-                    }
-                    else
-                        t.pc = pc2;
-                }
-                else
-                {
-                    worklist.insertFront(fork(t, pc2, t.counter));
-                    t.pc = pc1;
-                }
-                goto L_Infinite;
-            case IR.OrEnd:
-                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
-                    t.pc += IRL!(IR.OrEnd);
-                }
-                else
-                {
-                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
-                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_OrFetch;
-                }
-                goto L_Or;
-            case IR.OrStart:
-                t.pc += IRL!(IR.OrStart);
-                goto case;
-            case IR.Option:
-                uint next = t.pc + re.ir[t.pc].data + IRL!(IR.Option);
-                //queue next Option
-                if(re.ir[next].code == IR.Option)
-                {
-                    worklist.insertFront(fork(t, next, t.counter));
-                }
-                t.pc += IRL!(IR.Option);
-                goto L_Option;
-            case IR.GotoEndOr:
-                t.pc = t.pc + re.ir[t.pc].data + IRL!(IR.GotoEndOr);
-                goto L_GotondOr;
-            case IR.GroupStart: 
-                uint n = re.ir[t.pc].data;
-                t.matches.ptr[n].begin = index;
-                t.pc += IRL!(IR.GroupStart);
-                goto L_GroupStart;
-            case IR.GroupEnd:  
-                uint n = re.ir[t.pc].data;
-                t.matches.ptr[n].end = index;
-                t.pc += IRL!(IR.GroupEnd);
-                goto L_GroupEnd;
-            case IR.Backref:
-                uint n = re.ir[t.pc].data;
-                Group* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
-                assert(source);
-                if(source[n].begin == source[n].end)//zero-width Backref!
-                {
-                    t.pc += IRL!(IR.Backref);
-                }
-                else static if(withInput)
-                {
-                    size_t idx = source[n].begin + t.uopCounter;
-                    size_t end = source[n].end;
-                    if(s[idx..end].front == front)
-                    {
-                        t.uopCounter += std.utf.stride(s[idx..end], 0);
-                        if(t.uopCounter + source[n].begin == source[n].end)
-                        {//last codepoint
-                            t.pc += IRL!(IR.Backref);
-                            t.uopCounter = 0;
-                        }
-                        nlist.insertBack(t);
-                    }
-                    else
-                        recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Backref;
-                }
-                else
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Backref;
-                }
-                goto L_Backref;
-            case IR.LookbehindStart:
-            case IR.NeglookbehindStart:
-                auto matcher = 
-                    ThompsonMatcher!(Char, typeof(s.loopBack))
-                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
-                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
-                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
-                //backMatch
-                matcher.next(); //load first character from behind
-                bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
-                freelist = matcher.freelist;
-                if(match)
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    //
-                }
-                else
-                    t.pc += re.ir[t.pc].data + IRL!(IR.LookbehindStart) + IRL!(IR.LookbehindEnd);
-                
-                goto L_Lookbehind;
-            case IR.LookaheadEnd:
-            case IR.NeglookaheadEnd:
-                t.pc = re.ir[t.pc].indexOfPair(t.pc);
-                assert(re.ir[t.pc].code == IR.LookaheadStart || re.ir[t.pc].code == IR.NeglookaheadStart);
-                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
-                finish(t, matches.ptr[ms..me]);
-                recycle(t);
-                //cut off low priority threads
-                recycle(clist);
-                recycle(worklist);
-                return;
-            case IR.LookaheadStart:
-            case IR.NeglookaheadStart:
-                auto save = index;
-                uint len = re.ir[t.pc].data;
-                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
-                bool positive = re.ir[t.pc].code == IR.LookaheadStart;
-                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s);
-                matcher.front = front;
-                matcher.index = index;
-                matcher.re.ngroup = me - ms;
-                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
-                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
-                freelist = matcher.freelist;
-                s.reset(index);
-                next();
-                if(nomatch)
-                {
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    //
-                }
-                else
-                    t.pc += len + IRL!(IR.LookaheadEnd) + IRL!(IR.LookaheadStart);
-                
-                goto L_Lookahead;
-            case IR.LookbehindEnd:
-            case IR.NeglookbehindEnd:
-                assert(0);
-            case IR.Nop:
-                t.pc += IRL!(IR.Nop);
-                goto L_Fallback;
-            static if(withInput)
-            {
-                case IR.OrChar://assumes IRL!(OrChar) == 1
-                    uint len = re.ir[t.pc].sequence;
-                    uint end = t.pc + len;
-                    for(; t.pc<end; t.pc++)
-                        if(re.ir[t.pc].data == front)
-                            break;
-                    if(t.pc != end)
-                    {
-                        t.pc = end;
-                        nlist.insertBack(t);
-                    }
-                    else
-                        recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_OrChar;
-                case IR.Char:
-                    if(front == re.ir[t.pc].data)
-                    {
-                        t.pc += IRL!(IR.Char);
-                        nlist.insertBack(t);
-                    }
-                    else
-                        recycle(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Char;
-                case IR.Any:
-                    t.pc += IRL!(IR.Any);
-                    nlist.insertBack(t);
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Any;
-                case IR.CodepointSet:
-                    if(re.charsets[re.ir[t.pc].data].scanFor(front))
-                    {
-                        debug(fred_matching) writeln("CodepointSet passed");
-                        t.pc += IRL!(IR.CodepointSet);
-                        nlist.insertBack(t);
-                    }
-                    else
-                    {
-                        debug(fred_matching) writeln("CodepointSet notpassed");
-                        recycle(t);
-                    }
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Charset;
-                case IR.Trie:
-                    if(re.tries[re.ir[t.pc].data][front])
-                    {
-                        debug(fred_matching) writeln("Trie passed");
-                        t.pc += IRL!(IR.Trie);
-                        nlist.insertBack(t);
-                    }
-                    else
-                    {
-                        debug(fred_matching) writeln("Trie notpassed");
-                        recycle(t);
-                    }
-                    t = worklist.fetch();
-                    if(!t)
-                        return;
-                    goto L_Trie;
-                default:
-                    assert(0, "Unrecognized instruction " ~ re.ir[t.pc].mnemonic);
-            }
-            else
-            {
-                default:
-                    recycle(t);
-                    t = worklist.fetch();
-                    if(t)
-                       goto L_Fallback; 
-                    else
-                        return;
-            }
-
-            }
-        };
-
 /++
    Thomspon matcher does all matching in lockstep, never looking at the same char twice
 +/
@@ -5290,7 +4824,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         matched = true;
     }
-       
     /++
         match thread against codepoint, cutting trough all 0-width instructions
         and taking care of control flow, then add it to nlist
@@ -5299,31 +4832,469 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     {
         ThreadList worklist;
         debug(fred_matching) writeln("Evaluating thread");
-        L_Trie:
-        L_Charset:
-        L_OrChar:
-        L_Char:  
-            mixin(replica);
-        L_Any:
-        L_Repeat:
-        L_OrFetch:
-        L_InfiniteFetch:
-        L_RepeatFetch:
-        L_Infinite:
-        L_GotondOr:
-        L_Or:
-        L_Option:
-        L_GroupStart:
-        L_GroupEnd:
-        L_Wordboundary:
-        L_NotWordboundary:
-        L_Bol:
-        L_Eol:
-        L_Backref:
-        L_Lookbehind:
-        L_Lookahead:
-        L_Fallback:
-            mixin(replica);       
+        for(;;)
+        {
+            debug(fred_matching)
+            {
+                writef("\tpc=%s [", t.pc);
+                foreach(x; worklist[])
+                    writef(" %s ", x.pc);
+                writeln("]");
+            }
+            switch(re.ir[t.pc].code)
+            {
+            case IR.End:
+                finish(t, matches);
+                matches[0].end = index; //fix endpoint of the whole match
+                recycle(t);
+                //cut off low priority threads
+                recycle(clist);
+                recycle(worklist);
+                debug(fred_matching) writeln("Finished thread ", matches);
+                return;
+            case IR.Wordboundary:
+                dchar back;
+                size_t bi;
+                //at start & end of input
+                if(atStart && wordTrie[front])
+                {
+                    t.pc += IRL!(IR.Wordboundary);
+                    break;
+                }
+                else if(atEnd && s.loopBack.nextChar(back, bi)
+                        && wordTrie[back])
+                {
+                    t.pc += IRL!(IR.Wordboundary);
+                    break;
+                }
+                else if(s.loopBack.nextChar(back, index))
+                {
+                    bool af = wordTrie[front] != 0;
+                    bool ab = wordTrie[back] != 0;
+                    if(af ^ ab)
+                    {
+                        t.pc += IRL!(IR.Wordboundary);
+                        break;
+                    }
+                }
+                recycle(t);
+                t = worklist.fetch();
+                if(!t)
+                    return;
+                break;
+            case IR.Notwordboundary:
+                dchar back;
+                size_t bi;
+                //at start & end of input
+                if(atStart && wordTrie[front])
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                else if(atEnd && s.loopBack.nextChar(back, bi)
+                        && wordTrie[back])
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                else if(s.loopBack.nextChar(back, index))
+                {
+                    bool af = wordTrie[front] != 0;
+                    bool ab = wordTrie[back]  != 0;
+                    if(af ^ ab)
+                    {
+                        recycle(t);
+                        t = worklist.fetch();
+                        if(!t)
+                            return;
+                        break;
+                    }    
+                }
+                t.pc += IRL!(IR.Wordboundary);
+                break;
+            case IR.Bol:
+                dchar back;
+                size_t bi;
+                if(atStart)
+                    t.pc += IRL!(IR.Bol);
+                else if((re.flags & RegexOption.multiline) 
+                    && s.loopBack.nextChar(back,bi)
+                    && endOfLine(back, seenCr))
+                {
+                    t.pc += IRL!(IR.Bol);
+                }
+                else
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                }
+                break;
+            case IR.Eol:
+                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                //no matching inside \r\n
+                if(atEnd || ((re.flags & RegexOption.multiline) 
+                    && endOfLine(front, seenCr)))
+                {
+                    t.pc += IRL!(IR.Eol);
+                }
+                else
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                }
+                break;
+            case IR.InfiniteStart, IR.InfiniteQStart:
+                t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
+                goto case IR.InfiniteEnd; // both Q and non-Q
+            case IR.RepeatStart, IR.RepeatQStart:
+                t.pc += re.ir[t.pc].data + IRL!(IR.RepeatStart);
+                goto case IR.RepeatEnd; // both Q and non-Q
+            case IR.RepeatEnd:
+            case IR.RepeatQEnd:
+                // len, step, min, max
+                uint len = re.ir[t.pc].data;
+                uint step =  re.ir[t.pc+2].raw;
+                uint min = re.ir[t.pc+3].raw;
+                if(t.counter < min)
+                {
+                    t.counter += step;
+                    t.pc -= len;
+                    break;
+                }
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
+                }
+                else
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                uint max = re.ir[t.pc+4].raw;
+                if(t.counter < max)
+                {
+                    if(re.ir[t.pc].code == IR.RepeatEnd)
+                    {
+                        //queue out-of-loop thread
+                        worklist.insertFront(fork(t, t.pc + IRL!(IR.RepeatEnd),  t.counter % step));
+                        t.counter += step;
+                        t.pc -= len;
+                    }
+                    else
+                    {
+                        //queue into-loop thread
+                        worklist.insertFront(fork(t, t.pc - len,  t.counter + step));
+                        t.counter %= step;
+                        t.pc += IRL!(IR.RepeatEnd);
+                    }
+                }
+                else
+                {
+                    t.counter %= step;
+                    t.pc += IRL!(IR.RepeatEnd);
+                }
+                break;
+            case IR.InfiniteEnd:
+            case IR.InfiniteQEnd:
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
+                }
+                else
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, index, genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                uint len = re.ir[t.pc].data;
+                uint pc1, pc2; //branches to take in priority order
+                if(re.ir[t.pc].code == IR.InfiniteEnd)
+                {
+                    pc1 = t.pc - len;
+                    pc2 = t.pc + IRL!(IR.InfiniteEnd);
+                }
+                else
+                {
+                    pc1 = t.pc + IRL!(IR.InfiniteEnd);
+                    pc2 = t.pc - len;
+                }
+                static if(withInput)
+                {
+                    int test = quickTestFwd(pc1, front, re);
+                    if(test > 0)
+                    {
+                        nlist.insertBack(fork(t, pc1 + test, t.counter));
+                        t.pc = pc2;
+                    }
+                    else if(test == 0)
+                    {
+                        worklist.insertFront(fork(t, pc2, t.counter));
+                        t.pc = pc1;
+                    }
+                    else
+                        t.pc = pc2;
+                }
+                else
+                {
+                    worklist.insertFront(fork(t, pc2, t.counter));
+                    t.pc = pc1;
+                }
+                break;
+            case IR.OrEnd:
+                if(merge[re.ir[t.pc + 1].raw+t.counter] < genCounter)
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    merge[re.ir[t.pc + 1].raw+t.counter] = genCounter;
+                    t.pc += IRL!(IR.OrEnd);
+                }
+                else
+                {
+                    debug(fred_matching) writefln("A thread(pc=%s) got merged there : %s ; GenCounter=%s mergetab=%s",
+                                    t.pc, s[index..s.lastIndex], genCounter, merge[re.ir[t.pc + 1].raw+t.counter] );
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                }
+                break;
+            case IR.OrStart:
+                t.pc += IRL!(IR.OrStart);
+                goto case;
+            case IR.Option:
+                uint next = t.pc + re.ir[t.pc].data + IRL!(IR.Option);
+                //queue next Option
+                if(re.ir[next].code == IR.Option)
+                {
+                    worklist.insertFront(fork(t, next, t.counter));
+                }
+                t.pc += IRL!(IR.Option);
+                break;
+            case IR.GotoEndOr:
+                t.pc = t.pc + re.ir[t.pc].data + IRL!(IR.GotoEndOr);
+                goto case IR.OrEnd;
+            case IR.GroupStart:
+                uint n = re.ir[t.pc].data;
+                t.matches.ptr[n].begin = index;
+                t.pc += IRL!(IR.GroupStart);
+                break;
+            case IR.GroupEnd:
+                uint n = re.ir[t.pc].data;
+                t.matches.ptr[n].end = index;
+                t.pc += IRL!(IR.GroupEnd);
+                break;
+            case IR.Backref:
+                uint n = re.ir[t.pc].data;
+                Group* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
+                assert(source);
+                if(source[n].begin == source[n].end)//zero-width Backref!
+                {
+                    t.pc += IRL!(IR.Backref);
+                }
+                else static if(withInput)
+                {
+                    size_t idx = source[n].begin + t.uopCounter;
+                    size_t end = source[n].end;
+                    if(s[idx..end].front == front)
+                    {
+                        t.uopCounter += std.utf.stride(s[idx..end], 0);
+                        if(t.uopCounter + source[n].begin == source[n].end)
+                        {//last codepoint
+                            t.pc += IRL!(IR.Backref);
+                            t.uopCounter = 0;
+                        }
+                        nlist.insertBack(t);
+                    }
+                    else
+                        recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                else
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                break;
+            case IR.LookbehindStart:
+            case IR.NeglookbehindStart:
+                auto matcher = 
+                    ThompsonMatcher!(Char, typeof(s.loopBack))
+                    (this, re.ir[t.pc..t.pc+re.ir[t.pc].data+IRL!(IR.LookbehindStart)], s.loopBack);
+                matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                //backMatch
+                matcher.next(); //load first character from behind
+                bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                freelist = matcher.freelist;
+                if(match)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                else
+                    t.pc += re.ir[t.pc].data + IRL!(IR.LookbehindStart) + IRL!(IR.LookbehindEnd);
+                break;
+            case IR.LookaheadEnd:
+            case IR.NeglookaheadEnd:
+                t.pc = re.ir[t.pc].indexOfPair(t.pc);
+                assert(re.ir[t.pc].code == IR.LookaheadStart || re.ir[t.pc].code == IR.NeglookaheadStart);
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
+                finish(t, matches.ptr[ms..me]);
+                recycle(t);
+                //cut off low priority threads
+                recycle(clist);
+                recycle(worklist);
+                return;
+            case IR.LookaheadStart:
+            case IR.NeglookaheadStart:
+                auto save = index;
+                uint len = re.ir[t.pc].data;
+                uint ms = re.ir[t.pc+1].raw, me = re.ir[t.pc+2].raw;
+                bool positive = re.ir[t.pc].code == IR.LookaheadStart;
+                auto matcher = ThompsonMatcher(this, re.ir[t.pc .. t.pc+len+IRL!(IR.LookaheadEnd)+IRL!(IR.LookaheadStart)], s);
+                matcher.front = front;
+                matcher.index = index;
+                matcher.re.ngroup = me - ms;
+                matcher.backrefed = backrefed.empty ? t.matches : backrefed;
+                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                freelist = matcher.freelist;
+                s.reset(index);
+                next();
+                if(nomatch)
+                {
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                }
+                else
+                    t.pc += len + IRL!(IR.LookaheadEnd) + IRL!(IR.LookaheadStart);
+                break;
+            case IR.LookbehindEnd:
+            case IR.NeglookbehindEnd:
+                assert(0);
+            case IR.Nop:
+                t.pc += IRL!(IR.Nop);
+                break;
+            static if(withInput)
+            {
+                case IR.OrChar:
+                    uint len = re.ir[t.pc].sequence;
+                    uint end = t.pc + len;
+                    static assert(IRL!(IR.OrChar) == 1);
+                    for(; t.pc<end; t.pc++)
+                        if(re.ir[t.pc].data == front)
+                            break;
+                    if(t.pc != end)
+                    {
+                       t.pc = end;
+                        nlist.insertBack(t);
+                    }
+                    else
+                        recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                case IR.Char:
+                    if(front == re.ir[t.pc].data)
+                    {
+                        t.pc += IRL!(IR.Char);
+                        nlist.insertBack(t);
+                    }
+                    else
+                        recycle(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                case IR.Any:
+                    t.pc += IRL!(IR.Any);
+                    nlist.insertBack(t);
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                case IR.CodepointSet:
+                    if(re.charsets[re.ir[t.pc].data].scanFor(front))
+                    {
+                        debug(fred_matching) writeln("CodepointSet passed");
+                        t.pc += IRL!(IR.CodepointSet);
+                        nlist.insertBack(t);
+                    }
+                    else
+                    {
+                        debug(fred_matching) writeln("CodepointSet notpassed");
+                        recycle(t);
+                    }
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                case IR.Trie:
+                    if(re.tries[re.ir[t.pc].data][front])
+                    {
+                        debug(fred_matching) writeln("Trie passed");
+                        t.pc += IRL!(IR.Trie);
+                        nlist.insertBack(t);
+                    }
+                    else
+                    {
+                        debug(fred_matching) writeln("Trie notpassed");
+                        recycle(t);
+                    }
+                    t = worklist.fetch();
+                    if(!t)
+                        return;
+                    break;
+                default:
+                    assert(0, "Unrecognized instruction " ~ re.ir[t.pc].mnemonic);
+            }
+            else
+            {
+                default:
+                    recycle(t);
+                    t = worklist.fetch();
+                    if(t)
+                       break;
+                    else
+                        return;
+            }
+            } 
+        }
             
     }
     ///match the input, evaluating IR without searching
