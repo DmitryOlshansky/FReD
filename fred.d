@@ -1,24 +1,28 @@
 //Written in the D programming language
 /**
- * Fast Regular expressions for D
+ * $(D fred)  - Fast Regular expressions for D, a proposed replacement for $(D std.regex)
+ * 
+ * 
  *
  * License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
  *
  * Authors: Dmitry Olshansky
- *
+ * 
+ * Copyright
  */
 
 module fred;
 
-
 import fred_uni;//unicode property tables
-import std.stdio, core.stdc.stdlib, std.array, std.algorithm, std.range,
+import core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
        std.functional, std.exception, std.regionallocator;
 import core.bitop;
 import ascii = std.ascii;
 import std.string : representation;
+
+debug import std.stdio;
 
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
@@ -384,6 +388,7 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc
         put(sink,"\n");
     }
 }
+
 //wrappers for CTFE
 void insertInPlaceAlt(T)(ref T[] arr, size_t idx, T[] items...)
 {
@@ -392,6 +397,7 @@ void insertInPlaceAlt(T)(ref T[] arr, size_t idx, T[] items...)
     else
         insertInPlace(arr, idx, items);
 }
+
 //ditto
 void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
@@ -400,6 +406,7 @@ void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
     /*else //@@@BUG@@@ in replaceInPlace? symptoms being sudden ZEROs in array
         replaceInPlace(arr, from, to, items);*/
 }
+
 //ditto
 void moveAllAlt(T)(T[] src, T[] dest)
 {
@@ -466,7 +473,7 @@ struct Group
     }
 }
 
-//structure representing interval: [a,b)
+/// $(D Interval)  represents interval of codepoints: [a,b)
 struct Interval
 {
     //
@@ -475,20 +482,23 @@ struct Interval
         uint begin, end;
     }
 
-    //
-    this(uint x)
+    ///create interval containig a single character $(D ch)
+    this(dchar ch)
     {
-        begin = x;
-        end = x+1;
+        begin = ch;
+        end = ch+1;
     }
-    //from [a,b]
-    this(uint x, uint y)
+    /**
+        Create Interval from inclusive range [$(D a),$(D b)]. Contrary to internal structure, inclusive is chosen for interface.
+        The reasin is usability e.g. it's unwieldy to type Interval('a','z'+1) all over the place.
+    */
+    this(dchar a, dchar b)
     {
-        assert(x <= y);
-        begin = x;
-        end = y+1;
+        assert(a <= b);
+        begin = a;
+        end = b+1;
     }
-    //
+    ///
     string toString()const
     {
         auto s = appender!string;
@@ -500,14 +510,17 @@ struct Interval
 
 }
 
-//basic internal data structure for [...] sets
+/**
+* $(D CodepointSet) is a data structure for manipulating sets of Unicode codepoints in an efficient manner.
+*/
 struct CodepointSet
 {
-//private:
+private:
     enum uint endOfRange = 0x110000;
     uint[] ivals;
-    //
+
 public:
+    ///Add an $(D interval) of codepoints to this set.
     ref CodepointSet add(Interval inter)
     {
         debug(fred_charset) writeln("Inserting ",inter);
@@ -544,9 +557,12 @@ public:
         replaceInPlaceAlt(ivals, s, e, inter.begin ,inter.end);
         return this;
     }
-    //
+
+    ///Add a codepoint $(D ch) to this set.
     ref CodepointSet add(dchar ch){ add(Interval(cast(uint)ch)); return this; }
-    //this = this || set
+    
+    ///Add $(D set) in this set. 
+    ///Algebra: this = this | set.
     ref CodepointSet add(in CodepointSet set)
     {
         debug(fred_charset) writef ("%s || %s --> ", ivals, set.ivals);
@@ -555,7 +571,8 @@ public:
         debug(fred_charset) writeln(ivals);
         return this;
     }
-    //this = this -- set
+    ///Exclude $(D set) from this set.
+    ///Algebra: this = this - set.
     ref CodepointSet sub(in CodepointSet set)
     {
         if(empty)
@@ -622,15 +639,18 @@ public:
         ivals = cast(uint[])result;
         return this;
     }
-    //this = this ~~ set (i.e. (this || set) -- (this && set))
-    void symmetricSub(in CodepointSet set)
+    //Make this set a symmetric difference with $(D set).
+    //Algebra: this = this ~ set (i.e. (this || set) -- (this && set)).
+    ref symmetricSub(in CodepointSet set)
     {
         auto a = CodepointSet(ivals.dup);
         a.intersect(set);
         this.add(set);
         this.sub(a);
+        return this;
     }
-    //this = this && set
+    //Intersect this set with $(D set).
+    //Algebra: this = this & set
     ref CodepointSet intersect(in CodepointSet set)
     {
         if(empty || set.empty)
@@ -684,6 +704,7 @@ public:
         ivals = cast(uint[])intersection;
         return this;
     }
+    
     //this = !this (i.e. [^...] in regex syntax)
     ref CodepointSet negate()
     {
@@ -714,10 +735,14 @@ public:
         return this;
     }
 
-    //test if ch is present in this set, linear search
+    /**
+        Test if ch is present in this set, linear search done in $(BIGOH N) operations 
+        on number of $(U intervals) in this set.
+        In practice linear search outperforms binary search untill a certian threshold,
+        in general however it's recommended to use overloaded indexing operator.
+    */
     bool scanFor(dchar ch) const
     {
-        assert(ivals.length <= maxCharsetUsed);
         //linear search is in fact faster (given that length is fixed under threshold)
         for(size_t i=1; i<ivals.length; i+=2)
             if(ch < ivals[i])
@@ -725,7 +750,10 @@ public:
         return false;
     }
     
-    //test if ch is present in this set, binary search
+    /**
+        Test if ch is present in this set, in $(BIGOH LogN) operations on number 
+        of $(U intervals) in this set.
+    */
     bool opIndex(dchar ch)const
     {
         auto svals = assumeSorted!"a <= b"(ivals);
@@ -733,11 +761,12 @@ public:
         return s & 1;
     }
     
-    //true if set is empty
+    ///Test if this set is empty.
     @property bool empty() const {   return ivals.empty; }
     
-    //print out in [\uxxxx-\uyyyy...] style
-    void printUnicodeSet(void delegate(const(char)[])sink) const
+    ///Write out in regular expression style [\uxxxx-\uyyyy...].
+    void printUnicodeSet(R)(R sink) const
+        if(isOutputRange!(R, const(char)[]))
     {
         sink("[");
         for(uint i=0;i<ivals.length; i+=2)
@@ -748,19 +777,19 @@ public:
         sink("]");
     }
     
-    //deep copy this CodepointSet
+    ///Deep copy this set.
     @property CodepointSet dup() const
     {
         return CodepointSet(ivals.dup);
     }
     
-    //full range from start to end
+    ///Full covered length from first codepoint to the last one.
     @property uint extent() const
     {
         return ivals.empty ? 0 : ivals[$-1] - ivals[0];
     }
     
-    //number of codepoints in this CodepointSet
+    ///Number of codepoints stored in this set.
     @property uint chars() const
     {
         //CTFE workaround
@@ -770,19 +799,19 @@ public:
         return ret;
     }
     
-    //troika for hash map
+    ///Troika for built-in hash maps
     bool opEquals(ref const CodepointSet set) const
     {
         return ivals == set.ivals;
     }
     
-    //ditto
+    ///ditto
     int opCmp(ref const CodepointSet set) const
     {
         return cmp(cast(const(uint)[])ivals, cast(const(uint)[])set.ivals);
     }
     
-    //ditto
+    ///ditto
     hash_t toHash() const
     {
         hash_t hash = 5381+7*ivals.length;
@@ -821,10 +850,16 @@ public:
     }
     static assert(isForwardRange!ByCodepoint);
     
-    //iterate all codepoints in set
-    auto ref opSlice() const
+    //Forward range of all codepoints in this set.
+    auto opSlice() const
     {
         return ByCodepoint(this);
+    }
+    
+    //Random access range of intervals in this set.
+    @property auto byInterval() const
+    {
+        return cast(const(Interval)[])ivals;
     }
     //eaten alive by @@@BUG@@@s
     /+invariant() 
@@ -835,8 +870,25 @@ public:
     }+/
 }    
 
-//
-struct BasicTrie(uint prefixBits)
+/**
+    $(D CodepointTrie) is one 1-level  $(LUCKY Trie)  datastructure focused on lookup speeds.
+    Primary use use case is to convert a previously obtained CodepointSet 
+    to speed up subsequent element lookup.
+    $(D_CODE 
+        auto input = getLargeString();
+        Charset set;
+        set.add(unicodeAlphabetic).add('$').add('#');
+        auto lookup = CodepointTrie!8(set);
+        int count;
+        foreach(dchar ch; input)
+            if(lookup[ch])
+                count++;
+    )
+    prefixBits parameter controlls number of bits used to index last level 
+    and provided for tuning to a specific applications. 
+    A default parameter should works best in common cases though
+*/
+struct CodepointTrie(uint prefixBits)
     if(prefixBits > 4)
 {
 	static if(size_t.sizeof == 4)
@@ -851,8 +903,9 @@ struct BasicTrie(uint prefixBits)
     size_t[] data;
     ushort[] indexes;
     bool negative;
-    //
-    static void printBlock(in size_t[] block)
+    
+    //debugging tool
+    debug static void printBlock(in size_t[] block)
     {
         for(uint k=0; k<prefixSize; k++)
         {
@@ -864,6 +917,20 @@ struct BasicTrie(uint prefixBits)
         }
         writeln();
     }
+    
+    //ditto
+    debug void desc() const
+    {
+        writeln(indexes);
+        writeln("***Blocks***");
+        for(uint i=0; i<data.length; i+=prefixWordSize)
+        {
+            printBlock(data[i .. i+prefixWordSize]);
+            writeln("---");
+        }
+    }
+    
+public:
     //create a trie from CodepointSet set
     this(in CodepointSet s)
     {
@@ -931,17 +998,7 @@ struct BasicTrie(uint prefixBits)
             }
         }
     }
-    //debugging tool
-    void desc() const
-    {
-        writeln(indexes);
-        writeln("***Blocks***");
-        for(uint i=0; i<data.length; i+=prefixWordSize)
-        {
-            printBlock(data[i .. i+prefixWordSize]);
-            writeln("---");
-        }
-    }
+
     //!= 0 if contains char ch
     bool opIndex(dchar ch) const
     {
@@ -951,18 +1008,19 @@ struct BasicTrie(uint prefixBits)
             return negative;
         return cast(bool)bt(data.ptr, (indexes[ind]<<bitTestShift)+(ch&prefixMask)) ^ negative;
     }
-    //get a negative copy
-    auto negated() const
+    
+    //invert trie (trick internal for regular expressions, has aliasing problem)
+    private auto negated() const
     {
-        BasicTrie t = cast(BasicTrie)this;//shallow copy, need to subvert type system?
-        t.negative = !negative; 
+        CodepointTrie t = cast(CodepointTrie)this;//shallow copy, need to subvert type system?
+        t.negative = !negative;
         return t;
     }
 }
 //heuristic value determines maximum CodepointSet length suitable for linear search
 enum maxCharsetUsed = 6;
 
-alias BasicTrie!8 Trie;
+alias CodepointTrie!8 Trie;
 
 Trie[const(CodepointSet)] trieCache;
 
@@ -2337,7 +2395,9 @@ struct Parser(R, bool CTFE=false)
     }
 }
 
-//Object that holds all persistent data about compiled regex
+/**
+    $(D RegEx) holds all persistent data about compiled regular expression pattern.
+*/
 struct RegEx
 {
     Bytecode[] ir;      //compiled bytecode of pattern
@@ -2377,8 +2437,8 @@ struct RegEx
             }
         }
     }
-    /++
-        lightweight post process step - no GC allocations (TODO!),
+    /+
+        lightweight post process step,
         only essentials
     +/
     void lightPostprocess()
@@ -2466,6 +2526,7 @@ struct RegEx
     //print out disassembly a program's IR
     void print() const
     {
+        import std.stdio;
         writefln("PC\tINST\n");
         prettyPrint(delegate void(const(char)[] s){ write(s); },ir);
         writefln("\n");
@@ -2512,7 +2573,7 @@ uint lookupNamedGroup(String)(NamedGroup[] dict,String name)
 	return dict[fnd].group;
 }
 
-//same as RegEx, but also contains pointer to generated  machine code of the  matcher
+///RegEx object that contains alias to specifically generated machine code.
 struct NativeRegEx(alias Fn)
 {
     RegEx _prog;
@@ -2571,6 +2632,11 @@ int quickTestFwd(uint pc, dchar front, const ref RegEx re)
         }
 }
 
+/*
+    Useful utility for self-testing, an infinite range of string samples 
+    that _have_ to match given compiled regex.    
+    Caveats: supports only a simple subset of bytecode.
+*/
 struct SampleGenerator(Char)
 {
     import std.random;
@@ -2578,7 +2644,8 @@ struct SampleGenerator(Char)
     Appender!(char[]) app;
     uint limit, seed;
     Xorshift gen;
-
+    //generator for pattern r, with soft maximum of threshold elements 
+    //and a given random seed
     this(in RegEx r, uint threshold, uint randomSeed)
     {
         re = r;
@@ -2745,9 +2812,9 @@ uint effectiveSize(Char)()
         static assert(0);
 }
 
-/**
-    kickstart engine using ShiftOr algorithm,
-    a bit parallel technique for inexact string searching
+/*
+    Kickstart engine using ShiftOr algorithm,
+    a bit parallel technique for inexact string searching.
 */
 struct ShiftOr(Char)
 {
@@ -3036,10 +3103,14 @@ public:
             writeln("Min length: ", n_length);
         }
     }
+
     @property bool empty() const {  return n_length == 0; }
     
     @property uint length() const{ return cast(uint)n_length/charSize; }
-    //
+    
+    // lookup compatible bit pattern in haystack, return starting index
+    // has a useful trait: if supplied with valid UTF indexes, returns only valid UTF indexes
+    // (that given the haystack in question is valid UTF string)
     size_t search(const(Char)[] haystack, size_t idx)
     {
         assert(!empty);
@@ -3077,7 +3148,7 @@ public:
         return data.length;
     }
     
-    static void dump(uint[] table)
+    debug static void dump(uint[] table)
     {
         for(size_t i=0; i<table.length; i+=4)
         {
@@ -3151,15 +3222,11 @@ unittest
 
 alias ShiftOr Kickstart;
         
-//std.regex-like Regex object wrapper, provided for backwards compatibility
-/*struct Regex(Char)
-    if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
-{
-    RegEx storage;
-    this(RegEx rs){ storage = rs; }
-    alias storage this;
 
-}*/
+/**
+    std.regex-like Regex object parametrized on character type.
+    Wraps $(D RegEx), provided for backwards compatibility only.
+*/
 template Regex(Char)
     if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
 {
@@ -3173,12 +3240,14 @@ struct Input(Char)
     alias const(Char)[] String;
     String _origin;
     size_t _index;
+    
     //constructs Input object out of plain string
     this(String input, size_t idx=0)
     {
         _origin = input;
         _index = idx;
     }
+    
     //codepoint at current stream position
     bool nextChar(ref dchar res, ref size_t pos)
     {
@@ -3188,6 +3257,7 @@ struct Input(Char)
         res = std.utf.decode(_origin, _index);
         return true;
     }
+    
     bool search(Kickstart)(ref Kickstart kick, ref dchar res, ref size_t pos)
     {
         size_t idx = kick.search(_origin, _index);
@@ -3198,6 +3268,7 @@ struct Input(Char)
         }
         return false;
     }
+    
     //index of at End position
     @property size_t lastIndex(){   return _origin.length; }
     
@@ -3238,11 +3309,9 @@ struct Input(Char)
     @property auto loopBack(){   return BackLooper(this); }
 }
 
-
-/++
+/+
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions.
-    low level construct, doesn't 'own' any memory
 +/
 template BacktrackingMatcher(alias hardcoded)
 {
@@ -3386,7 +3455,7 @@ template BacktrackingMatcher(alias hardcoded)
         }
         else
         {
-        /++
+        /+
             match subexpression against input, using provided malloc'ed array as stack,
             results are stored in matches
         +/
@@ -3769,10 +3838,10 @@ template BacktrackingMatcher(alias hardcoded)
             return true;
         }
         
-        /++
+        /+
             Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
             Results are stored in matches
-        ++/
+        +/
         bool matchBackImpl()
         {
             pc = cast(uint)re.ir.length-1;
@@ -4237,7 +4306,9 @@ CtState ctGenAlternation(Bytecode[] ir, int addr)
     r.addr = addr;
     return r;
 }
-//
+
+// genereate fixup code for instruction in ir,
+// fixup means it has an altrenative way for control flow
 string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
 {
     string r;

@@ -12,21 +12,13 @@ import fred;
 
 
 struct CommonCaseEntry
-
 {
-
     dchar start, end;
-
     uint op; 
-
     @property uint delta() const { return op & 0xFF_FFFF; }
-
     @property uint xor()const {   return op & doXor; }
-
     @property uint neg()const {   return op & doMinus; }
-
     enum doXor = 1<<31, doMinus = 1<<30;
-
 }
 
 

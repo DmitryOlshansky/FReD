@@ -92,7 +92,7 @@ void loadCaseFolding(string name)
 			casefold[d] = CodepointSet.init;
 		casefold[d].add(val);
 	}
-	auto copy =  CodepointSet(casefold[1].ivals.dup);
+	auto copy =  casefold[1].dup;
     //merge for first bit flipped intervals
 	foreach(ch; copy[])
         {
@@ -185,8 +185,8 @@ string charsetString(in CodepointSet set, string sep=";\n")
 {
     auto app = appender!(char[])();
 	formattedWrite(app,"CodepointSet([\n");
-	for(size_t i=0; i<set.ivals.length; i+=2)
-		formattedWrite(app, "    0x%05x, 0x%05x,\n", set.ivals[i], set.ivals[i+1]);
+	foreach(ival; set.byInterval)
+		formattedWrite(app, "    0x%05x, 0x%05x,\n", ival.begin, ival.end);
 	formattedWrite(app, "])%s\n",sep);
     return cast(string)app.data;
 }
@@ -197,16 +197,15 @@ void writeCaseFolding()
 //sorted by .start, however they do intersect
 immutable commonCaseTable = [");
     CommonCaseEntry[] table;
-    
     foreach(k, v; casefold)
     {
         CommonCaseEntry e;
-        for(size_t i=0; i< v.ivals.length; i+= 2)
+        foreach(ival; v.byInterval)
         {
-            auto xored = map!((x){ return x ^ k; })(iota(v.ivals[i],v.ivals[i+1]));
-            auto plused = map!((x){ return x + k; })(iota(v.ivals[i],v.ivals[i+1]));
-            e.start = v.ivals[i];
-            e.end = v.ivals[i+1];
+            auto xored = map!((x){ return x ^ k; })(iota(ival.begin,ival.end));
+            auto plused = map!((x){ return x + k; })(iota(ival.begin,ival.end));
+            e.start = ival.begin;
+            e.end = ival.end;
             e.op = k;
             if(equal(xored, plused) || k == 1)
             {
