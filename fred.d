@@ -158,6 +158,7 @@ struct Bytecode
     //natural constraints
     enum maxSequence = 2+4;
     enum maxData = 1<<22;
+    enum maxRaw = 1<<31;
     
     this(IR code, uint data)
     {
@@ -217,7 +218,7 @@ struct Bytecode
         assert(code == IR.Backref);
         raw = raw | (1<<23);
     }
-    
+
     //is a local ref
     @property bool localRef() const
     {
@@ -1258,6 +1259,8 @@ struct Stack(T, bool CTFE=false)
 
 enum maxGroupNumber = 2^^19;
 enum maxLookaroundDepth = 16;
+enum maxCompiledLength = 2^^18;// *Bytecode.sizeof, i.e. 1Mb of bytecode alone
+enum maxCumulativeRepetitionLength = 2^^20; //amounts to up to 4 Mb of auxilary table for matching
 
 struct Parser(R, bool CTFE=false)
     if (isForwardRange!R && is(ElementType!R : dchar))
@@ -1304,6 +1307,7 @@ struct Parser(R, bool CTFE=false)
         put(Bytecode(IR.End, 0));
 
     }
+    
     //mark referenced groups for latter processing
     void markBackref(uint n)
     {   
@@ -1347,6 +1351,7 @@ struct Parser(R, bool CTFE=false)
     
     void put(Bytecode code)
     {  
+        enforce(ir.length < maxCompiledLength, "maximum compiled pattern length is exceeded");
         if(__ctfe)
         {
             ir = ir ~ code;
@@ -1355,7 +1360,11 @@ struct Parser(R, bool CTFE=false)
             ir ~= code; 
     }
     
-    void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
+    void putRaw(uint number)
+    {
+        enforce(ir.length < maxCompiledLength, "maximum compiled pattern length is exceeded");
+        ir ~= Bytecode.fromRaw(number); 
+    }
     
     //parsing number with basic overflow check
     uint parseDecimal()
@@ -1705,6 +1714,7 @@ struct Parser(R, bool CTFE=false)
                 }
             }
             put(Bytecode(greedy ? IR.InfiniteStart : IR.InfiniteQStart, len));
+            enforce(ir.length + len < maxCompiledLength,  "maximum compiled pattern length is exceeded");
             ir ~= ir[offset .. offset+len];
             //IR.InfinteX is always a hotspot
             put(Bytecode(greedy ? IR.InfiniteEnd : IR.InfiniteQEnd, len));
@@ -1779,7 +1789,7 @@ struct Parser(R, bool CTFE=false)
         put(Bytecode.fromRaw(0));
         groupStack.push(0);
         lookaroundNest++;
-        enforce(lookaroundNest <= maxLookaroundDepth, "maximum lookaround depth exceeded");
+        enforce(lookaroundNest <= maxLookaroundDepth, "maximum lookaround depth is exceeded");
     }
     
     //fixup lookaround with start at offset fix
@@ -2385,6 +2395,7 @@ struct RegEx
         }
         auto counterRange = FixedStack!uint(new uint[maxCounterDepth+1], -1);
         counterRange.push(1);
+        ulong cumRange = 0;
         for(uint i=0; i<ir.length; i+=ir[i].length)
         {
             if(ir[i].hotspot)
@@ -2402,7 +2413,10 @@ struct RegEx
                 ir[repEnd+2].raw = counterRange.top;
                 ir[repEnd+3].raw *= counterRange.top;
                 ir[repEnd+4].raw *= counterRange.top;
-                counterRange.push((max+1) * counterRange.top);
+                ulong cntRange = cast(ulong)(max)*counterRange.top;
+                cumRange += cntRange;
+                enforce(cumRange < maxCumulativeRepetitionLength, "repetition length limit is exceeded");
+                counterRange.push(cast(uint)cntRange + counterRange.top);
                 threadCount += counterRange.top;
                 break;
             case IR.RepeatEnd, IR.RepeatQEnd:
