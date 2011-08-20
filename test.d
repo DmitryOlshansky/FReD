@@ -397,6 +397,7 @@ unittest
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
             auto nr = regex(tvd.pattern, tvd.flags);
+            
             debug
             {
                 writeln(" Test #", a, " pattern: ", tvd.pattern);
@@ -563,7 +564,7 @@ else
     }
     //@@@BUG@@@ template function doesn't work inside unittest block
     version(unittest)
-    String baz(String)(RegexMatch!(String) m)
+    String baz(String)(Captures!(String) m)
     {
         return std.string.toUpper(m.hit);
     }
@@ -675,7 +676,7 @@ int main(string[] argv)
                 return 0;
             auto inp = argv[3];
             auto m = match(to!string(inp), regex(pat, argv.length > 4 ? argv[4] : ""));
-            writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m.captures);
+            writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m);
         }
         catch(Exception ex)
         {

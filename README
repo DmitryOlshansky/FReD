@@ -42,7 +42,7 @@ unittest
     foreach(cur; m)//iterate over all matches
         writeln(cur.hit);
 
-    enum ctr = regex(`^.*/(.+)/?$`); //static regex, precompiled
+    enum ctr = ctRegex!(`^.*/(.+)/?$`); //static regex, precompiled
     auto m2 = match("foo/bar", ctr);   //first match found here if any
     assert(!m2.empty);   //so be sure to check it before examining contents!
     assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
