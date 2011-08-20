@@ -3,22 +3,32 @@
     gen_uni is a quick & dirty source code generator for unicode datastructures
 */
 import fred;
-import std.ascii, std.stdio, std.conv, std.algorithm, std.array, std.format, std.string;
-
-Charset[int] casefold;//entries by delta
-uint[] lowIrreg;//that low/high doesn't mean they are all _letters_!
-uint[] highIrreg; //so we check that ;)
-Charset[string] props;
+import std.ascii, std.stdio, std.conv, std.algorithm, 
+       std.array, std.format, std.string, std.bitmanip,
+       std.range;
+import core.bitop;
+CodepointSet[int] casefold;//entries by delta
+CodepointSet[string] props;
 string[string] aliases;
-Charset[string] normalization;
-string[] blacklist = [ "Lu", "Ll" ];
-uint[] globalIndex;
-
+CodepointSet[string] normalization;
+string[] blacklist = [  ];
+enum mixedCCEntry = q{
+struct CommonCaseEntry
+{
+    dchar start, end;
+    uint op; 
+    @property uint delta() const { return op & 0xFF_FFFF; }
+    @property uint xor()const {   return op & doXor; }
+    @property uint neg()const {   return op & doMinus; }
+    enum doXor = 1<<31, doMinus = 1<<30;
+}
+};
+mixin(mixedCCEntry);
 void scanUniData(alias Fn)(string name, Regex!char r)
 {
     foreach(line; File(name).byLine)
 	{
-        auto m = tmatch(line, r);
+        auto m = match(line, r);
         if(!m.empty)
             Fn(m);
     }
@@ -37,7 +47,6 @@ void main(string[] argv)
  */
 //Automatically generated from Unicode Character Database files
 import fred;");
-    loadGlobalIndex("Global.txt");
     loadCaseFolding("Casefolding.txt");
     loadBlocks("Blocks.txt");
     loadProperties("PropList.txt");
@@ -45,45 +54,9 @@ import fred;");
     loadProperties("DerivedCoreProperties.txt");
     loadProperties("Scripts.txt");
     loadNormalization("DerivedNormalizationProps.txt");
-    testCasingIrregular();
     writeCaseFolding();
     writeProperties();
     writeNormalization();
-}
-
-void testCasingIrregular()
-{
-    auto lowSet = props["Ll"].dup;
-    Charset irreg;
-    foreach(ch; lowIrreg)
-            irreg.add(ch);
-    foreach(ch; highIrreg)
-            irreg.add(ch);
-    lowSet.intersect(irreg);
-    uint array[];
-    foreach(ch; lowSet)
-    {
-            array ~= ch;
-    }
-    assert(equal(sort(array),sort(lowIrreg.dup)));
-    auto upperSet = props["Lu"].dup;
-    upperSet.intersect(irreg);
-    array.length = 0;
-    foreach(ch; upperSet)
-    {
-            array ~= ch;
-    }
-    assert(equal(sort(array),sort(highIrreg.dup)));
-}
-
-void loadGlobalIndex(string name)
-{
-    File f = File(name);
-    foreach(line; f.byLine)
-	{
-        if(!line.empty)
-            globalIndex ~= to!uint(strip(line));
-    }
 }
 
 void loadCaseFolding(string name)
@@ -93,7 +66,7 @@ void loadCaseFolding(string name)
     auto f = File(name);
 	foreach(line; f.byLine)
 	{
-		auto m = tmatch(line, r);
+		auto m = match(line, r);
 		if(!m.empty)
 		{
 			auto s1 = m.captures[1];
@@ -116,12 +89,12 @@ void loadCaseFolding(string name)
         }
         //store as lesser codepoint interval + positive delta
 		if(d !in casefold)
-			casefold[d] = Charset.init;
+			casefold[d] = CodepointSet.init;
 		casefold[d].add(val);
 	}
-	auto copy =  Charset(casefold[1].ivals.dup);
-
-	foreach(ch; copy)
+	auto copy =  CodepointSet(casefold[1].ivals.dup);
+    //merge for first bit flipped intervals
+	foreach(ch; copy[])
         {
             casefold[1].add(1 + ch);
         }
@@ -135,7 +108,7 @@ void loadBlocks(string f)
 			auto s2 = m.captures[2];
 			auto a1 = parse!uint(s1, 16);
 			auto a2 = parse!uint(s2, 16);
-			props["In"~to!string(m.captures[3])] = Charset([a1, a2+1]);
+			props["In"~to!string(m.captures[3])] = CodepointSet([a1, a2+1]);
 	})(f, r);
 }
 
@@ -154,7 +127,7 @@ void loadProperties(string inp)
             uint a = parse!uint(sa, 16);
             uint b = parse!uint(sb, 16);
             if(name !in props)
-                props[name] = Charset.init;
+                props[name] = CodepointSet.init;
             props[name].add(Interval(a,b));
             if(!aliasStr.empty)
             {
@@ -167,7 +140,7 @@ void loadProperties(string inp)
             auto sx = m.captures[3];
             uint x = parse!uint(sx, 16);
             if(name !in props)
-                props[name] = Charset.init;
+                props[name] = CodepointSet.init;
             props[name].add(x);
             if(!aliasStr.empty)
             {
@@ -193,7 +166,7 @@ void loadNormalization(string inp)
             uint a = parse!uint(sa, 16);
             uint b = parse!uint(sb, 16);
             if(name !in normalization)
-                normalization[name] = Charset.init;
+                normalization[name] = CodepointSet.init;
             normalization[name].add(Interval(a,b));
         }
         else if(!m.captures[3].empty)
@@ -201,17 +174,17 @@ void loadNormalization(string inp)
             auto sx = m.captures[3];
             uint x = parse!uint(sx, 16);
             if(name !in normalization)
-                normalization[name] = Charset.init;
+                normalization[name] = CodepointSet.init;
             normalization[name].add(x);
         }
         //stderr.writeln(m.hit);
     })(inp, r);
 }
 
-string charsetString(in Charset set, string sep=";\n")
+string charsetString(in CodepointSet set, string sep=";\n")
 {
     auto app = appender!(char[])();
-	formattedWrite(app,"Charset([\n");
+	formattedWrite(app,"CodepointSet([\n");
 	for(size_t i=0; i<set.ivals.length; i+=2)
 		formattedWrite(app, "    0x%05x, 0x%05x,\n", set.ivals[i], set.ivals[i+1]);
 	formattedWrite(app, "])%s\n",sep);
@@ -220,70 +193,74 @@ string charsetString(in Charset set, string sep=";\n")
 
 void writeCaseFolding()
 {
-    write("//any codepoint in these intervals is trivially uppercased/lowercased"
-" (lowest bit set -> lower)\nimmutable evenUpper = ");
-	write(charsetString(casefold[1]));
-	writeln("struct CommonCaseEntry
-{
-    short delta;
-    Charset set;
-
-}
-//these are a bit harder to lowercase/uppercase lower: +- delta
+	writeln(mixedCCEntry, "
+//sorted by .start, however they do intersect
 immutable commonCaseTable = [");
-    auto keys =casefold.keys();
-    sort!"abs(a) < abs(b)"(keys);
-	foreach(k; keys)
-	{
-		if(k > 1)
-		{
-			auto app = appender!(char[])();
-			bool notEmpty = false;
-			formattedWrite(app, "CommonCaseEntry(%d, Charset([", k);
-			for(size_t i=0; i<casefold[k].ivals.length; i+= 2)
-			{
-				if(casefold[k].ivals[i] == casefold[k].ivals[i+1])
-				{
-					lowIrreg ~= casefold[k].ivals[i];
-					highIrreg ~= casefold[k].ivals[i]+k;
-				}
-				else
-				{
-					formattedWrite(app, "0x%05x, 0x%05x,", casefold[k][i], casefold[k][i+1]);
-					notEmpty = true;
-				}
-
-			}
-			formattedWrite(app, "])),");
-			if(notEmpty)
-				writeln(app.data);
-			app.clear();
-			notEmpty  = false;
-			formattedWrite(app,"CommonCaseEntry(%d, Charset([", -k);
-			for(size_t i=0; i<casefold[k].ivals.length; i+= 2)
-			{
-				if(casefold[k].ivals[i] == casefold[k].ivals[i+1])
-				{
-					formattedWrite(app, "0x%05x, 0x%05x,", casefold[k][i], casefold[k][i+1]+k);
-					notEmpty = true;
-				}
-
-			}
-			formattedWrite(app, "])),");
-			if(notEmpty)
-				writeln(app.data);
-		}
-	}
+    CommonCaseEntry[] table;
+    
+    foreach(k, v; casefold)
+    {
+        CommonCaseEntry e;
+        for(size_t i=0; i< v.ivals.length; i+= 2)
+        {
+            auto xored = map!((x){ return x ^ k; })(iota(v.ivals[i],v.ivals[i+1]));
+            auto plused = map!((x){ return x + k; })(iota(v.ivals[i],v.ivals[i+1]));
+            e.start = v.ivals[i];
+            e.end = v.ivals[i+1];
+            e.op = k;
+            if(equal(xored, plused) || k == 1)
+            {
+                e.op |= CommonCaseEntry.doXor;
+                table ~= e;
+                if(k != 1)
+                    table ~= CommonCaseEntry(e.start+k, e.end+k, e.op);
+            }
+            else
+            {
+                table ~= e;
+                table ~= CommonCaseEntry(e.start+k, e.end+k, CommonCaseEntry.doMinus | e.op);
+            }
+        }
+    }
+    alias uint[4] ebh;
+    ebh[] mapper = new ebh[0x11_0000];
+    foreach(v; table)
+    {
+        int i;
+        foreach(ch; iota(cast(uint)v.start, cast(uint)v.end))
+        {
+            for(i=0; i<4;i++)
+                if(!mapper[ch][i])
+                {
+                    mapper[ch][i] = v.op;
+                    break;
+                }
+            assert(i != 4);
+        }
+    }
+    table.length = 0;
+    uint cur = 0;
+    for(uint i=1; i<mapper.length;i++)
+    {
+        if(mapper[cur] != mapper[i])
+        {
+            foreach(v; mapper[cur][])
+                if(v)
+                    table ~= CommonCaseEntry(cur, i,  v);
+            cur = i;
+        }
+    }
+    for(size_t i=0; i<table.length; i++)
+        for(size_t j=i+1;j<table.length; j++)
+        {
+            assert(table[i].start <= table[j].start);
+            assert(table[i].end <= table[j].end);
+        }
+	foreach(e; table)
+    {
+        writefln("CommonCaseEntry(0x%05x, 0x%05x, %s),", e.start, e.end,  e.op);
+    }
 	writeln("];\n");
-	auto index = new uint[lowIrreg.length];
-	assert(lowIrreg.length == highIrreg.length);
-	makeIndex(lowIrreg, index);
-	writeln("//horrible irregularities are stockpiled here as equivalent pairs"
-            " (note  it's not a 1:1 mapping, more like n:m)\n"
-            "immutable(uint)[] casePairs = [");
-	foreach(i; index)
-		writefln("0x%05x, 0x%05x,",lowIrreg[i], highIrreg[i]);
-	writeln("];");
 }
 
 string identName(string s)
@@ -313,13 +290,13 @@ void writeProperties()
     writeln("struct UnicodeProperty
 {
     string name;
-    immutable Charset set;
+    immutable CodepointSet set;
 }");
     foreach(k, v; props)
     {
         if(countUntil(blacklist, k) < 0)
         {
-            writef("immutable(Charset) unicode%s = ", identName(k));
+            writef("immutable(CodepointSet) unicode%s = ", identName(k));
             write(charsetString(v));
         }
     }
