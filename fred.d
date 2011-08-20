@@ -25,68 +25,68 @@ import std.string : representation;
 //debug = fred_matching;
 //debug = fred_charset;
 
-//  IR bit pattern: 0b1_xxxxx_yy
-//  where yy indicates class of instruction, xxxxx for actual operation code
-//      00: atom, a normal instruction
-//      01: open, opening of a group, has length of contained IR in the low bits
-//      10: close, closing of a group, has length of contained IR in the low bits
-//      11 unused
+// IR bit pattern: 0b1_xxxxx_yy
+// where yy indicates class of instruction, xxxxx for actual operation code
+//     00: atom, a normal instruction
+//     01: open, opening of a group, has length of contained IR in the low bits
+//     10: close, closing of a group, has length of contained IR in the low bits
+//     11 unused
 //
-//  Loops with Q (non-greedy, with ? mark) must have the same size / other properties as non Q version
-// Posible changes:
-// * encode non eagerness (*q) and groups with content (B) differently?
-// * merge group, option, infinite/repeat start (to never copy during parsing of (a|b){1,2}) 
-// * reorganize groups to make n args easier to find, or simplify the check for groups of similar ops
-//   (like lookaround), or make it easier to identify hotspots.
+// Loops with Q (non-greedy, with ? mark) must have the same size / other properties as non Q version
+//Posible changes:
+//* encode non eagerness (*q) and groups with content (B) differently?
+//* merge group, option, infinite/repeat start (to never copy during parsing of (a|b){1,2}) 
+//* reorganize groups to make n args easier to find, or simplify the check for groups of similar ops
+//  (like lookaround), or make it easier to identify hotspots.
 
 enum IR:uint {
-    Char              = 0b1_00000_00, // a character
-    Any               = 0b1_00001_00, // any character
-    CodepointSet           = 0b1_00010_00, // a most generic CodepointSet [...]
-    Trie              = 0b1_00011_00, // CodepointSet implemented as Trie
-    // match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
-    // OrChar holds in upper two bits of data total number of OrChars in this _sequence_
-    // the drawback of this representation is that it is difficult to detect a jump in the middle of it
+    Char              = 0b1_00000_00, //a character
+    Any               = 0b1_00001_00, //any character
+    CodepointSet           = 0b1_00010_00, //a most generic CodepointSet [...]
+    Trie              = 0b1_00011_00, //CodepointSet implemented as Trie
+    //match with any of a consecutive OrChar's in this sequence (used for case insensitive match)
+    //OrChar holds in upper two bits of data total number of OrChars in this _sequence_
+    //the drawback of this representation is that it is difficult to detect a jump in the middle of it
     OrChar            = 0b1_00100_00,
-    Nop               = 0b1_00101_00, // no operation (padding)
-    End               = 0b1_00110_00, // end of program
-    Bol               = 0b1_00111_00, // beginning of a string ^
-    Eol               = 0b1_01000_00, // end of a string $
-    Wordboundary      = 0b1_01001_00, // boundary of a word
-    Notwordboundary   = 0b1_01010_00, // not a word boundary
-    Backref           = 0b1_01011_00, // backreference to a group (that has to be pinned, i.e. locally unique) (group index)
-    GroupStart        = 0b1_01100_00, // start of a group (x) (groupIndex+groupPinning(1bit))
-    GroupEnd          = 0b1_01101_00, // end of a group (x) (groupIndex+groupPinning(1bit))
-    Option            = 0b1_01110_00, // start of an option within an alternation x | y (length)
-    GotoEndOr         = 0b1_01111_00, // end of an option (length of the rest)
+    Nop               = 0b1_00101_00, //no operation (padding)
+    End               = 0b1_00110_00, //end of program
+    Bol               = 0b1_00111_00, //beginning of a string ^
+    Eol               = 0b1_01000_00, //end of a string $
+    Wordboundary      = 0b1_01001_00, //boundary of a word
+    Notwordboundary   = 0b1_01010_00, //not a word boundary
+    Backref           = 0b1_01011_00, //backreference to a group (that has to be pinned, i.e. locally unique) (group index)
+    GroupStart        = 0b1_01100_00, //start of a group (x) (groupIndex+groupPinning(1bit))
+    GroupEnd          = 0b1_01101_00, //end of a group (x) (groupIndex+groupPinning(1bit))
+    Option            = 0b1_01110_00, //start of an option within an alternation x | y (length)
+    GotoEndOr         = 0b1_01111_00, //end of an option (length of the rest)
     //... any additional atoms here   
     
     
 
-    OrStart           = 0b1_00000_01, // start of alternation group  (length)
-    OrEnd             = 0b1_00000_10, // end of the or group (length,mergeIndex)
+    OrStart           = 0b1_00000_01, //start of alternation group  (length)
+    OrEnd             = 0b1_00000_10, //end of the or group (length,mergeIndex)
     //with this instruction order
     //bit mask 0b1_00001_00 could be used to test/set greediness
-    InfiniteStart     = 0b1_00001_01, // start of an infinite repetition x* (length)
-    InfiniteEnd       = 0b1_00001_10, // end of infinite repetition x* (length,mergeIndex)
-    InfiniteQStart    = 0b1_00010_01, // start of a non eager infinite repetition x*? (length)
-    InfiniteQEnd      = 0b1_00010_10, // end of non eager infinite repetition x*? (length,mergeIndex)
-    RepeatStart       = 0b1_00011_01, // start of a {n,m} repetition (length)
-    RepeatEnd         = 0b1_00011_10, // end of x{n,m} repetition (length,step,minRep,maxRep)
-    RepeatQStart      = 0b1_00100_01, // start of a non eager x{n,m}? repetition (length)
-    RepeatQEnd        = 0b1_00100_10, // end of non eager x{n,m}? repetition (length,step,minRep,maxRep)
+    InfiniteStart     = 0b1_00001_01, //start of an infinite repetition x* (length)
+    InfiniteEnd       = 0b1_00001_10, //end of infinite repetition x* (length,mergeIndex)
+    InfiniteQStart    = 0b1_00010_01, //start of a non eager infinite repetition x*? (length)
+    InfiniteQEnd      = 0b1_00010_10, //end of non eager infinite repetition x*? (length,mergeIndex)
+    RepeatStart       = 0b1_00011_01, //start of a {n,m} repetition (length)
+    RepeatEnd         = 0b1_00011_10, //end of x{n,m} repetition (length,step,minRep,maxRep)
+    RepeatQStart      = 0b1_00100_01, //start of a non eager x{n,m}? repetition (length)
+    RepeatQEnd        = 0b1_00100_10, //end of non eager x{n,m}? repetition (length,step,minRep,maxRep)
     //
-    LookaheadStart    = 0b1_00101_01, // begin of the lookahead group (length)
-    LookaheadEnd      = 0b1_00101_10, // end of a lookahead group (length)
-    NeglookaheadStart = 0b1_00110_01, // start of a negative lookahead (length)
-    NeglookaheadEnd   = 0b1_00110_10, // end of a negative lookahead (length)
-    LookbehindStart   = 0b1_00111_01, // start of a lookbehind (length)
-    LookbehindEnd     = 0b1_00111_10, // end of a lookbehind (length)
-    NeglookbehindStart= 0b1_01000_01, // start of a negative lookbehind (length)
-    NeglookbehindEnd  = 0b1_01000_10, // end of negative lookbehind (length)
+    LookaheadStart    = 0b1_00101_01, //begin of the lookahead group (length)
+    LookaheadEnd      = 0b1_00101_10, //end of a lookahead group (length)
+    NeglookaheadStart = 0b1_00110_01, //start of a negative lookahead (length)
+    NeglookaheadEnd   = 0b1_00110_10, //end of a negative lookahead (length)
+    LookbehindStart   = 0b1_00111_01, //start of a lookbehind (length)
+    LookbehindEnd     = 0b1_00111_10, //end of a lookbehind (length)
+    NeglookbehindStart= 0b1_01000_01, //start of a negative lookbehind (length)
+    NeglookbehindEnd  = 0b1_01000_10, //end of negative lookbehind (length)
 }
 
-// a shorthand for IR length - full length of specific opcode evaluated at compile time
+//a shorthand for IR length - full length of specific opcode evaluated at compile time
 template IRL(IR code)
 {
     enum uint IRL =  lengthOfIR(code);
@@ -94,7 +94,7 @@ template IRL(IR code)
 
 static assert (IRL!(IR.LookaheadStart) == 3);
 
-// how many parameters follow the IR, should be optimized fixing some IR bits
+//how many parameters follow the IR, should be optimized fixing some IR bits
 int immediateParamsIR(IR i){
     switch (i){
     case IR.OrEnd,IR.InfiniteEnd,IR.InfiniteQEnd:
@@ -108,71 +108,78 @@ int immediateParamsIR(IR i){
     }
 }
 
-// full length of IR instruction inlcuding all parameters that might follow it
+//full length of IR instruction inlcuding all parameters that might follow it
 int lengthOfIR(IR i)
 {
     return 1 + immediateParamsIR(i);
 }
 
-// full length of the paired IR instruction inlcuding all parameters that might follow it
+//full length of the paired IR instruction inlcuding all parameters that might follow it
 int lengthOfPairedIR(IR i)
 {
     return 1 + immediateParamsIR(pairedIR(i));
 }
 
-// if the operation has a merge point (this relies on the order of the ops)
+//if the operation has a merge point (this relies on the order of the ops)
 bool hasMerge(IR i)
 {
     return (i&0b11)==0b10 && i<=IR.RepeatQEnd;
 }
 
-// is an IR that opens a "group"
+//is an IR that opens a "group"
 bool isStartIR(IR i)
 {
     return (i&0b11)==0b01;
 }
 
-// is an IR that ends a "group"
+//is an IR that ends a "group"
 bool isEndIR(IR i)
 {
     return (i&0b11)==0b10;
 }
 
-// is a standalone IR
+//is a standalone IR
 bool isAtomIR(IR i)
 {
     return (i&0b11)==0b00;
 }
 
-// makes respective pair out of IR i, swapping start/end bits of instruction
+//makes respective pair out of IR i, swapping start/end bits of instruction
 IR pairedIR(IR i)
 {
     assert(isStartIR(i) || isEndIR(i));
     return cast(IR)(i ^ 0b11);
 }
 
-// encoded IR instruction
+//encoded IR instruction
 struct Bytecode
 {
     uint raw;
-    enum MaxSequence = 2+4;
+    //natural constraints
+    enum maxSequence = 2+4;
+    enum maxData = 1<<22;
+    
     this(IR code, uint data)
     {
         assert(data < (1<<22) && code < 256);
         raw = code<<24 | data;
     }
+    
     this(IR code, uint data, uint seq)
     {
         assert(data < (1<<22) && code < 256 );
-        assert(seq >= 2 && seq < MaxSequence);
+        assert(seq >= 2 && seq < maxSequence);
         raw = code<<24 | ((seq-2)<<22) | data;
     }
+    
+    //store raw data
     static Bytecode fromRaw(uint data)
     {
         Bytecode t;
         t.raw = data;
         return t;
     }
+    
     //bit twiddling helpers
     @property uint data() const { return raw & 0x003f_ffff; }
     //ditto
@@ -187,54 +194,63 @@ struct Bytecode
     @property bool isStart() const { return isStartIR(code); }
     //ditto
     @property bool isEnd() const { return isEndIR(code); }
-    // number of arguments for this instruction
+    //number of arguments for this instruction
     @property int args() const { return immediateParamsIR(code); }
+    
     //mark this GroupStart or GroupEnd as referenced in backreference
     void setBackrefence()
     {
         assert(code == IR.GroupStart || code == IR.GroupEnd);
         raw = raw | (1<<23);
     }
+    
     //is referenced 
     @property bool backreference() const
     {
         assert(code == IR.GroupStart || code == IR.GroupEnd);
         return cast(bool)(raw & (1<<23));
     }
-    // mark as local reference (for backrefs in lookarounds)
+    
+    //mark as local reference (for backrefs in lookarounds)
     void setLocalRef()
     {
         assert(code == IR.Backref);
         raw = raw | (1<<23);
     }
-    // is a local ref
+    
+    //is a local ref
     @property bool localRef() const
     {
         assert(code == IR.Backref);
         return cast(bool)(raw & (1<<23));
     }
-    // human readable name of instruction
+    
+    //human readable name of instruction
     @property string mnemonic() const
     {
         return to!string(code);
     }
-    // full length of instruction
+    
+    //full length of instruction
     @property uint length() const
     {
         return lengthOfIR(code);
     }
-    // full length of respective start/end of this instruction
+    
+    //full length of respective start/end of this instruction
     @property uint pairedLength() const
     {
         return lengthOfPairedIR(code);
     }
-    // returns bytecode of paired instruction (assuming this one is start or end)
+    
+    //returns bytecode of paired instruction (assuming this one is start or end)
     @property Bytecode paired() const
-    {// depends on bit and struct layout order
+    {//depends on bit and struct layout order
         assert(isStart || isEnd);
         return Bytecode.fromRaw(raw ^ (0b11<<24));
     }
-    // gets an index into IR block of the respective pair
+    
+    //gets an index into IR block of the respective pair
     uint indexOfPair(uint pc) const
     {
         assert(isStart || isEnd);
@@ -244,7 +260,7 @@ struct Bytecode
 
 static assert(Bytecode.sizeof == 4);
 
-// debugging tool, prints out instruction along with opcodes
+//debugging tool, prints out instruction along with opcodes
 string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
 {
     auto output = appender!string();
@@ -277,8 +293,8 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.GroupStart, IR.GroupEnd:
         uint n = irb[pc].data;
-        // 
-        // Ouch: '!vthis->csym' on line 713 in file 'glue.c'
+        //
+        //Ouch: '!vthis->csym' on line 713 in file 'glue.c'
         string name;
         foreach(v;dict)
             if(v.group == n)
@@ -307,7 +323,7 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
     return output.data;
 }
 
-// another pretty printer, writes out the bytecode of a regex and where the pc is
+//another pretty printer, writes out the bytecode of a regex and where the pc is
 void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc=uint.max,int indent=3,size_t index=0)
     if (isOutputRange!(Sink,Char))
 {
@@ -380,7 +396,7 @@ void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
     //if(__ctfe)
         arr = arr[0..from]~items~arr[to..$];
-    /*else //@@@BUG@@@ in replaceInPlace? with symptoms being sudden ZEROs in array
+    /*else //@@@BUG@@@ in replaceInPlace? symptoms being sudden ZEROs in array
         replaceInPlace(arr, from, to, items);*/
 }
 //ditto
@@ -393,7 +409,7 @@ void moveAllAlt(T)(T[] src, T[] dest)
         moveAll(src, dest);
 }
 
-// default allocator to use
+//default allocator to use
 alias RegionAllocator Allocator;
 
 //Regular expression engine/parser options:
@@ -406,17 +422,9 @@ static assert( RegexOption.max < 0x80);
 enum RegexInfo : uint { oneShot = 0x80 };
 
 private enum NEL = '\u0085', LS = '\u2028', PS = '\u2029'; 
-//multiply-add, throws exception on overflow
-uint checkedMulAdd(uint f1, uint f2, uint add)
-{
-    ulong r = f1 * cast(ulong)f2 + add;
-    if(r < (1<<32UL))
-        throw new RegexException("Regex internal errror - integer overflow");
-    return cast(uint)r;
-}
 
-// test if a given string starts with hex number of maxDigit that's a valid codepoint
-// returns it's value and skips these maxDigit chars on success, throws on failure
+//test if a given string starts with hex number of maxDigit that's a valid codepoint
+//returns it's value and skips these maxDigit chars on success, throws on failure
 dchar parseUniHex(Char)(ref Char[] str, uint maxDigit)
 {
     enforce(str.length >= maxDigit,"incomplete escape sequence");        
@@ -457,7 +465,7 @@ struct Group
     }
 }
 
-// structure representing interval: [a,b)
+//structure representing interval: [a,b)
 struct Interval
 {
     //
@@ -491,7 +499,7 @@ struct Interval
 
 }
 
-// basic internal data structure for [...] sets
+//basic internal data structure for [...] sets
 struct CodepointSet
 {
 //private:
@@ -537,7 +545,7 @@ public:
     }
     //
     ref CodepointSet add(dchar ch){ add(Interval(cast(uint)ch)); return this; }
-    // this = this || set
+    //this = this || set
     ref CodepointSet add(in CodepointSet set)
     {
         debug(fred_charset) writef ("%s || %s --> ", ivals, set.ivals);
@@ -546,7 +554,7 @@ public:
         debug(fred_charset) writeln(ivals);
         return this;
     }
-    // this = this -- set
+    //this = this -- set
     ref CodepointSet sub(in CodepointSet set)
     {
         if(empty)
@@ -613,7 +621,7 @@ public:
         ivals = cast(uint[])result;
         return this;
     }
-    // this = this ~~ set (i.e. (this || set) -- (this && set))
+    //this = this ~~ set (i.e. (this || set) -- (this && set))
     void symmetricSub(in CodepointSet set)
     {
         auto a = CodepointSet(ivals.dup);
@@ -621,7 +629,7 @@ public:
         this.add(set);
         this.sub(a);
     }
-    // this = this && set
+    //this = this && set
     ref CodepointSet intersect(in CodepointSet set)
     {
         if(empty || set.empty)
@@ -675,7 +683,7 @@ public:
         ivals = cast(uint[])intersection;
         return this;
     }
-    // this = !this (i.e. [^...] in regex syntax)
+    //this = !this (i.e. [^...] in regex syntax)
     ref CodepointSet negate()
     {
         if(empty)
@@ -705,7 +713,7 @@ public:
         return this;
     }
 
-    // test if ch is present in this set, linear search
+    //test if ch is present in this set, linear search
     bool scanFor(dchar ch) const
     {
         assert(ivals.length <= maxCharsetUsed);
@@ -716,7 +724,7 @@ public:
         return false;
     }
     
-    // test if ch is present in this set, binary search
+    //test if ch is present in this set, binary search
     bool opIndex(dchar ch)const
     {
         auto svals = assumeSorted!"a <= b"(ivals);
@@ -724,10 +732,10 @@ public:
         return s & 1;
     }
     
-    // true if set is empty
+    //true if set is empty
     @property bool empty() const {   return ivals.empty; }
     
-    // print out in [\uxxxx-\uyyyy...] style
+    //print out in [\uxxxx-\uyyyy...] style
     void printUnicodeSet(void delegate(const(char)[])sink) const
     {
         sink("[");
@@ -739,19 +747,19 @@ public:
         sink("]");
     }
     
-    // deep copy this CodepointSet
+    //deep copy this CodepointSet
     @property CodepointSet dup() const
     {
         return CodepointSet(ivals.dup);
     }
     
-    // full range from start to end
+    //full range from start to end
     @property uint extent() const
     {
         return ivals.empty ? 0 : ivals[$-1] - ivals[0];
     }
     
-    // number of codepoints in this CodepointSet
+    //number of codepoints in this CodepointSet
     @property uint chars() const
     {
         //CTFE workaround
@@ -761,7 +769,7 @@ public:
         return ret;
     }
     
-    // troika for hash map
+    //troika for hash map
     bool opEquals(ref const CodepointSet set) const
     {
         return ivals == set.ivals;
@@ -855,7 +863,7 @@ struct BasicTrie(uint prefixBits)
         }
         writeln();
     }
-    // create a trie from CodepointSet set
+    //create a trie from CodepointSet set
     this(in CodepointSet s)
     {
         if(s.empty)
@@ -881,7 +889,7 @@ struct BasicTrie(uint prefixBits)
                             bound = uint.max;
                             if(flag)//not a single one set so far
                                 return;
-                            // no more bits in the whole set, but need to add the last bucket
+                            //no more bits in the whole set, but need to add the last bucket
                             break L_Prefix_Loop;
                         }
                     }
@@ -898,7 +906,6 @@ struct BasicTrie(uint prefixBits)
                 {
                    printBlock(page);
                 }
-                //writeln("Iteration ", i>>prefixBits);
                 uint npos;
                 for(npos=0;npos<data.length;npos+=prefixWordSize)
                     if(equal(page[], data[npos .. npos+prefixWordSize]))
@@ -934,7 +941,7 @@ struct BasicTrie(uint prefixBits)
             writeln("---");
         }
     }
-    // != 0 if contains char ch
+    //!= 0 if contains char ch
     bool opIndex(dchar ch) const
     {
         assert(ch < 0x110000);
@@ -955,8 +962,10 @@ struct BasicTrie(uint prefixBits)
 enum maxCharsetUsed = 6;
 
 alias BasicTrie!8 Trie;
+
 Trie[const(CodepointSet)] trieCache;
 
+//accessor with caching
 Trie getTrie(in CodepointSet set)
 {
     if(__ctfe)
@@ -999,7 +1008,7 @@ unittest//a very sloow test
     }
 }
 
-// fussy compare for unicode property names as per UTS-18
+//fussy compare for unicode property names as per UTS-18
 int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
 {
     for(;;)
@@ -1025,6 +1034,7 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
         b.popFront();
     }
 }
+
 //ditto
 bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
 {
@@ -1208,7 +1218,7 @@ const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
 }
 
 
-// basic stack, just in case it gets used anywhere else then Parser
+//basic stack, just in case it gets used anywhere else then Parser
 struct Stack(T, bool CTFE=false)
 {
     static if(!CTFE)
@@ -1246,6 +1256,9 @@ struct Stack(T, bool CTFE=false)
     }
 }
 
+enum maxGroupNumber = 2^^19;
+enum maxLookaroundDepth = 16;
+
 struct Parser(R, bool CTFE=false)
     if (isForwardRange!R && is(ElementType!R : dchar))
 {
@@ -1260,6 +1273,7 @@ struct Parser(R, bool CTFE=false)
     //current num of group, group nesting level and repetitions step
     Stack!(uint,CTFE) groupStack;
     uint nesting = 0;
+    uint lookaroundNest = 0;
     uint counterDepth = 0; //current depth of nested counted repetitions
     const(CodepointSet)[] charsets;  //
     const(Trie)[] tries; //
@@ -1290,14 +1304,14 @@ struct Parser(R, bool CTFE=false)
         put(Bytecode(IR.End, 0));
 
     }
-    
+    //mark referenced groups for latter processing
     void markBackref(uint n)
     {   
         if(n/32 >= backrefed.length)
             backrefed.length = n/32 + 1;
         backrefed[n/32] |= 1<<(n & 31);
     }
-    
+
     @property dchar current(){ return _current; }
     
     bool _next()
@@ -1330,13 +1344,6 @@ struct Parser(R, bool CTFE=false)
         else
             return _next();
     }
-        
-    void restart(R newpat)
-    {
-        pat = newpat;
-        empty = false;
-        next();
-    }
     
     void put(Bytecode code)
     {  
@@ -1350,6 +1357,7 @@ struct Parser(R, bool CTFE=false)
     
     void putRaw(uint number){ ir ~= Bytecode.fromRaw(number); }
     
+    //parsing number with basic overflow check
     uint parseDecimal()
     {
         uint r=0;
@@ -1364,7 +1372,7 @@ struct Parser(R, bool CTFE=false)
         return r;
     }
     
-    // parse control code of form \cXXX, c assumed to be the current symbol
+    //parse control code of form \cXXX, c assumed to be the current symbol
     dchar parseControlCode()
     {
         enforce(next(), "Unfinished escape sequence");
@@ -1373,9 +1381,7 @@ struct Parser(R, bool CTFE=false)
         return current & 0x1f;
     }
     
-    /**
-
-    */
+    //
     void parseFlags(S)(S flags)
     {
         foreach(ch; flags)//flags are ASCII anyway
@@ -1401,9 +1407,7 @@ struct Parser(R, bool CTFE=false)
         }
     }
     
-    /**
-        Parse and store IR for regex pattern
-    */
+    //parse and store IR for regex pattern
     void parseRegex()
     {
         fixupStack.push(0);
@@ -1452,6 +1456,7 @@ struct Parser(R, bool CTFE=false)
                             error("Expected '>' closing named group");
                         next();
                         nglob = groupStack.top++;
+                        enforce(groupStack.top <= maxGroupNumber, "limit on submatches is exceeded");
                         auto t = NamedGroup(name, nglob);
                         
                         if(__ctfe)
@@ -1487,6 +1492,7 @@ struct Parser(R, bool CTFE=false)
                 else
                 {
                     nglob = groupStack.top++;
+                    enforce(groupStack.top <= maxGroupNumber, "limit on number of submatches is exceeded");
                     put(Bytecode(IR.GroupStart, nglob));
                 }
                 break;
@@ -1502,11 +1508,13 @@ struct Parser(R, bool CTFE=false)
                     parseQuantifier(fix);
                     break;
                 case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
+                    assert(lookaroundNest);
                     fixLookaround(fix);
+                    lookaroundNest--;
                     put(ir[fix].paired);
                     break;
-                case IR.Option: // | xxx )
-                    // two fixups: last option + full OR
+                case IR.Option: //| xxx )
+                    //two fixups: last option + full OR
                     finishAlternation(fix);
                     fix = fixupStack.top;
                     switch(ir[fix].code)
@@ -1517,6 +1525,8 @@ struct Parser(R, bool CTFE=false)
                         parseQuantifier(fix);
                         break;
                     case IR.LookaheadStart, IR.NeglookaheadStart, IR.LookbehindStart, IR.NeglookbehindStart:
+                        assert(lookaroundNest);
+                        lookaroundNest--;
                         fix = fixupStack.pop();
                         fixLookaround(fix);
                         put(ir[fix].paired);
@@ -1537,7 +1547,7 @@ struct Parser(R, bool CTFE=false)
                 {
                     ir[fix] = Bytecode(ir[fix].code, cast(uint)ir.length - fix);
                     put(Bytecode(IR.GotoEndOr, 0));
-                    fixupStack.top = cast(uint)ir.length; // replace latest fixup for Option
+                    fixupStack.top = cast(uint)ir.length; //replace latest fixup for Option
                     put(Bytecode(IR.Option, 0));
                     break;
                 }
@@ -1548,7 +1558,7 @@ struct Parser(R, bool CTFE=false)
                 insertInPlaceAlt(ir, fix+1, Bytecode(IR.OrStart, 0), Bytecode(IR.Option, len));
                 assert(ir[fix+1].code == IR.OrStart);
                 put(Bytecode(IR.GotoEndOr, 0));
-                fixupStack.push(fix+1); // fixup for StartOR
+                fixupStack.push(fix+1); //fixup for StartOR
                 fixupStack.push(cast(uint)ir.length); //for Option
                 put(Bytecode(IR.Option, 0));
                 break;
@@ -1567,6 +1577,7 @@ struct Parser(R, bool CTFE=false)
             enforce(fixupStack.length == 1, "no matching ')'");
         }
     }
+    
     //helper function, finalizes IR.Option, fix points to the first option of sequence
     void finishAlternation(uint fix)
     {
@@ -1587,9 +1598,8 @@ struct Parser(R, bool CTFE=false)
         }
         put(Bytecode.fromRaw(0));
     }
-    /*
-        Parse and store IR for atom-quantifier pair
-    */
+   
+    //parse and store IR for atom-quantifier pair
     void parseQuantifier(uint offset)
     {
         uint replace = ir[offset].code == IR.Nop;
@@ -1665,7 +1675,7 @@ struct Parser(R, bool CTFE=false)
                 counterDepth = std.algorithm.max(counterDepth, nesting+1);
             }
         }
-        else if(min) // && max is infinite
+        else if(min) //&& max is infinite
         {
             if(min != 1)
             {
@@ -1713,9 +1723,8 @@ struct Parser(R, bool CTFE=false)
 
         }
     }
-    /**
-        Parse and store IR for atom
-    */
+    
+    //parse and store IR for atom
     void parseAtom()
     {
         if(empty)
@@ -1762,13 +1771,15 @@ struct Parser(R, bool CTFE=false)
         }
     }
     
-    // generate code for start of lookaround: (?= (?! (?<= (?<!
+    //generate code for start of lookaround: (?= (?! (?<= (?<!
     void genLookaround(IR opcode)
     {
         put(Bytecode(opcode, 0));
         put(Bytecode.fromRaw(0));
         put(Bytecode.fromRaw(0));
         groupStack.push(0);
+        lookaroundNest++;
+        enforce(lookaroundNest <= maxLookaroundDepth, "maximum lookaround depth exceeded");
     }
     
     //fixup lookaround with start at offset fix
@@ -1778,7 +1789,7 @@ struct Parser(R, bool CTFE=false)
         auto g = groupStack.pop();
         assert(!groupStack.empty);
         ir[fix+1] = Bytecode.fromRaw(groupStack.top);
-        // groups are cumulative across lookarounds
+        //groups are cumulative across lookarounds
         ir[fix+2] = Bytecode.fromRaw(groupStack.top+g);
         groupStack.top += g;
     }
@@ -1786,8 +1797,8 @@ struct Parser(R, bool CTFE=false)
     //CodepointSet operations relatively in order of priority
     enum Operator:uint { Open=0, Negate,  Difference, SymDifference, Intersection, Union, None };
     
-    // parse unit of CodepointSet spec, most notably escape sequences and char ranges
-    // also fetches next set operation
+    //parse unit of CodepointSet spec, most notably escape sequences and char ranges
+    //also fetches next set operation
     Tuple!(CodepointSet,Operator) parseCharTerm()
     {
         enum State{ Start, Char, Escape, Dash, DashEscape };
@@ -1989,7 +2000,7 @@ struct Parser(R, bool CTFE=false)
                     state = State.Start;
                 }
                 break;            
-            case State.DashEscape:  // xxxx-\yyyy
+            case State.DashEscape:  //xxxx-\yyyy
                 uint end;
                 switch(current)
                 {
@@ -2038,9 +2049,8 @@ struct Parser(R, bool CTFE=false)
     
     alias Stack!(CodepointSet,CTFE) ValStack;
     alias Stack!(Operator,CTFE) OpStack;
-    /**
-        Parse and store IR for CodepointSet
-    */
+
+    //parse and store IR for CodepointSet
     void parseCharset()
     {
         ValStack vstack;
@@ -2153,7 +2163,7 @@ struct Parser(R, bool CTFE=false)
     void charsetToIr(in CodepointSet set)
     {
         uint chars = set.chars();
-        if(chars < Bytecode.MaxSequence)
+        if(chars < Bytecode.maxSequence)
         {
             switch(chars)
             {
@@ -2186,6 +2196,7 @@ struct Parser(R, bool CTFE=false)
             assert(charsets.length == tries.length);
         }
     }
+    
     //parse and generate IR for escape stand alone escape sequence
     void parseEscape()
     {
@@ -2278,9 +2289,10 @@ struct Parser(R, bool CTFE=false)
             put(op);
         }
     }
-	// parse and return a CodepointSet for \p{...Property...} and \P{...Property..},
-	// \ - assumed to be processed, p - is current
-	immutable(CodepointSet) parseUnicodePropertySpec(bool negated)
+    
+	//parse and return a CodepointSet for \p{...Property...} and \P{...Property..},
+	//\ - assumed to be processed, p - is current
+	const(CodepointSet) parseUnicodePropertySpec(bool negated)
 	{
         alias comparePropertyName ucmp;
         enum MAX_PROPERTY = 128;
@@ -2295,8 +2307,9 @@ struct Parser(R, bool CTFE=false)
 		enforce(!s.empty, "unrecognized unicode property spec");
 		enforce(current == '}', "} expected ");
 		next();
-		return cast(immutable CodepointSet)(s);
+		return s;
 	}
+    
     //
     void error(string msg)
     {
@@ -2306,6 +2319,7 @@ struct Parser(R, bool CTFE=false)
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
+    
     //packages parsing results into a RegEx object
     @property RegEx program()
     {
@@ -2316,11 +2330,11 @@ struct Parser(R, bool CTFE=false)
 //Object that holds all persistent data about compiled regex
 struct RegEx
 {
-    Bytecode[] ir;      // compiled bytecode of pattern
+    Bytecode[] ir;      //compiled bytecode of pattern
     NamedGroup[] dict;  //maps name -> user group number
     uint ngroup;        //number of internal groups
     uint maxCounterDepth; //max depth of nested {n,m} repetitions
-    uint hotspotTableSize; // number of entries in merge table
+    uint hotspotTableSize; //number of entries in merge table
     uint threadCount;
     uint flags;         //global regex flags
     const(CodepointSet)[] charsets; //
@@ -2412,7 +2426,7 @@ struct RegEx
         checkIfOneShot();
         debug(fred_allocation) writefln("IR processed, max threads: %d", threadCount);
     }
-    // IR code validator - proper nesting, illegal instructions, etc.
+    //IR code validator - proper nesting, illegal instructions, etc.
     void validate()
     {
         uint[] groupBits = new uint[ngroup/32+1];
@@ -2435,7 +2449,7 @@ struct RegEx
         foreach(i,v; groupBits)
             assert(v == 0, text("unclosed group, bogus # is in range ", i*32, " - ",i*32+32));
     }
-    // print out disassembly a program's IR
+    //print out disassembly a program's IR
     void print() const
     {
         writefln("PC\tINST\n");
@@ -2492,7 +2506,7 @@ struct NativeRegEx(alias Fn)
     alias _prog this;
     this(RegEx  prog){    _prog = prog; } 
 }
-// whether ch is one of unicode newline sequences
+//whether ch is one of unicode newline sequences
 bool endOfLine(dchar ch, bool seenCr)
 {
     return ((ch == '\n') ^ seenCr) || ch == '\r' || ch == NEL || ch == LS || ch == PS;
@@ -2664,7 +2678,7 @@ struct SampleGenerator(Char)
                     break;
                 case IR.InfiniteStart, IR.InfiniteQStart:
                     pc += re.ir[pc].data + IRL!(IR.InfiniteStart);
-                    goto case IR.InfiniteEnd; // both Q and non-Q
+                    goto case IR.InfiniteEnd; //both Q and non-Q
                 case IR.InfiniteEnd:
                 case IR.InfiniteQEnd:
                     uint len = re.ir[pc].data;
@@ -2844,7 +2858,7 @@ public:
                 case IR.OrChar://assumes IRL!(OrChar) == 1
                     uint len = re.ir[t.pc].sequence;
                     uint end = t.pc + len;
-                    uint[Bytecode.MaxSequence] s;
+                    uint[Bytecode.maxSequence] s;
                     uint numS;
                     for(uint i = 0; i<len; i++)
                     {
@@ -2884,7 +2898,7 @@ public:
                     {
                         static if(charSize == 1)
                             static immutable codeBounds = [0x0, 0x7F, 0x80, 0x7FF, 0x800, 0xFFFF, 0x10000, 0x10FFFF];
-                        else // == 2
+                        else //== 2
                             static immutable codeBounds = [0x0, 0xFFFF, 0x10000, 0x10FFFF];
                         auto srange = assumeSorted!"a<=b"(set.ivals); 
                         for(uint i = 0; i<codeBounds.length/2; i++)
@@ -2969,7 +2983,7 @@ public:
                     break;
                 case IR.InfiniteStart, IR.InfiniteQStart:
                     t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
-                    goto case IR.InfiniteEnd; // both Q and non-Q
+                    goto case IR.InfiniteEnd; //both Q and non-Q
                 case IR.InfiniteEnd:
                 case IR.InfiniteQEnd:
                     uint len = re.ir[t.pc].data;
@@ -3138,20 +3152,20 @@ template Regex(Char)
     alias RegEx Regex;
 }
 
-// Simple UTF-string stream abstraction (w/o normalization and such)
+//Simple UTF-string stream abstraction (w/o normalization and such)
 struct Input(Char)
     if(is(Char :dchar))
 {
     alias const(Char)[] String;
     String _origin;
     size_t _index;
-    // constructs Input object out of plain string
+    //constructs Input object out of plain string
     this(String input, size_t idx=0)
     {
         _origin = input;
         _index = idx;
     }
-    // codepoint at current stream position
+    //codepoint at current stream position
     bool nextChar(ref dchar res, ref size_t pos)
     {
         if(_index == _origin.length)
@@ -3367,7 +3381,7 @@ template BacktrackingMatcher(alias hardcoded)
             pc = 0;
             counter = 0;
             lastState = 0;
-            infiniteNesting = -1;// intentional
+            infiniteNesting = -1;//intentional
             auto start = s._index;
             debug(fred_matching) writeln("Try match starting at ",s[index..s.lastIndex]);        
             for(;;)
@@ -3516,7 +3530,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.RepeatEnd:
                 case IR.RepeatQEnd:
-                    // len, step, min, max
+                    //len, step, min, max
                     uint len = re.ir[pc].data;
                     uint step =  re.ir[pc+2].raw;
                     uint min = re.ir[pc+3].raw;
@@ -3750,7 +3764,7 @@ template BacktrackingMatcher(alias hardcoded)
             pc = cast(uint)re.ir.length-1;
             counter = 0;
             lastState = 0;
-            infiniteNesting = -1;// intentional
+            infiniteNesting = -1;//intentional
             auto start = index;
             debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));        
             for(;;)
@@ -4089,7 +4103,7 @@ template BacktrackingMatcher(alias hardcoded)
     }
 }
 
-// state of codegenerator
+//state of codegenerator
 struct CtState
 {
     string code;
@@ -4269,7 +4283,7 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
         ir = ir[ir[0].length..$];
         break;
      case IR.RepeatEnd, IR.RepeatQEnd:
-        // len, step, min, max
+        //len, step, min, max
         uint len = ir[0].data;
         uint step = ir[2].raw;
         uint min = ir[3].raw;
@@ -4357,7 +4371,7 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
     return result;
 }
 
-// D code for atom at ir using address addr, addr < 0 means quickTest
+//D code for atom at ir using address addr, addr < 0 means quickTest
 string ctAtomCode(Bytecode[] ir, int addr)
 {
     string code;
@@ -4541,7 +4555,7 @@ string ctGenRegEx(Bytecode[] ir)
         pc = 0;
         counter = 0;
         lastState = 0;
-        infiniteNesting = -1;// intentional
+        infiniteNesting = -1;//intentional
         auto start = s._index;
         debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]); 
     StartLoop:
@@ -4574,15 +4588,15 @@ struct Thread
 {
     Thread* next;    //intrusive linked list
     uint pc;
-    uint counter;    // loop counter
-    uint uopCounter; // counts micro operations inside one macro instruction (e.g. BackRef)
+    uint counter;    //loop counter
+    uint uopCounter; //counts micro operations inside one macro instruction (e.g. BackRef)
     Group[1] matches;
 }
 //head-tail singly-linked list
 struct ThreadList
 {
     Thread* tip=null, toe=null;
-    // add new thread to the start of list
+    //add new thread to the start of list
     void insertFront(Thread* t)
     {
         if(tip)
@@ -4673,9 +4687,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     }
     else
         enum kicked = false;
-    // true if it's start of input
+    //true if it's start of input
     @property bool atStart(){   return index == 0; }
-    // true if it's end of input
+    //true if it's end of input
     @property bool atEnd(){  return index == s.lastIndex; }
     //
     bool next()
@@ -4771,7 +4785,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
-        if(!atEnd)// if no char 
+        if(!atEnd)//if no char 
             for(;;)
             {
                 genCounter++;
@@ -4791,7 +4805,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     eval!true(t, matches);
                 }
                 if(!matched)//if we already have match no need to push the engine
-                    eval!true(createStart(index), matches);// new thread staring at this position
+                    eval!true(createStart(index), matches);//new thread staring at this position
                 else if(nlist.empty)
                 {
                     debug(fred_matching) writeln("Stopped  matching before consuming full input");
@@ -4813,7 +4827,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         debug(fred_matching) writefln("Threaded matching threads at end");
         //try out all zero-width posibilities
         if(!matched)
-            eval!false(createStart(index), matches);// new thread starting at end of input
+            eval!false(createStart(index), matches);//new thread starting at end of input
         for(Thread* t = clist.fetch(); t; t = clist.fetch())
         {
             eval!false(t, matches);
@@ -4971,13 +4985,13 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.InfiniteStart, IR.InfiniteQStart:
                 t.pc += re.ir[t.pc].data + IRL!(IR.InfiniteStart);
-                goto case IR.InfiniteEnd; // both Q and non-Q
+                goto case IR.InfiniteEnd; //both Q and non-Q
             case IR.RepeatStart, IR.RepeatQStart:
                 t.pc += re.ir[t.pc].data + IRL!(IR.RepeatStart);
-                goto case IR.RepeatEnd; // both Q and non-Q
+                goto case IR.RepeatEnd; //both Q and non-Q
             case IR.RepeatEnd:
             case IR.RepeatQEnd:
-                // len, step, min, max
+                //len, step, min, max
                 uint len = re.ir[t.pc].data;
                 uint step =  re.ir[t.pc+2].raw;
                 uint min = re.ir[t.pc+3].raw;
@@ -5327,7 +5341,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             alias evalBack evalFn;
         assert(clist == ThreadList.init);
         assert(nlist == ThreadList.init);
-        if(!atEnd)// if no char 
+        if(!atEnd)//if no char 
         {
             auto startT = createStart(index);
             static if(direction == OneShot.Fwd)
@@ -5488,7 +5502,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.InfiniteStart, IR.InfiniteQStart:
                 uint len = re.ir[t.pc].data;
-                uint mIdx = t.pc + len + IRL!(IR.InfiniteEnd); // we're always pointed at the tail of instruction
+                uint mIdx = t.pc + len + IRL!(IR.InfiniteEnd); //we're always pointed at the tail of instruction
                 if(merge[re.ir[mIdx].raw+t.counter] < genCounter)
                 {
                     debug(fred_matching) writefln("A thread(pc=%s) passed there : %s ; GenCounter=%s mergetab=%s",
@@ -6021,7 +6035,7 @@ public:
    
 }
 
-/// compile regular expression object from a given pattern with  flags
+///compile regular expression object from a given pattern with  flags
 auto regex(S, S2=string)(S pattern, S2 flags=[])
     if(isSomeString!S && isSomeString!S2)
 {
@@ -6141,7 +6155,7 @@ L_Replace_Loop:
                 case '\\':
                     state = State.Escape;
                     sink.put(format[0 .. offset]);
-                    format = format[offset+1 .. $];// safe since special chars are ascii only
+                    format = format[offset+1 .. $];//safe since special chars are ascii only
                     continue L_Replace_Loop;
                 case '$':
                     state = State.Dollar;
@@ -6228,7 +6242,7 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
         separator.flags |= RegexOption.global;
         if (_input.empty)
         {
-            // there is nothing to match at all, make _offset > 0
+            //there is nothing to match at all, make _offset > 0
             _offset = 1;
         }
         else
@@ -6259,12 +6273,12 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
         assert(!empty);
         if (_match.empty)
         {
-            // No more separators, work is done here
+            //No more separators, work is done here
             _offset = _input.length + 1;
         }
         else
         {
-            // skip past the separator
+            //skip past the separator
             _offset = _match.pre.length + _match.hit.length;
             _match.popFront;
         }
@@ -6276,7 +6290,7 @@ struct Splitter(Range, alias Engine=ThompsonMatcher)
     }
 }
 
-// Ditto
+//Ditto
 Splitter!(Range) splitter(Range)(Range r, RegEx pat)
     if (is(Unqual!(typeof(Range.init[0])) : dchar))
 {
@@ -6293,7 +6307,7 @@ String[] split(String)(String input, RegEx rx)
     return a.data;
 }
 
-// Exception object thrown in case of any errors during regex compilation
+//Exception object thrown in case of any errors during regex compilation
 class RegexException : Exception
 {
     this(string msg)
