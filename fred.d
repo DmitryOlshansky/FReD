@@ -3240,11 +3240,11 @@ template BacktrackingMatcher(alias hardcoded)
         bool seenCr;
         //backtracking machine state
         uint pc, counter;
-        size_t lastState = 0;          //top of state stack
+        size_t lastState = 0;       //top of state stack
         size_t[] trackers;
         uint infiniteNesting;
         size_t[] memory;
-        Group[] matches, backrefed;
+        Group[] matches, backrefed; //local slice of matches, global for backref
         Allocator* alloc;
         static if(__traits(hasMember,Stream, "search"))
         {
@@ -3464,7 +3464,6 @@ template BacktrackingMatcher(alias hardcoded)
                 case IR.Bol:
                     dchar back;
                     size_t bi;
-                    //TODO: multiline & attributes, unicode line terminators
                     if(atStart)
                         pc += IRL!(IR.Bol);
                     else if((re.flags & RegexOption.multiline) 
@@ -3523,8 +3522,6 @@ template BacktrackingMatcher(alias hardcoded)
                     uint step =  re.ir[pc+2].raw;
                     uint min = re.ir[pc+3].raw;
                     uint max = re.ir[pc+4].raw;
-                    //debug(fred_matching) writefln("repeat pc=%u, counter=%u",pc,counter);
-
                     if(counter < min)
                     {
                         counter += step;
@@ -4057,7 +4054,9 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Backref:
                     uint n = re.ir[pc].data;
-                    auto referenced = s[backrefed[n].begin .. backrefed[n].end];
+                    auto referenced = re.ir[pc].localRef 
+                            ? s[matches[n].begin .. matches[n].end] 
+                            : s[backrefed[n].begin .. backrefed[n].end];
                     while(!atEnd && !referenced.empty && front == referenced.front)
                     {
                         next();
@@ -4215,6 +4214,7 @@ CtState ctGenAlternation(Bytecode[] ir, int addr)
 string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
 {
     string r;
+    string testCode;
     switch(ir[0].code)
     {
     case IR.InfiniteStart, IR.InfiniteQStart:
@@ -4225,6 +4225,7 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
         ir = ir[ir[0].length..$];
         break;
     case IR.InfiniteEnd:
+        testCode = ctQuickTest(ir[IRL!(IR.InfiniteEnd)..$],addr+1);
         r = ctSub( `
             case $$:
                 debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
@@ -4237,9 +4238,10 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
                 trackers[infiniteNesting] = index;
 
                 infiniteNesting--;
-                pushState($$, counter);
+                $$
+                    pushState($$, counter);
                 infiniteNesting++;
-                goto case $$;`, addr, addr+1, addr+1, fixup);
+                goto case $$;`, addr, addr+1, testCode, addr+1, fixup);
         ir = ir[ir[0].length..$];
         break;
     case IR.InfiniteQEnd:
@@ -4320,85 +4322,117 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
     return r;
 }
 
+
+string ctQuickTest(Bytecode[] ir, int id)
+{
+    uint pc=0;
+    while(pc < ir.length && ir[pc].isAtom)
+    {
+        if(ir[pc].code == IR.GroupStart || ir[pc].code == IR.GroupEnd)
+        {
+            pc++;
+        }
+        else
+        {
+            return ctSub(`
+                int test_$$()
+                {
+                    $$
+                }
+                if(test_$$() >= 0)
+                `, id, ctAtomCode(ir[pc..$], -1), id); 
+        }
+    }
+    return "";
+}
+
 ///process & generate source for the simple bytecodes at front of ir using address addr
 CtState ctGenAtom(ref Bytecode[] ir, int addr)
 {
     CtState result;
+    result.code = ctAtomCode(ir, addr);
+    ir.popFrontN(ir[0].code == IR.OrChar ? ir[0].sequence : ir[0].length);
+    result.addr = addr + 1;
+    return result;
+}
+
+/// D code for atom at ir using address addr, addr < 0 means quickTest
+string ctAtomCode(Bytecode[] ir, int addr)
+{
+    string code;
+    string bailOut, nextInstr;
+    if(addr < 0)
+    {       
+        bailOut = "return -1;";
+        nextInstr = "return 0;";
+    }
+    else
+    {
+        bailOut = "goto L_backtrack;";
+        nextInstr = ctSub("goto case $$;", addr+1);
+        code ~=  ctSub( `
+             case $$:
+                `, addr);
+    }
     switch(ir[0].code)
     {
     case IR.OrChar://assumes IRL!(OrChar) == 1
-        result.code ~=  ctSub( `
-            case $$:
+        code ~=  ctSub(`
                 if(atEnd)
-                    goto L_backtrack;`, addr);
+                    $$`, bailOut);
         uint len = ir[0].sequence;
         for(uint i = 0; i<len; i++)
         {
-            result.code ~= ctSub( `
+            code ~= ctSub( `
                 if(front == $$)
                 {
-                    next();
-                    goto case;
-                }`,  ir[i].data);
+                    $$
+                    $$
+                }`,  addr >= 0 ? "next();" :"", ir[i].data, nextInstr);
         }
-        result.code ~= ctSub( `
-            goto L_backtrack;`);
-        result.addr = addr + 1;
-        ir.popFrontN(len);
+        code ~= ctSub( `
+            $$`, bailOut);
         break;
     case IR.Char:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 if(atEnd || front != $$)
-                    goto L_backtrack;
-                next();
-                goto case;`, addr, ir[0].data);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$
+                $$
+                $$`, ir[0].data, bailOut, addr >= 0 ? "next();" :"", nextInstr);
         break;
     case IR.Any:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 if(atEnd)
-                    goto L_backtrack;
-                next();
-                goto case;`, addr);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$
+                $$
+                $$`, bailOut, addr >= 0 ? "next();" :"",nextInstr);
         break;
     case IR.CodepointSet:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 if(atEnd || !re.charsets[$$].scanFor(front))
-                    goto L_backtrack;
-                next();
-            goto case;`, addr, ir[0].data);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$
+                $$
+            $$`, ir[0].data, bailOut, addr >= 0 ? "next();" :"", nextInstr);
         break;
     case IR.Trie:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 if(atEnd || !re.tries[$$][front])
-                    goto L_backtrack;
-                next();
-            goto case;`, addr, ir[0].data);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$
+                $$
+            $$`, ir[0].data, bailOut, addr >= 0 ? "next();" :"", nextInstr);
         break;
     case IR.Wordboundary:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 dchar back;
                 size_t bi;
                 if(atStart && wordTrie[front])
                 {
-                    goto case $$;
+                    $$
                 }
                 else if(atEnd && s.loopBack.nextChar(back, bi)
                         && wordTrie[back])
                 {
-                    goto case $$;
+                    $$
                 }
                 else if(s.loopBack.nextChar(back, bi))
                 {
@@ -4406,117 +4440,98 @@ CtState ctGenAtom(ref Bytecode[] ir, int addr)
                     bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
-                        goto case $$;
+                        $$
                     }
                 }
-                goto L_backtrack;`, addr, addr+1, addr+1, addr+1);
-        result.addr = addr + 1;
-        ir.popFront();
+                $$`
+            , nextInstr, nextInstr, nextInstr, bailOut);
         break;
     case IR.Notwordboundary:
-        result.code ~= ctSub( `
-            case $$:
+        code ~= ctSub( `
                 dchar back;
                 size_t bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
-                    goto L_backtrack;
+                    $$
                 else if(atEnd && s.loopBack.nextChar(back, bi)
                         && wordTrie[back])
-                    goto L_backtrack;
+                    $$
                 else if(s.loopBack.nextChar(back, index))
                 {
                     bool af = wordTrie[front];
                     bool ab = wordTrie[back];
                     if(af ^ ab)
-                        goto L_backtrack;
+                        $$
                 }
-                goto case;`, addr);
-        result.addr = addr + 1;
-        ir.popFront();
+                $$`
+            , bailOut, bailOut, bailOut, nextInstr);
+        
         break;
     case IR.Bol:
-        result.code ~= ctSub(q{
-            case $$:
+        code ~= ctSub(`
                 dchar back;
                 size_t bi;
                 if(atStart)
-                    goto case $$;
+                    $$
                 else if((re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
                     && endOfLine(back, seenCr))
                 {
-                    goto case $$;
+                    $$
                 }
                 else
-                    goto L_backtrack;
-        }, addr, addr + 1,addr + 1);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$
+        `, nextInstr, nextInstr, bailOut);
+        
         break;
     case IR.Eol:
-        result.code ~= ctSub(`
-            case $$:
+        code ~= ctSub(`
                 debug(fred_matching) writefln("EOL (seen CR: %x, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
                 //no matching inside \r\n
                 if(atEnd || ((re.flags & RegexOption.multiline) 
                         && endOfLine(front, seenCr)))
                 {
-                    goto case;
+                    $$
                 }
                 else
-                    goto L_backtrack;`, addr);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$`, nextInstr, bailOut);
+        
         break;
     case IR.GroupStart:
-        result.code ~= ctSub(`
-            case $$:
+        code ~= ctSub(`
                 matches[$$].begin = index;
-                debug(fred_matching) writefln("IR group #%u starts at %u", $$, index);
-                goto case;`, addr, ir[0].data 
-            , ir[0].data, ir[0].data);
-        result.addr = addr + 1;
-        ir.popFront();
+                $$`, ir[0].data, nextInstr);
+        
         break;
     case IR.GroupEnd:
-        result.code ~= ctSub(`
-            case $$:
+        code ~= ctSub(`
                 matches[$$].end = index;
-                debug(fred_matching) writefln("IR group #%u ends at %u", $$, index);
-                goto case;`, addr, ir[0].data
-            , ir[0].data, ir[0].data);
-        result.addr = addr + 1;
-        ir.popFront();
+                $$`, ir[0].data, nextInstr);
         break;
     case IR.Backref:
-        result.code ~= ctSub( `
-            case $$:
-                auto referenced = s[backrefed[$$].begin .. backrefed[$$].end];
+        string mStr = ir[0].localRef 
+            ? ctSub("matches[$$].begin .. matches[$$].end];", ir[0].data, ir[0].data) 
+            : ctSub("s[backrefed[$$].begin .. backrefed[$$].end];",ir[0].data, ir[0].data);
+        code ~= ctSub( `
+                $$
                 while(!atEnd && !referenced.empty && front == referenced.front)
                 {
-                    next();
+                    next();;
                     referenced.popFront();
                 }
                 if(referenced.empty)
-                    goto case;
+                    $$
                 else
-                    goto L_backtrack;
-                break;`, addr, ir[0].data-1, ir[0].data-1);
-        result.addr = addr + 1;
-        ir.popFront();
+                    $$`, mStr, nextInstr, bailOut);
         break;
     case IR.Nop:
     case IR.End:
-        result.addr = addr;
-        ir.popFront();
         break;
     default:
-        assert(0, text(ir[0].mnemonic));
+        assert(0, text(ir[0].mnemonic, "is not supported yet"));
     }
-    return result;
+    return code;
 }
-
 string ctGenRegEx(Bytecode[] ir)
 {
     auto r = `
