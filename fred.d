@@ -4245,6 +4245,7 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
         ir = ir[ir[0].length..$];
         break;
     case IR.InfiniteQEnd:
+        testCode = ctQuickTest(ir[IRL!(IR.InfiniteEnd)..$],addr+1);
         r = ctSub( `
             case $$:
                 debug(fred_matching) writeln("Infinited nesting:", infiniteNesting);
@@ -4255,10 +4256,11 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
                     goto case $$;
                 }
                 trackers[infiniteNesting] = index;
-
-                pushState($$, counter);
+                  
+                $$
+                    pushState($$, counter);
                 infiniteNesting--;
-                goto case;`, addr, addr+1, fixup);
+                goto case;`, addr, testCode, addr+1, fixup);
         ir = ir[ir[0].length..$];
         break;
     case IR.RepeatStart, IR.RepeatQStart:

@@ -442,8 +442,11 @@ unittest
         assert(match("aaabaaaabbb",  cr6).hit == "aaab");
         auto cr7 = ctRegex!(`\r.*?$`,"m");
         assert(match("abc\r\nxy",  cr7).hit == "\r\nxy");
+        auto greed =  ctRegex!("<packet.*?/packet>");
+        assert(match("<packet>text</packet><packet>text</packet>", greed).hit
+                == "<packet>text</packet>");
         //CTFE parser BUG is triggered by group 
-        //in the middle (at least not first and not last) in regex
+        //in the middle or alterantion (at least not first and not last)
         version(fred_bug)
         {
         enum testCT = regex(`abc|(edf)|xyz`);
