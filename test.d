@@ -564,7 +564,8 @@ else
     }
     //@@@BUG@@@ template function doesn't work inside unittest block
     version(unittest)
-    String baz(String)(Captures!(String) m)
+    Cap.String baz(Cap)(Cap m)
+    if (is(Cap==Captures!(Cap.String,Cap.DataIndex)))
     {
         return std.string.toUpper(m.hit);
     }
@@ -585,7 +586,7 @@ else
                        == to!String("[n]oon"));
                 assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
                        == to!String(": test2 test1 :"));
-                auto s = fred.replace!(baz!String)(to!String("Strap a rocket engine on a chicken."),
+                auto s = fred.replace!(baz!(Captures!(String,size_t)))(to!String("Strap a rocket engine on a chicken."),
                         regex("[ar]", "g"));
                 assert(s == "StRAp A Rocket engine on A chicken.");
             }

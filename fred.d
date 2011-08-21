@@ -511,9 +511,9 @@ struct NamedGroup
 }
 
 //holds pair of start-end markers for a submatch
-struct Group
+struct Group(DataIndex)
 {
-    size_t begin, end;
+    DataIndex begin, end;
     string toString() const
     {
         auto a = appender!string();
@@ -3296,6 +3296,7 @@ template Regex(Char)
 struct Input(Char)
     if(is(Char :dchar))
 {
+	alias size_t DataIndex;
     alias const(Char)[] String;
     String _origin;
     size_t _index;
@@ -3338,6 +3339,7 @@ struct Input(Char)
     
     struct BackLooper
     {
+        alias size_t DataIndex;
         String _origin;
         size_t _index;
         this(Input input)
@@ -3376,10 +3378,11 @@ template BacktrackingMatcher(alias hardcoded)
 {
     struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(is(Char : dchar))
-    {        
+    {
+        alias Stream.DataIndex DataIndex;
         struct State
         {//top bit in pc is set if saved along with matches
-            size_t index;
+            DataIndex index;
             uint pc, counter, infiniteNesting;
         }
         static assert(State.sizeof % size_t.sizeof == 0);
@@ -3389,17 +3392,17 @@ template BacktrackingMatcher(alias hardcoded)
         RegEx re;           //regex program
         //Stream state
         Stream s;
-        size_t index;
+        DataIndex index;
         dchar front;
         bool exhausted;
         bool seenCr;
         //backtracking machine state
         uint pc, counter;
-        size_t lastState = 0;       //top of state stack
-        size_t[] trackers;
+        DataIndex lastState = 0;       //top of state stack
+        DataIndex[] trackers;
         uint infiniteNesting;
         size_t[] memory;
-        Group[] matches, backrefed; //local slice of matches, global for backref
+        Group!DataIndex[] matches, backrefed; //local slice of matches, global for backref
         Allocator* alloc;
         static if(__traits(hasMember,Stream, "search"))
         {
@@ -3437,7 +3440,7 @@ template BacktrackingMatcher(alias hardcoded)
         
         void newStack()
         {
-            auto chunk = alloc.newArray!(size_t[])(initialStack*(stateSize + 2*re.ngroup)+1);
+            auto chunk = alloc.newArray!(size_t[])(initialStack*(stateSize + 2*re.ngroup*DataIndex.sizeof/size_t.sizeof)+1);
             chunk[0] = cast(size_t)(memory.ptr);
             memory = chunk[1..$];
         }
@@ -3449,14 +3452,14 @@ template BacktrackingMatcher(alias hardcoded)
             alloc = allocator;
             next();
             exhausted = false;
-            trackers = alloc.newArray!(size_t[])(re.ngroup+1);
+            trackers = alloc.newArray!(DataIndex[])(re.ngroup+1);
             newStack();
             backrefed = null;
             static if(kicked)
                 kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
         }
         //lookup next match, fill matches with indices into input
-        bool match(Group matches[])
+        bool match(Group!DataIndex matches[])
         {            
             debug(fred_matching)
             {
@@ -3468,7 +3471,7 @@ template BacktrackingMatcher(alias hardcoded)
             if(re.flags & RegexInfo.oneShot)
             {
                 exhausted = true;
-                size_t start = index;
+                DataIndex start = index;
                 auto m = matchImpl();
                 if(m)
                 {
@@ -3484,7 +3487,7 @@ template BacktrackingMatcher(alias hardcoded)
             for(;;)
             {
                 
-                size_t start = index;
+                DataIndex start = index;
                 if(matchImpl())
                 {//stream is updated here
                     matches[0].begin = start;
@@ -3573,7 +3576,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Wordboundary:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     //at start & end of input
                     if(atStart && wordTrie[front])
                     {
@@ -3600,7 +3603,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Notwordboundary:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     //at start & end of input
                     if(atStart && wordTrie[front])
                         goto L_backtrack;
@@ -3618,7 +3621,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Bol:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     if(atStart)
                         pc += IRL!(IR.Bol);
                     else if((re.flags & RegexOption.multiline) 
@@ -3956,7 +3959,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Wordboundary:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     //at start & end of input
                     if(atStart && wordTrie[front])
                     {
@@ -3983,7 +3986,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Notwordboundary:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     //at start & end of input
                     if(atStart && wordTrie[front])
                         goto L_backtrack;
@@ -4001,7 +4004,7 @@ template BacktrackingMatcher(alias hardcoded)
                     break;
                 case IR.Bol:
                     dchar back;
-                    size_t bi;
+                    DataIndex bi;
                     if(atStart)
                         pc--;
                     else if((re.flags & RegexOption.multiline) 
@@ -4377,7 +4380,7 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
     case IR.InfiniteStart, IR.InfiniteQStart:
         r = ctSub( `
             case $$:
-                trackers[++infiniteNesting] = size_t.max;
+                trackers[++infiniteNesting] = DataIndex.max;
                 goto case $$;`, addr, fixup);
         ir = ir[ir[0].length..$];
         break;
@@ -4583,7 +4586,7 @@ string ctAtomCode(Bytecode[] ir, int addr)
     case IR.Wordboundary:
         code ~= ctSub( `
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 if(atStart && wordTrie[front])
                 {
                     $$
@@ -4608,7 +4611,7 @@ string ctAtomCode(Bytecode[] ir, int addr)
     case IR.Notwordboundary:
         code ~= ctSub( `
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
                     $$
@@ -4629,7 +4632,7 @@ string ctAtomCode(Bytecode[] ir, int addr)
     case IR.Bol:
         code ~= ctSub(`
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 if(atStart)
                     $$
                 else if((re.flags & RegexOption.multiline) 
@@ -4731,21 +4734,21 @@ string ctGenRegEx(Bytecode[] ir)
 }
 
 //State of VM thread
-struct Thread
+struct Thread(DataIndex)
 {
     Thread* next;    //intrusive linked list
     uint pc;
     uint counter;    //loop counter
     uint uopCounter; //counts micro operations inside one macro instruction (e.g. BackRef)
-    Group[1] matches;
+    Group!DataIndex[1] matches;
 }
 
 //head-tail singly-linked list
-struct ThreadList
+struct ThreadList(DataIndex)
 {
-    Thread* tip=null, toe=null;
+    Thread!DataIndex* tip=null, toe=null;
     //add new thread to the start of list
-    void insertFront(Thread* t)
+    void insertFront(Thread!DataIndex* t)
     {
         if(tip)
         {
@@ -4759,7 +4762,7 @@ struct ThreadList
         }
     }
     //add new thread to the end of list
-    void insertBack(Thread* t)
+    void insertBack(Thread!DataIndex* t)
     {
         if(toe)
         {
@@ -4771,7 +4774,7 @@ struct ThreadList
         toe.next = null;
     }
     //move head element out of list
-    Thread* fetch()
+    Thread!DataIndex* fetch()
     {
         auto t = tip;
         if(tip == toe)
@@ -4783,10 +4786,10 @@ struct ThreadList
     //non-destructive iteration of ThreadList
     struct ThreadRange
     {
-        const(Thread)* ct;
+        const(Thread!DataIndex)* ct;
         this(ThreadList tlist){ ct = tlist.tip; }
         @property bool empty(){ return ct is null; }
-        @property const(Thread)* front(){ return ct; }
+        @property const(Thread!DataIndex)* front(){ return ct; }
         @property popFront()
         {
             assert(ct);
@@ -4812,17 +4815,18 @@ enum OneShot { Fwd, Bwd };
 struct ThompsonMatcher(Char, Stream=Input!Char)
     if(is(Char : dchar))
 {
+    alias Stream.DataIndex DataIndex;
     alias const(Char)[] String;
     enum threadAllocSize = 16;
-    Thread* freelist;
-    ThreadList clist, nlist;
-    size_t[] merge;
-    Group[] backrefed;
+    Thread!DataIndex* freelist;
+    ThreadList!DataIndex clist, nlist;
+    DataIndex[] merge;
+    Group!DataIndex[] backrefed;
     RegEx re;           //regex program
     Stream s;
     dchar front;
-    size_t index;
-    size_t genCounter;    //merge trace counter, goes up on every dchar
+    DataIndex index;
+    DataIndex genCounter;    //merge trace counter, goes up on every dchar
     size_t threadSize;
     bool matched;
     bool seenCr;    //true if CR was processed   
@@ -4871,10 +4875,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         re = program;
         s = stream;
         alloc = allocator;
-        threadSize = re.ngroup ? Thread.sizeof+(re.ngroup-1)*Group.sizeof : Thread.sizeof - Group.sizeof;
+        threadSize = re.ngroup ? (Thread!DataIndex).sizeof+(re.ngroup-1)*(Group!DataIndex).sizeof : (Thread!DataIndex).sizeof - (Group!DataIndex).sizeof;
         reserve(re.threadCount);
         if(re.hotspotTableSize)
-            merge = alloc.newArray!(size_t[])(re.hotspotTableSize);
+            merge = alloc.newArray!(DataIndex[])(re.hotspotTableSize);
         genCounter = 0;
         static if(kicked)
         {
@@ -4903,7 +4907,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     /+
         the usual match the input and fill matches
     +/
-    bool match(Group[] matches)
+    bool match(Group!DataIndex[] matches)
     {
         debug(fred_matching)
         {
@@ -4931,8 +4935,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         {
             matched = false;
         }
-        assert(clist == ThreadList.init);
-        assert(nlist == ThreadList.init);
+        assert(clist == (ThreadList!DataIndex).init);
+        assert(nlist == (ThreadList!DataIndex).init);
         if(!atEnd)//if no char 
             for(;;)
             {
@@ -4948,7 +4952,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                         writeln();
                     }
                 }
-                for(Thread* t = clist.fetch(); t; t = clist.fetch())
+                for(Thread!DataIndex* t = clist.fetch(); t; t = clist.fetch())
                 {
                     eval!true(t, matches);
                 }
@@ -4960,7 +4964,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     break;//not a partial match for sure
                 }
                 clist = nlist;
-                nlist = ThreadList.init;
+                nlist = (ThreadList!DataIndex).init;
                 if(clist.tip is null)
                 {
                     if(!searchFn())
@@ -4976,7 +4980,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         //try out all zero-width posibilities
         if(!matched)
             eval!false(createStart(index), matches);//new thread starting at end of input
-        for(Thread* t = clist.fetch(); t; t = clist.fetch())
+        for(Thread!DataIndex* t = clist.fetch(); t; t = clist.fetch())
         {
             eval!false(t, matches);
         }
@@ -4988,7 +4992,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     /+
         handle succesful threads
     +/
-    void finish(const(Thread)* t, Group[] matches)
+    void finish(const(Thread!DataIndex)* t, Group!DataIndex[] matches)
     {
         matches.ptr[0..re.ngroup] = t.matches.ptr[0..re.ngroup];
         debug(fred_matching) 
@@ -5006,9 +5010,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         match thread against codepoint, cutting trough all 0-width instructions
         and taking care of control flow, then add it to nlist
     +/
-    void eval(bool withInput)(Thread* t, Group[] matches)
+    void eval(bool withInput)(Thread!DataIndex* t, Group!DataIndex[] matches)
     {
-        ThreadList worklist;
+        ThreadList!DataIndex worklist;
         debug(fred_matching) writeln("Evaluating thread");
         for(;;)
         {
@@ -5032,7 +5036,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 return;
             case IR.Wordboundary:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
                 {
@@ -5062,7 +5066,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Notwordboundary:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
                 {
@@ -5098,7 +5102,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Bol:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 if(atStart)
                     t.pc += IRL!(IR.Bol);
                 else if((re.flags & RegexOption.multiline) 
@@ -5286,7 +5290,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Backref:
                 uint n = re.ir[t.pc].data;
-                Group* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
+                Group!DataIndex* source = re.ir[t.pc].localRef ? t.matches.ptr : backrefed.ptr;
                 assert(source);
                 if(source[n].begin == source[n].end)//zero-width Backref!
                 {
@@ -5476,7 +5480,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             
     }
     //match the input, evaluating IR without searching
-    bool matchOneShot(OneShot direction)(Group[] matches, uint startPc=0)
+    bool matchOneShot(OneShot direction, DataIndex)(Group!DataIndex[] matches, uint startPc=0)
     {
         debug(fred_matching)
         {
@@ -5487,8 +5491,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             alias eval evalFn;
         else
             alias evalBack evalFn;
-        assert(clist == ThreadList.init);
-        assert(nlist == ThreadList.init);
+        assert(clist == (ThreadList!DataIndex).init);
+        assert(nlist == (ThreadList!DataIndex).init);
         if(!atEnd)//if no char 
         {
             auto startT = createStart(index);
@@ -5515,7 +5519,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                         writeln();
                     }
                 }
-                for(Thread* t = clist.fetch(); t; t = clist.fetch())
+                for(Thread!DataIndex* t = clist.fetch(); t; t = clist.fetch())
                 {
                     evalFn!true(t, matches);
                 }
@@ -5525,7 +5529,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     break;//not a partial match for sure
                 }
                 clist = nlist;
-                nlist = ThreadList.init;
+                nlist = (ThreadList!DataIndex).init;
                 if(!next())
                     break;
             }
@@ -5534,7 +5538,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         debug(fred_matching) writefln("Threaded matching (%s) threads at end",
                                       direction == OneShot.Fwd ? "forward" : "backward");
         //try out all zero-width posibilities
-        for(Thread* t = clist.fetch(); t; t = clist.fetch())
+        for(Thread!DataIndex* t = clist.fetch(); t; t = clist.fetch())
         {
             evalFn!false(t, matches);
         }
@@ -5543,9 +5547,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     /+
         a version of eval that executes IR backwards
     +/
-    void evalBack(bool withInput)(Thread* t, Group[] matches)
+    void evalBack(bool withInput)(Thread!DataIndex* t, Group!DataIndex[] matches)
     {
-        ThreadList worklist;
+        ThreadList!DataIndex worklist;
         debug(fred_matching) writeln("Evaluating thread backwards");
         do
         {
@@ -5561,7 +5565,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             {
             case IR.Wordboundary:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
                 {
@@ -5589,7 +5593,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Notwordboundary:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 //at start & end of input
                 if(atStart && wordTrie[front])
                 {
@@ -5619,7 +5623,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Bol:
                 dchar back;
-                size_t bi;
+                DataIndex bi;
                 if(atStart)
                     t.pc--;
                 else if((re.flags & RegexOption.multiline) 
@@ -5968,10 +5972,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }while(t);
     }
     //get a dirty recycled Thread
-    Thread* allocate()
+    Thread!DataIndex* allocate()
     {
         assert(freelist, "not enough preallocated memory");
-        Thread* t = freelist;
+        Thread!DataIndex* t = freelist;
         freelist = freelist.next;
         return t;
     }
@@ -5979,20 +5983,20 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     void reserve(size_t size)
     {
         void[] mem = alloc.allocate(threadSize*size)[0 .. threadSize*size];
-        freelist = cast(Thread*)&mem[0];
+        freelist = cast(Thread!DataIndex*)&mem[0];
         size_t i;
         for(i=threadSize; i<threadSize*size; i+=threadSize)
-            (cast(Thread*)&mem[i-threadSize]).next = cast(Thread*)&mem[i];
-        (cast(Thread*)&mem[i-threadSize]).next = null;
+            (cast(Thread!DataIndex*)&mem[i-threadSize]).next = cast(Thread!DataIndex*)&mem[i];
+        (cast(Thread!DataIndex*)&mem[i-threadSize]).next = null;
     }
     //dispose a thread
-    void recycle(Thread* t)
+    void recycle(Thread!DataIndex* t)
     {
         t.next = freelist;
         freelist = t;
     }
     //dispose list of threads
-    void recycle(ref ThreadList list)
+    void recycle(ref ThreadList!DataIndex list)
     {
         auto t = list.tip;
         while(t)
@@ -6004,7 +6008,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         list = list.init;
     }
     //creates a copy of master thread with given pc
-    Thread* fork(Thread* master, uint pc, uint counter)
+    Thread!DataIndex* fork(Thread!DataIndex* master, uint pc, uint counter)
     {
         auto t = allocate();
         t.matches.ptr[0..re.ngroup] = master.matches.ptr[0..re.ngroup];
@@ -6014,10 +6018,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         return t;
     }
     //creates a start thread
-    Thread*  createStart(size_t index)
+    Thread!DataIndex*  createStart(size_t index)
     {
         auto t = allocate();
-        t.matches.ptr[0..re.ngroup] = Group.init;
+        t.matches.ptr[0..re.ngroup] = (Group!DataIndex).init;
         t.matches[0].begin = index;
         t.pc = 0;
         t.counter = 0;
@@ -6051,17 +6055,19 @@ popFrontN(c, 2);
 assert(c.empty);
 ----
 */
-public struct Captures(R)
+struct Captures(R,DIndex)
     if(isSomeString!R)
 {
+    alias DIndex DataIndex;
+    alias R String;
 private:
     R _input;
     bool _empty;
     enum smallString = 3;
     union
     {
-        Group[] big_matches;
-        Group[smallString] small_matches;
+        Group!DataIndex[] big_matches;
+        Group!DataIndex[smallString] small_matches;
     }
     uint f, b;
     uint ngroup;
@@ -6075,14 +6081,14 @@ private:
         b = ngroup;
         f = 0;
     }
-    @property Group[] matches()
+    @property Group!DataIndex[] matches()
     {
        return ngroup > smallString ? big_matches : small_matches[0..ngroup];
     }
     void newMatches()
     {
         if(ngroup > smallString)
-            big_matches = new Group[ngroup];
+            big_matches = new Group!DataIndex[ngroup];
     }
 public:
     ///Slice of input prior to the match.
@@ -6179,7 +6185,7 @@ private:
     EngineType _engine;
     Allocator _alloc;
     R _input;
-    Captures!R _captures;
+    Captures!(R,EngineType.DataIndex) _captures;
     //
     this(RegEx prog, R input)
     {
@@ -6187,7 +6193,7 @@ private:
         auto stack = RegionAllocatorStack(1<<20, GCScan.no);
         _alloc = stack.newRegionAllocator();        
         _engine = EngineType(prog, Input!Char(input), &_alloc);
-        _captures = Captures!R(this);
+        _captures = Captures!(R,EngineType.DataIndex)(this);
         _captures._empty = !_engine.match(_captures.matches);
     }
 public:
@@ -6358,8 +6364,9 @@ public R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
 }
 
 //produce replacement string from format using captures for substitue
-void replaceFmt(R, OutR)(R format, Captures!R captures, OutR sink, bool ignoreBadSubs=false)
-    if(isOutputRange!(OutR, ElementEncodingType!R[]))
+void replaceFmt(R, Capt, OutR)(R format, Capt captures, OutR sink, bool ignoreBadSubs=false)
+    if(isOutputRange!(OutR, ElementEncodingType!R[]) &&
+        isOutputRange!(OutR, ElementEncodingType!(Capt.String)[]))
 {
     enum State { Normal, Escape, Dollar };
     auto state = State.Normal;
