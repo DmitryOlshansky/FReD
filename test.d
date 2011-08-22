@@ -657,7 +657,7 @@ int main(string[] argv)
         {
             auto re = regex(s, argv.length > 3 ? argv[3] : "");
             write(" OK \n");
-            re.print();
+            debug re.print();
         }
         catch(Exception ex)
         {
