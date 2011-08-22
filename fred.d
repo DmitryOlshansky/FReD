@@ -3317,7 +3317,9 @@ struct Input(Char)
         res = std.utf.decode(_origin, _index);
         return true;
     }
-    
+    @property bool atEnd(){
+        return _index>=_origin.length;
+    }
     bool search(Kickstart)(ref Kickstart kick, ref dchar res, ref size_t pos)
     {
         size_t idx = kick.search(_origin, _index);
@@ -3358,6 +3360,7 @@ struct Input(Char)
             res = _origin[0.._index].back;
             return true;
         }
+        @property atEnd(){ return _index==0 || _index==std.utf.strideBack(_origin, _index); }
         @property auto loopBack(){   return Input(_origin, _index); }
         
         //support for backtracker engine, might not be present
@@ -3365,6 +3368,139 @@ struct Input(Char)
         
         String opSlice(size_t start, size_t end){   return _origin[end..start]; }
         //index of at End position
+        @property size_t lastIndex(){   return 0; }
+    }
+    @property auto loopBack(){   return BackLooper(this); }
+}
+
+/// Test stream against simple UTF-string stream abstraction (w/o normalization and such)
+struct StreamTester(Char)
+    if (is(Char:dchar))
+{
+    alias ulong DataIndex;
+    alias const(Char)[] String;
+    Input!(Char) refStream;
+    String allStr;
+    StreamCBuf!(Char) stream;
+    size_t[] splits;
+    size_t pos;
+    
+    /// adds the next chunk to the stream
+    bool addNextChunk(){
+        if (splits.length<pos){
+            ++pos;
+            if (pos<splits.length){
+                assert(splits[pos-1]<=splits[pos],"splits is not ordered");
+                stream.addChunk(allStr[splits[pos-1]..splits[pos]]);
+            } else {
+                stream.addChunk(allStr[splits[pos-1]..$]);
+                stream.hasEnd=true;
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+    /// constructs Input object out of plain string
+    this(String input, size_t[] splits)
+    {
+        allStr=input;
+        refStream=Input!(Char)(input,splits);
+        stream=new StreamCBuf!(Char)();
+        pos=0;
+        if (splits.length) {
+            stream.addChunk(allStr);
+            stream.hasEnd=true;
+        } else {
+            stream.addChunk(allStr[0..splits[0]]);
+        }
+    }
+    /// codepoint at current stream position
+    bool nextChar(ref dchar res, ref size_t pos)
+    {
+        bool ret=stream.nextChar(res,pos);
+        dchar refRes;
+        size_t refPos;
+        if (!res) {
+            if (stream.hasEnd && refStream.nextChar(refRes,refPos)) {
+                throw new Exception("stream eneded too early",__FILE__,__LINE__);
+            }
+            return false;
+        } else {
+            bool refRet=refStream.nextChar(refRes,refPos);
+            enforce(refRet==ret,"stream contiinued past end");
+            enforce(refRes==res,"incorrect char "~res~" vs "~refRes);
+            enforce(refPos==(pos &~(255UL<<48)),"incorrect pos, string wans't normalized???");
+            return true;
+        }
+    }
+    @property bool atEnd(){
+        enforce(!stream.atEnd || refStream.atEnd,"stream ended too early");
+        return _index>=_origin.length;
+    }
+    bool search(Kickstart)(ref Kickstart kick, ref dchar res, ref ulong pos)
+    {
+        bool ret=stream.search(kick,res,pos);
+        dchar refRes;
+        size_t refPos;
+        if (ret){
+            bool refRet=refStream.search(kick,refRes,refPos);
+            enforce(refRet,"stream found spurious kickstart match");
+            enforce(refRes==res,"stream found different kickstart match "~res~" vs "~refRes);
+            enforce(refPos==(pos &~(255UL<<48)),"stream found different pos for kickstart match, non normalized input?: "~to!string(pos)~" vs "~to!string(refPos));
+        } else if (hasEnd) {
+            enforce(!refStream.search(kick,refRes,refPos),"stream missed kickstart match");
+        }
+        return ret;
+    }
+    ///index of at End position
+    @property size_t lastIndex(){   return _origin.length; }
+        
+    String opSlice(size_t start, size_t end){
+        return _origin[start..end];
+    }
+    
+    struct BackLooper
+    {
+        alias ulong DataIndex;
+        Input!(Char).BackLooper refBacklooper;
+        StreamCBuf!(Char).BackLooper backlooper;
+        ulong startPos;
+
+        this(Input!(Char).BackLooper refBacklooper,StreamCBuf!(Char).BackLooper backlooper)
+        {
+            this.refBacklooper=refBacklooper;
+            this.backlooper=backlooper;
+        }
+        bool nextChar(ref dchar res,ref ulong pos)
+        {
+            bool ret=backlooper.nextChar(res,pos);
+            if (ret){
+                dchar refRes;
+                size_t refPos;
+                bool refRet=refBacklooper.nextChar(refRes,refPos);
+                enforce(refRet,"stream backlooper goes back beyond start");
+                enforce(refRes==res,"stream backlooper has different char "~res~" vs "~refRes);
+                enforce(refPos==(pos &~(255UL<<48)),"stream backlooper has different pos: "~to!string(pos)~" vs "~to!string(refPos));
+            } else if (refBacklooper.nextChar(refPos,refPos)){
+                enforce(refPos+historySize<=(startPos &~(255UL<<48)),"stream backlooper stopped before historyWindow");
+            }
+            return ret;
+        }
+        @property atEnd(){
+            if (refBacklooper.atEnd){
+                
+            }
+            enforce(!refBacklooper.atEnd || refStream.atEnd,"stream ended too early");
+            return stream.atEnd;
+        }
+        @property auto loopBack(){   return Input(_origin, _index); }
+        
+        ///support for backtracker engine, might not be present
+        void reset(size_t index){   _index = index+std.utf.stride(_origin, index);  }
+        
+        String opSlice(size_t start, size_t end){   return _origin[end..start]; }
+        ///index of at End position
         @property size_t lastIndex(){   return 0; }
     }
     @property auto loopBack(){   return BackLooper(this); }
@@ -4842,7 +4978,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     //true if it's start of input
     @property bool atStart(){   return index == 0; }
     //true if it's end of input
-    @property bool atEnd(){  return index == s.lastIndex; }
+    @property bool atEnd(){  return s.atEnd; }
     //
     bool next()
     {
@@ -4904,6 +5040,11 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         debug(fred_allocation) writeln("ThompsonVM postblit!");
         //free list is  efectively shared ATM
     }
+    enum MatchResult{
+        NoMatch,
+        PartialMatch,
+        Match,
+    }
     /+
         the usual match the input and fill matches
     +/
@@ -4917,9 +5058,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
            return false;
         if(re.flags & RegexInfo.oneShot)
         {
-            next();
+            next(); // why this is not 
             exhausted = true;
-            return matchOneShot!(OneShot.Fwd)(matches);
+            return matchOneShot!(OneShot.Fwd)(matches)==MatchResult.Match;
         }
         static if(kicked)
         {
@@ -4927,7 +5068,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         else
             auto searchFn = &this.next;
-        if(!matched)
+        if((!matched) && clist.empty)
         {
            searchFn();
         }
@@ -4935,8 +5076,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         {
             matched = false;
         }
-        assert(clist == (ThreadList!DataIndex).init);
-        assert(nlist == (ThreadList!DataIndex).init);
+        //assert(clist == (ThreadList!DataIndex).init);
+        //assert(nlist == (ThreadList!DataIndex).init);
         if(!atEnd)//if no char 
             for(;;)
             {
@@ -4970,8 +5111,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     if(!searchFn())
                         break;
                 }
-                else if(!next())
+                else if(!next()){
+                    if (!atEnd) return false;
                     break;
+                }
             }
         else
             exhausted = true;
@@ -5335,7 +5478,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 //backMatch
                 matcher.next(); //load first character from behind
-                bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
+                bool match = (matcher.matchOneShot!(OneShot.Bwd)(t.matches)==MatchResult.Match) ^ (re.ir[t.pc].code == IR.LookbehindStart);
                 freelist = matcher.freelist;
                 if(match)
                 {
@@ -5370,7 +5513,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.index = index;
                 matcher.re.ngroup = me - ms;
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
-                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart))!=MatchResult.Match;
                 freelist = matcher.freelist;
                 s.reset(index);
                 next();
@@ -5479,8 +5622,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
             
     }
+    enum uint RestartPc=uint.max;
     //match the input, evaluating IR without searching
-    bool matchOneShot(OneShot direction, DataIndex)(Group!DataIndex[] matches, uint startPc=0)
+    MatchResult matchOneShot(OneShot direction, DataIndex)(Group!DataIndex[] matches, uint startPc=0)
     {
         debug(fred_matching)
         {
@@ -5491,17 +5635,19 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             alias eval evalFn;
         else
             alias evalBack evalFn;
-        assert(clist == (ThreadList!DataIndex).init);
-        assert(nlist == (ThreadList!DataIndex).init);
+        assert(clist == (ThreadList!DataIndex).init || startPc==RestartPc); // incorrect after a partial match
+        assert(nlist == (ThreadList!DataIndex).init || startPc==RestartPc);
         if(!atEnd)//if no char 
         {
-            auto startT = createStart(index);
-            static if(direction == OneShot.Fwd)
-                startT.pc = startPc;
-            else
-                startT.pc = cast(uint)re.ir.length-IRL!(IR.LookbehindEnd);
-            genCounter++;
-            evalFn!true(startT, matches);
+            if (startPc!=RestartPc){
+                auto startT = createStart(index);
+                static if(direction == OneShot.Fwd)
+                    startT.pc = startPc;
+                else
+                    startT.pc = cast(uint)re.ir.length-IRL!(IR.LookbehindEnd);
+                genCounter++;
+                evalFn!true(startT, matches);
+            }
             for(;;)
             {
                 genCounter++;
@@ -5530,8 +5676,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 clist = nlist;
                 nlist = (ThreadList!DataIndex).init;
-                if(!next())
+                if(!next()){
+                    if (!atEnd) return MatchResult.PartialMatch;
                     break;
+                }
             }
         }
         genCounter++; //increment also on each end
@@ -5542,7 +5690,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         {
             evalFn!false(t, matches);
         }
-        return matched;
+        return (matched?MatchResult.Match:MatchResult.NoMatch);
     }
     /+
         a version of eval that executes IR backwards
@@ -5853,7 +6001,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.re.ngroup = re.ir[t.pc+2].raw - re.ir[t.pc+1].raw;
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 matcher.next(); //fetch a char, since direction was reversed
-                bool match = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
+                bool match = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart))==MatchResult.NoMatch;
                 freelist = matcher.freelist;
                 if(match)
                 {
@@ -5875,7 +6023,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.index = index;
                 matcher.re.ngroup = me - ms;
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
-                bool nomatch = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ positive;
+                bool nomatch = matcher.matchOneShot!(OneShot.Bwd)(t.matches) != MatchResult.NoMatch;
                 freelist = matcher.freelist;
                 s.reset(index);
                 next();
