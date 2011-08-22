@@ -1,23 +1,24 @@
 //Written in the D programming language
 /++
-  $(D fred) is an acronim for Fast Regular Expressions for D, a proposed replacement for $(D std.regex).
+  $(D FReD) is an acronym for Fast Regular Expressions for D, a proposed replacement for $(D std.regex).
   
   $(LUCKY Regular expressions) are commonly used method of pattern matching 
   on strings, with $(I regex) being a catchy word for a pattern in this domain 
   specific language. Typical problems usually solved by regular expressions
-  include validation of input in web forms, find & replace in various text processing utilities.
+  include validation of user input and ubiquitous find & replace in various text processing utilities.
   
-  The general usage guideline is keeping regex complexity on the side of simplicity, as it's capabilities 
-  are best suited to purely character level manipulation,  and as such are ill suited for tasks
+  The general usage guideline is keeping regex complexity on the side of simplicity, as its capabilities 
+  reside in purely character-level manipulation,  and as such are ill suited for tasks
   involving higher level invariants like matching an integer number $(U bounded) in [a,b] interval.
   Checking of this sort of higher level stuff is better left to a separate postprocessing steps.
+
   Synposis:
   ---
   import fred;
   import std.stdio;
 
-  //print out all possible dd/mm/yy(yy) dates figuring in user input
-  auto r = regex(r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b");
+  //print out all possible dd/mm/yy(yy) dates found in user input
+  auto r = regex(r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b", "g");//g - global, find all matches
   foreach(line; stdin.byLine)
   {
     foreach(c; match(line, r))
@@ -32,33 +33,74 @@
   assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
 
   ...
+  //test if a string consists of letters
+  assert(match("Letter", `^\p{L}+$`));
 
   ---
 
-  Basic Syntax 
-
+  The basic syntax shouldn't surprize experienced users of regular expressions. 
+  Thankfully, nowdays the web is bustling with resources to help newcommers, and a good reference with tutorial 
+  could be found on $(WEB www.regular-expressions.info, regular-expressions). 
+  For specifics search up ECMAScript flavor.
+  
  $(BOOKTABLE Flags controlling the behavior of pattern matching
     $(TR $(TH Flag) $(TH Effect))
     $(TR $(TD $(B g)) $(TD global; repeat over the whole input ))
     $(TR $(TD $(B i)) $(TD case insensitive))
-    $(TR $(TD $(B m)) $(TD multiline, match $ on line separators as well as end of input)))
-
+    $(TR $(TD $(B m)) $(TD multiline, match $ on line separators as well as end of input))
+    $(TR $(TD $(B x)) $(TD free-form syntax, ignores whitespace in pattern, 
+        useful for formating complex regular expressions))
+ )
  
   Advanced Syntax
 
+  Aside from providing a well known features of regular expressions found in e.g. JavaScript, 
+  FReD does support the following extensions:
+  $(UL
+    $(LI Named groups, with Python style syntax (?P<name>re), 
+        names working like aliases in addition to numbers.)
+    $(LI Arbitrary length and complexity lookbehind with common syntax 
+        (?<=re) and (?<!re), including lookahead in lookbehind and vise-versa )
+    $(LI Unicode properities such as Scripts, Blocks and 
+        common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.)
+  )
+
+
   Unicode support
 
-  This library provides full Level 1 support according to $(WEB http://unicode.org/reports/tr18/, UTS 18).
-  
-  All matches returned by pattern matching functionallity are slices of original input. 
-  With exception being replace family of functions that generate new string based on input.
+  This library provides full Level 1 support* according to 
+    $(WEB http://unicode.org/reports/tr18/, UTS 18). Specifically:
+  $(UL 
+    $(LI 1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ)
+    $(LI 1.2 Unicode properties)
+    $(LI 1.3 Charactar classes with set operations)
+    $(LI 1.4 Word boundaries use full set of "word" characters)
+    $(LI 1.5 Using simple casefolding to match case 
+        insensitevely across full range of codepoints)
+    $(LI 1.6 Respecting line breaks as any of  
+        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A)
+    $(LI 1.7 Operating on codepoint level)   
+  )
+  *With exception being point 1.1.1, as of yet, normalization of input 
+    is expected to be enforced by user.
+
+ $(BOOKTABLE Syntax mostly follows techincal standard
+   $(TR $(TD \p{PropertyName}, \P{PropertyName}) $(TD unicode property sets, 
+syntax for unicode blocks is InBlockName))
+   $(TR $(TD [a||b], [a--b], [a~~b], [a&&b]) $(TD where a, b 
+    are arbitrary [...] sets; means union, set difference,
+    symmetric set difference, and intersection respectively))
+  )
+  All matches returned by pattern matching functionality in this library
+  are slices of original input. With sole exception being replace family of functions
+  that generate new string from input.
  
   License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
  
-  Authors: Dmitry Olshansky
+  Authors: Dmitry Olshansky, API and utility constructs 
+    based on original $(D std.regex) by Walter Bright and Andrei Alexandrescu
   
-  Copyright: 
-    Copyright(c) Dmitry Olshansky, 2011
+  Copyright: Copyright Dmitry Olshansky, 2011
  +/
 
 module fred;
@@ -522,7 +564,7 @@ struct Group
     }
 }
 
-/// $(D Interval)  represents interval of codepoints: [a,b).
+/// $(D Interval)  represents an interval of codepoints: [a,b).
 struct Interval
 {
     //
@@ -531,15 +573,16 @@ struct Interval
         uint begin, end;
     }
 
-    ///create interval containig a single character $(D ch).
+    ///Create interval containig a single character $(D ch).
     this(dchar ch)
     {
         begin = ch;
         end = ch+1;
     }
+    
     /**
         Create Interval from inclusive range [$(D a),$(D b)]. Contrary to internal structure, inclusive is chosen for interface.
-        The reason fro this is usability e.g. it's would force user to type the unweildy Interval('a','z'+1) all over the place.
+        The reason fro this is usability e.g. it's would force user to type the unwieldy Interval('a','z'+1) all over the place.
     */
     this(dchar a, dchar b)
     {
@@ -547,6 +590,7 @@ struct Interval
         begin = a;
         end = b+1;
     }
+    
     ///
     string toString()const
     {
@@ -787,8 +831,8 @@ public:
     /**
         Test if ch is present in this set, linear search done in $(BIGOH N) operations 
         on number of $(U intervals) in this set.
-        In practice linear search outperforms binary search untill a certian threshold,
-        in general however it's recommended to use overloaded indexing operator.
+        In practice linear search outperforms binary search until a certain threshold,
+        unless this is the case however it's recommended to use overloaded indexing operator.
     */
     bool scanFor(dchar ch) const
     {
@@ -920,7 +964,7 @@ public:
 }    
 
 /**
-    $(D CodepointTrie) is 1-level  $(LUCKY Trie)  datastructure focused on lookup speeds.
+    $(D CodepointTrie) is 1-level  $(LUCKY Trie)  data structure focused on lookup speeds.
     Primary use case is to convert a previously obtained CodepointSet 
     to speed up subsequent element lookup.
 
@@ -2473,6 +2517,7 @@ private:
             return 0;
         return backrefed[n/32] & (1<<(n&31));
     }
+    //
     void checkIfOneShot()
     {
         if(flags & RegexOption.multiline)
@@ -2579,7 +2624,7 @@ private:
             assert(v == 0, text("unclosed group, bogus # is in range ", i*32, " - ",i*32+32));
     }
     //print out disassembly a program's IR
-    void print() const
+    debug public void print() const
     {
         import std.stdio;
         writefln("PC\tINST\n");
@@ -2629,7 +2674,7 @@ uint lookupNamedGroup(String)(NamedGroup[] dict,String name)
 
 /**
     A $(D RegEx) object that contains specifically generated machine code. 
-    As tailored code is asociated with the type as alias parameter, 
+    As tailored code is associated  with the type as alias parameter, 
     to store these en masse use $(D std.typecons.Tuple).
 */
 public struct NativeRegEx(alias Fn)
@@ -3455,6 +3500,24 @@ template BacktrackingMatcher(alias hardcoded)
             static if(kicked)
                 kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
         }
+        //
+        bool matchFinalize()
+        {
+            size_t start = index;
+            if(matchImpl())
+            {//stream is updated here
+                matches[0].begin = start;
+                matches[0].end = index;
+                if(!(re.flags & RegexOption.global) || atEnd)
+                    exhausted = true;
+                if(start == index)//empty match advances input
+                    next();
+                return true;
+            }
+            else
+                return false;
+        }
+        
         //lookup next match, fill matches with indices into input
         bool match(Group matches[])
         {            
@@ -3484,21 +3547,20 @@ template BacktrackingMatcher(alias hardcoded)
             for(;;)
             {
                 
-                size_t start = index;
-                if(matchImpl())
-                {//stream is updated here
-                    matches[0].begin = start;
-                    matches[0].end = index;
-                    if(!(re.flags & RegexOption.global) || atEnd)
-                        exhausted = true;
-                    if(start == index)//empty match advances input
-                        next();
+                if(matchFinalize())
                     return true;
-                }
-                else if(!atEnd)
-                    searchFn();
                 else
-                    break;
+                {
+                    if(atEnd)
+                        break;
+                    searchFn();  
+                    if(atEnd)
+                    {
+                        exhausted = true;
+                        return matchFinalize();
+                    }
+                }
+                    
             }
             exhausted = true;
             return false;
@@ -5047,8 +5109,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordTrie[front] != 0;
-                    bool ab = wordTrie[back] != 0;
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
                         t.pc += IRL!(IR.Wordboundary);
@@ -5083,7 +5145,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordTrie[front] != 0;
+                    bool af = wordTrie[front];
                     bool ab = wordTrie[back]  != 0;
                     if(af ^ ab)
                     {
@@ -5576,8 +5638,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordTrie[front] != 0;
-                    bool ab = wordTrie[back] != 0;
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
                         t.pc--;
@@ -5606,8 +5668,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 else if(s.loopBack.nextChar(back, index))
                 {
-                    bool af = wordTrie[front] != 0;
-                    bool ab = wordTrie[back]  != 0;
+                    bool af = wordTrie[front];
+                    bool ab = wordTrie[back];
                     if(af ^ ab)
                     {
                         recycle(t);
@@ -6167,8 +6229,8 @@ public:
 
 /**
     A search engine state, as returned by $(D match) family of functions. 
-    Effectively is's a forward range of Captures!R, produced by lazily searching for matches in a input. 
-    alias Engine specifies an engine type to use druing  matching, and is automatically deduced in call to $(D match)/$(D bmatch).
+    Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a input. 
+    alias Engine specifies an engine type to use during  matching, and is automatically deduced in call to $(D match)/$(D bmatch).
 */
 public struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
@@ -6207,7 +6269,7 @@ public:
         return _captures.hit;
     }
     /**
-        Functionallity for processing subsequent matches of global regexes via range interface:
+        Functionality for processing subsequent matches of global regexes via range interface:
         ---
         import fred;
         auto m = match("Hello, world!", regex(`\w+`, "g"));
@@ -6232,7 +6294,7 @@ public:
     ///Test if this match object is empty.
     @property bool empty(){ return _captures._empty; }
     
-    ///Same as !(x.empty), provided for its convience in conditional statements.
+    ///Same as !(x.empty), provided for its convenience  in conditional statements.
     T opCast(T:bool)(){ return !empty; }
     //
     @property auto captures(){ return _captures; }
@@ -6282,6 +6344,7 @@ public template ctRegex(string pattern, string flags=[])
 
 /**
     Initiate matching of input to static regex pattern re, using Backtracking matching scheme (precompiled to machine code).
+    Returns a $(D RegexMatch) object holding engine state after first match.
 */
 public auto match(R, alias s)(R input, NativeRegEx!s re)
 {
@@ -6290,7 +6353,8 @@ public auto match(R, alias s)(R input, NativeRegEx!s re)
 
 /**
     Initiate matching of input to regex pattern re, using Thompson NFA matching scheme.
-    This is the recomended method for matching regular expression.
+    Returns a $(D RegexMatch) object holding engine state after first match.
+    This is the recommended method for matching regular expression.
 */
 public auto match(R)(R input, RegEx re)
 {
@@ -6306,6 +6370,7 @@ public auto match(R, String)(R input, String pat)
 
 /**
     Initiate matching of input to regex pattern re, using traditional backtracking matching scheme.
+    Returns a $(D RegexMatch) object holding engine state after first match.
 */
 public auto bmatch(R)(R input, RegEx re)
 {
@@ -6320,7 +6385,27 @@ public auto bmatch(R, String)(R input, String pat)
 }
 
 /**
+    Construct a new string from $(D input) by replacing each match with 
+    string generated form match accroding to $(D format) specifier.
+    To replace all occurances use regex with "g" flag, otherwise first occurence get replaced.
+
+    Params: 
+    input = string to search
+    re = compiled regualr expression to use
+    format = format string to generate replacements from
     
+    Example:
+    ---
+    //Comify a number
+    auto com = regex(r"(?<=\d)(?=(\d\d\d)+\b)","g");
+    assert(replace("12000 + 42100 = 56000", com, ",") == "12,000 + 42,100 = 56,100");
+    ---
+
+    The replacement format can reference the matches using the $&amp;, $$,
+    $', $`, $0 .. $99 notation:
+    ---
+    assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
+    ---
 */
 public R replace(R, alias scheme=match)(R input, RegEx re, R format)
     if(isSomeString!R)
@@ -6338,8 +6423,28 @@ public R replace(R, alias scheme=match)(R input, RegEx re, R format)
     return app.data;
 }
 
-/**
-    
+/*
+    Search string for matches with regular expression pattern with
+    attributes.  Pass captures for each match to function $(D fun).  Replace each match
+    with the return value from dg.
+
+    Params:
+    s = String to search.
+    pattern = Regular expression pattern.
+    dg = delegate to use
+
+    Returns: the resulting string.
+    Example:
+    Capitalize the letters 'a' and 'r':
+    ---
+    string baz(Captures!(string) m)
+    {
+        return std.string.toUpper(m.hit);
+    }
+    auto s = replace!(baz)("Strap a rocket engine on a chicken.",
+            regex("[ar]", "g"));
+    assert(s == "StRAp A Rocket engine on A chicken.");
+    ---
 */
 public R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
     if(isSomeString!R)
@@ -6440,7 +6545,8 @@ L_Replace_Loop:
 
 /**
 Range that splits a string using a regular expression as a
-separator. With split being eager version producing an array of string slices in one go.
+separator.
+
 Example:
 ----
 auto s1 = ", abc, de,  fg, hi, ";
