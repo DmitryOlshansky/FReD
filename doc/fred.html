@@ -86,7 +86,7 @@ function listanchors()
 </div>
 </form>
 <div id="toctop">
-    <ul><li><a href="../index.html" title="D Programming Language">D</a></li>
+    <ul>	<li><a href="../index.html" title="D Programming Language">D</a></li>
 	<li><a href="../spec.html" title="D Language Specification">Language</a></li>
 	<li><a href="../phobos/index.html" title="D Runtime Library">Phobos</a></li>
 	<li><a href="../phobos-prerelease/index.html" title="D Runtime Library (prerelease)">Phobos (prerelease)</a></li>
@@ -94,12 +94,13 @@ function listanchors()
     </ul>
 </div>
 </div>
+
     
 <div class="navblock">
-    <ul><li><a href="object.html" title="root of object hierarchy">object</a></li>
+    <ul>	<li><a href="object.html" title="root of object hierarchy">object</a></li>
     </ul>
     <h2><a href="index.html#std" title="D standard modules">std</a></h2>
-    <ul><li><a href="std_algorithm.html" title="General-purpose algorithms">std.algorithm</a></li>
+    <ul>	<li><a href="std_algorithm.html" title="General-purpose algorithms">std.algorithm</a></li>
 	<li><a href="std_array.html" title="Array functions">std.array</a></li>
 	<li><a href="std_ascii.html" title="Functions which operate on ASCII characters">std.ascii</a></li>
 	<li><a href="std_base64.html" title="Encode/decode base64 format">std.base64</a></li>
@@ -176,11 +177,11 @@ function listanchors()
 	<li><a href="index.html#std_c_linux" title="C Linux API">std.c.linux</a></li>
     </ul>
     <h2><a href="index.html#etc" title="D etc modules">etc</a></h2>
-    <ul><li><a href="etc_c_curl.html" title="Interface to libcurl library">etc.c.curl</a></li>
+    <ul>	<li><a href="etc_c_curl.html" title="Interface to libcurl library">etc.c.curl</a></li>
 	<li><a href="etc_c_zlib.html" title="Interface to zlib library">etc.c.zlib</a></li>
     </ul>
     <h2><a href="index.html#core" title="D core modules">core</a></h2>
-    <ul><li><a href="core_atomic.html" title="Atomic operations">core.atomic</a></li>
+    <ul>	<li><a href="core_atomic.html" title="Atomic operations">core.atomic</a></li>
 	<li><a href="core_bitop.html" title="Bitwise operations">core.bitop</a></li>
 	<li><a href="core_cpuid.html" title="CPU identification">core.cpuid</a></li>
 	<li><a href="core_exception.html" title="Root of exception hierarchy">core.exception</a></li>
@@ -198,6 +199,7 @@ function listanchors()
 	<li><a href="core_sync_semaphore.html" title="Semaphores">core.sync.semaphore</a></li>
     </ul>
 </div>
+
 </div>
 <div id="content">
     <h1>fred</h1>
@@ -210,6 +212,7 @@ function listanchors()
   specific language. Typical problems usually solved by regular expressions
   include validation of user input and ubiquitous find &amp; replace in various text processing utilities.
 <p></p>
+
 
   The general usage guideline is keeping regex complexity on the side of simplicity, as its capabilities
   reside in purely character-level manipulation,  and as such are ill suited for tasks
@@ -243,30 +246,25 @@ function listanchors()
 </pre>
 
   The basic syntax shouldn't surprize experienced users of regular expressions.
-  Thankfully, nowdays the web is bustling with resources to help newcommers, and a good reference with tutorial
+  Thankfully, nowdays the web is bustling with resources to help newcomers, and a good reference with tutorial
   could be found on <a href="http://www.regular-expressions.info">regular-expressions</a>.
   For specifics search up ECMAScript flavor.
 <p></p>
 
- <center><table cellspacing=0 cellpadding=5 class=book><caption>Flags controlling the behavior of pattern matching
-    <tr><th>Flag</th> <th>Effect</th></tr>
+
+ <center><table cellspacing=0 cellpadding=5 class=book><caption>Flags controlling the behavior of pattern matching</caption>    <tr><th>Flag</th> <th>Effect</th></tr>
     <tr><td valign=top><b>g</b></td> <td valign=top>global; repeat over the whole input </td></tr>
     <tr><td valign=top><b>i</b></td> <td valign=top>case insensitive</td></tr>
     <tr><td valign=top><b>m</b></td> <td valign=top>multiline, match $ on line separators as well as end of input</td></tr>
     <tr><td valign=top><b>x</b></td> <td valign=top>free-form syntax, ignores whitespace in pattern,
         useful for formating complex regular expressions</td></tr>
- </caption>Flags controlling the behavior of pattern matching
-    <tr><th>Flag</th> <th>Effect</th></tr>
-    <tr><td valign=top><b>g</b></td> <td valign=top>global; repeat over the whole input </td></tr>
-    <tr><td valign=top><b>i</b></td> <td valign=top>case insensitive</td></tr>
-    <tr><td valign=top><b>m</b></td> <td valign=top>multiline, match $ on line separators as well as end of input</td></tr>
-    <tr><td valign=top><b>x</b></td> <td valign=top>free-form syntax, ignores whitespace in pattern,
-        useful for formating complex regular expressions</td></tr>
- </table></center>
+  </table></center>
 <p></p>
+
 
   Advanced Syntax
 <p></p>
+
 
   Aside from providing a well known features of regular expressions found in e.g. JavaScript,
   FReD does support the following extensions:
@@ -279,10 +277,13 @@ function listanchors()
   </ul>
 <p></p>
 
+
 <p></p>
+
 
   Unicode support
 <p></p>
+
 
   This library provides full Level 1 support* according to
     <a href="http://http://unicode.org/reports/tr18/">UTS 18</a>. Specifically:
@@ -300,14 +301,8 @@ function listanchors()
     is expected to be enforced by user.
 <p></p>
 
- <center><table cellspacing=0 cellpadding=5 class=book><caption>Syntax mostly follows techincal standard
-   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
-syntax for unicode blocks is InBlockName</td></tr>
-   <tr><td valign=top>[a||b], [a--b], [a~~b], [a&amp;&b]</td> <td valign=top>where a, b
-    are arbitrary [...] sets; means union, set difference,
-    symmetric set difference, and intersection respectively</td></tr>
-  </caption>Syntax mostly follows techincal standard
-   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
+
+ <center><table cellspacing=0 cellpadding=5 class=book><caption>Syntax mostly follows techincal standard</caption>   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
 syntax for unicode blocks is InBlockName</td></tr>
    <tr><td valign=top>[a||b], [a--b], [a~~b], [a&amp;&b]</td> <td valign=top>where a, b
     are arbitrary [...] sets; means union, set difference,
@@ -344,6 +339,7 @@ syntax for unicode blocks is InBlockName</td></tr>
 <dt class="d_decl">const string <a name="toString"></a><span class="ddoc_psymbol">toString</span>();
 </dt>
 <dd><p></p>
+
 </dd>
 </dl>
 </dd>
@@ -697,6 +693,7 @@ separator.
 <dl><dt class="d_decl">this(string <i>msg</i>);
 </dt>
 <dd><p></p>
+
 </dd>
 </dl>
 </dd>
@@ -724,3 +721,4 @@ Page generated by <a href="http://www.digitalmars.com/d/2.0/ddoc.html">Ddoc</a>.
 
 </body>
 </html>
+

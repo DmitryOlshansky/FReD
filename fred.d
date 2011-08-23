@@ -39,18 +39,18 @@
   ---
 
   The basic syntax shouldn't surprize experienced users of regular expressions. 
-  Thankfully, nowdays the web is bustling with resources to help newcommers, and a good reference with tutorial 
+  Thankfully, nowdays the web is bustling with resources to help newcomers, and a good reference with tutorial 
   could be found on $(WEB www.regular-expressions.info, regular-expressions). 
   For specifics search up ECMAScript flavor.
   
- $(BOOKTABLE Flags controlling the behavior of pattern matching
+ $(BOOKTABLE Flags controlling the behavior of pattern matching,
     $(TR $(TH Flag) $(TH Effect))
     $(TR $(TD $(B g)) $(TD global; repeat over the whole input ))
     $(TR $(TD $(B i)) $(TD case insensitive))
     $(TR $(TD $(B m)) $(TD multiline, match $ on line separators as well as end of input))
     $(TR $(TD $(B x)) $(TD free-form syntax, ignores whitespace in pattern, 
         useful for formating complex regular expressions))
- )
+  )
  
   Advanced Syntax
 
@@ -84,7 +84,7 @@
   *With exception being point 1.1.1, as of yet, normalization of input 
     is expected to be enforced by user.
 
- $(BOOKTABLE Syntax mostly follows techincal standard
+ $(BOOKTABLE Syntax mostly follows techincal standard,
    $(TR $(TD \p{PropertyName}, \P{PropertyName}) $(TD unicode property sets, 
 syntax for unicode blocks is InBlockName))
    $(TR $(TD [a||b], [a--b], [a~~b], [a&&b]) $(TD where a, b 
