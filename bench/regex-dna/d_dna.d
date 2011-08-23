@@ -16,7 +16,7 @@ int main(string[] args)
 
     string[] patterns =  [
         "agggtaaa|tttaccct",
-        "cgt]gggtaaa|tttaccc[acg]",
+        "[cgt]gggtaaa|tttaccc[acg]",
         "a[act]ggtaaa|tttacc[agt]t",
         "ag[act]gtaaa|tttac[agt]ct",
         "agg[act]taaa|ttta[agt]cct",
