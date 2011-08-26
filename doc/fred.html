@@ -1,0 +1,724 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+   "http://www.w3.org/TR/html4/loose.dtd">
+<html lang='en'>
+
+<!--
+	Copyright (c) 1999-2010 by Digital Mars
+	All Rights Reserved Written by Walter Bright
+	http://www.digitalmars.com
+  -->
+
+<head>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" >
+<title>fred - D Programming Language - Digital Mars</title>
+<link rel="stylesheet" type="text/css" href="css/style.css">
+
+<script type="text/javascript">
+function listanchors()
+{
+    if (typeof inhibitQuickIndex !== 'undefined') return;
+    var a = document.getElementById("quickindex");
+    if (!a) return;
+    var newText = "";
+    var hash = new Array;
+    var n = 0;
+    var values = new Array;
+    // List all anchors.
+    for (var i = 0; i < document.anchors.length; i++)
+    {
+        var a = document.anchors[i];
+        var text = a.name;
+        if (hash[text] > 0) continue;
+        hash[text] = 1;
+        values[n++] = a.name
+    }
+
+    values.sort();
+
+    for(var i = 0; i < values.length; i++) {
+        var a = values[i];
+        newText += ' \x3Ca href="\x23' + a +
+            '"\x3E\x3Cspan class="d_psymbol"\x3E' + a + '\x3C/span\x3E\x3C/a\x3E';
+    }
+    if (newText != "") newText = "\x3Cp\x3E\x3Cb\x3EJump to:\x3C/b\x3E" + newText + "\x3C/p\x3E";
+    var a = document.getElementById("quickindex");
+    a.innerHTML = newText;
+}
+</script>
+
+<script src="js/hyphenate_selectively.js" type="text/javascript"></script>
+
+</head>
+
+<body onload="listanchors()" class='hyphenate'>
+
+<div id="top">
+	<div id="search-box">
+		<form method="get" action="http://google.com/search">
+			<img src="/images/search-left.gif" width="11" height="22" alt=""><input id="q" name="q"><input type="image" id="search-submit" name="submit" src="/images/search-button.gif">
+			<input type="hidden" id="domains" name="domains" value="d-programming-language.org">
+			<input type="hidden" id="sourceid" name="sourceid" value="google-search">
+			<div id="search-dropdown">
+				<select id="sitesearch" name="sitesearch" size="1">
+					<option value="d-programming-language.org">Entire D  Site</option>
+					<option value="d-programming-language.org/phobos">Library Reference</option>
+					<option value="www.digitalmars.com/d/archives">Newsgroup Archives</option>
+				</select>
+			</div>
+		</form>
+	</div>
+	<div id="header">
+		<a href="/"><img id="logo" width="125" height="95" border="0" alt="D Logo" src="/images/dlogo.png"></a>
+		<a id="d-language" href="/">D Programming Language </a>
+	</div>
+</div>
+
+<div id="navigation">
+    
+<div class="navblock">
+<form method="get" action="http://www.google.com/search">
+<div id="searchbox">
+<input name="q" size="10" value="RTL Search" onFocus='if(this.value == "RTL Search"){this.value="";}'>
+<input type="hidden" name="domains" value="www.digitalmars.com">
+<input type="hidden" name="sitesearch" value="www.digitalmars.com/d/2.0/phobos">
+<input type="hidden" name="sourceid" value="google-search">
+<input type="submit" name="submit" value="Go">
+</div>
+</form>
+<div id="toctop">
+    <ul>	<li><a href="../index.html" title="D Programming Language">D</a></li>
+	<li><a href="../spec.html" title="D Language Specification">Language</a></li>
+	<li><a href="../phobos/index.html" title="D Runtime Library">Phobos</a></li>
+	<li><a href="../phobos-prerelease/index.html" title="D Runtime Library (prerelease)">Phobos (prerelease)</a></li>
+	<li><a href="../comparison.html" title="Language Comparisons">Comparisons</a></li>
+    </ul>
+</div>
+</div>
+
+    
+<div class="navblock">
+    <ul>	<li><a href="object.html" title="root of object hierarchy">object</a></li>
+    </ul>
+    <h2><a href="index.html#std" title="D standard modules">std</a></h2>
+    <ul>	<li><a href="std_algorithm.html" title="General-purpose algorithms">std.algorithm</a></li>
+	<li><a href="std_array.html" title="Array functions">std.array</a></li>
+	<li><a href="std_ascii.html" title="Functions which operate on ASCII characters">std.ascii</a></li>
+	<li><a href="std_base64.html" title="Encode/decode base64 format">std.base64</a></li>
+	<li><a href="std_bigint.html" title="Arbitrary-precision ('bignum') arithmetic">std.bigint</a></li>
+	<li><a href="std_bitmanip.html" title="Bit-level manipulation">std.bitmanip</a></li>
+	<li><a href="std_compiler.html" title="Information about the D compiler implementation">std.compiler</a></li>
+	<li><a href="std_complex.html" title="Complex numbers">std.complex</a></li>
+	<li><a href="std_concurrency.html" title="Message Passing">std.concurrency</a></li>
+	<li><a href="std_container.html" title="Containers">std.container</a></li>
+	<li><a href="std_contracts.html" title="Think assert">std.contracts</a></li>
+	<li><a href="std_conv.html" title="Conversion of strings to integers">std.conv</a></li>
+	<li><a href="std_cpuid.html" title="CPU identification">std.cpuid</a></li>
+	<li><a href="std_ctype.html" title="Simple character classification">std.ctype</a></li>
+	<li><a href="std_date.html" title="Date and time functions">std.date</a></li>
+	<li><a href="std_datetime.html" title="Date and time-related types and functions">std.datetime</a></li>
+	<li><a href="std_demangle.html" title="Demangle D names">std.demangle</a></li>
+	<li><a href="std_encoding.html" title="Character and string encoding">std.encoding</a></li>
+	<li><a href="std_exception.html" title="Exceptions and error handling">std.exception</a></li>
+	<li><a href="std_file.html" title="Basic file operations">std.file</a></li>
+	<li><a href="std_format.html" title="Formatted conversions of values to strings">std.format</a></li>
+	<li><a href="std_functional.html" title="functional">std.functional</a></li>
+	<li><a href="std_getopt.html" title="Command line options">std.getopt</a></li>
+	<li><a href="std_gregorian.html" title="Gregorian Calendar">std.gregorian</a></li>
+	<li><a href="std_json.html" title="JSON reader">std.json</a></li>
+	<li><a href="std_math.html" title="the usual math functions">std.math</a></li>
+	<li><a href="std_mathspecial.html" title="mathematical special functions">std.mathspecial</a></li>
+	<li><a href="std_md5.html" title="Compute MD5 digests">std.md5</a></li>
+	<li><a href="std_metastrings.html" title="Metaprogramming with strings">std.metastrings</a></li>
+	<li><a href="std_mmfile.html" title="Memory mapped files">std.mmfile</a></li>
+	<li><a href="std_numeric.html" title="Numeric algorithms">std.numeric</a></li>
+	<li><a href="std_outbuffer.html" title="Assemble data into an array of bytes">std.outbuffer</a></li>
+	<li><a href="std_parallelism.html" title="High-level primitives for SMP parallelism">std.parallelism</a></li>
+	<li><a href="std_path.html" title="Manipulate file names, path names, etc.">std.path</a></li>
+	<li><a href="std_process.html" title="Create/destroy processes">std.process</a></li>
+	<li><a href="std_random.html" title="Random number generation">std.random</a></li>
+	<li><a href="std_range.html" title="Ranges">std.range</a></li>
+	<li><a href="std_regex.html" title="regular expressions">std.regex</a></li>
+	<li><a href="std_regexp.html" title="regular expressions (deprecated)">std.regexp</a></li>
+	<li><a href="std_signals.html" title="Signals">std.signals</a></li>
+	<li><a href="std_socket.html" title="Sockets">std.socket</a></li>
+	<li><a href="std_socketstream.html" title="Stream for a blocking, connected Socket">std.socketstream</a></li>
+	<li><a href="std_stdint.html" title="Integral types for various purposes">std.stdint</a></li>
+	<li><a href="std_stdio.html" title="Standard I/O">std.stdio</a></li>
+	<li><a href="std_cstream.html" title="Stream I/O">std.cstream</a></li>
+	<li><a href="std_stream.html" title="Stream I/O">std.stream</a></li>
+	<li><a href="std_string.html" title="Basic string operations">std.string</a></li>
+	<li><a href="std_system.html" title="Inquire about the CPU, operating system">std.system</a></li>
+	<li><a href="std_traits.html" title="Type traits">std.traits</a></li>
+	<li><a href="std_typecons.html" title="Type constructors">std.typecons</a></li>
+	<li><a href="std_typetuple.html" title="Type tuples">std.typetuple</a></li>
+	<li><a href="std_uni.html" title="Unicode classification">std.uni</a></li>
+	<li><a href="std_uri.html" title="Encode and decode Uniform Resource Identifiers (URIs)">std.uri</a></li>
+	<li><a href="std_utf.html" title="Encode and decode utf character encodings">std.utf</a></li>
+	<li><a href="std_variant.html" title="Stores all types in a uniform, dynamically-checked representation">std.variant</a></li>
+	<li><a href="std_xml.html" title="XML file processing">std.xml</a></li>
+	<li><a href="std_zip.html" title="Read/write zip archives">std.zip</a></li>
+	<li><a href="std_zlib.html" title="Compression / Decompression of data">std.zlib</a></li>
+	<li><a href="std_c_fenv.html" title="Floating point environment">std.c.fenv</a></li>
+	<li><a href="std_c_locale.html" title="Locale">std.c.locale</a></li>
+	<li><a href="std_c_math.html" title="Math">std.c.math</a></li>
+	<li><a href="std_c_process.html" title="Process">std.c.process</a></li>
+	<li><a href="std_c_stdarg.html" title="Variadic arguments">std.c.stdarg</a></li>
+	<li><a href="std_c_stddef.html" title="Standard definitions">std.c.stddef</a></li>
+	<li><a href="std_c_stdio.html" title="Standard I/O">std.c.stdio</a></li>
+	<li><a href="std_c_stdlib.html" title="Standard library">std.c.stdlib</a></li>
+	<li><a href="std_c_string.html" title="Strings">std.c.string</a></li>
+	<li><a href="std_c_time.html" title="Time">std.c.time</a></li>
+	<li><a href="std_c_wcharh.html" title="Wide characters">std.c.wcharh</a></li>
+	<li><a href="std_net_isemail.html" title="Validate e-mail addresses">std.net.isemail</a></li>
+	<li><a href="std_windows_charset.html" title="Conversion to/from Windows character sets">std.windows.charset</a></li>
+	<li><a href="index.html#std_windows" title="Modules specific to Windows">std.windows</a></li>
+	<li><a href="index.html#std_linux" title="Modules specific to Windows">std.linux</a></li>
+	<li><a href="index.html#std_c_windows" title="C Windows API">std.c.windows</a></li>
+	<li><a href="index.html#std_c_linux" title="C Linux API">std.c.linux</a></li>
+    </ul>
+    <h2><a href="index.html#etc" title="D etc modules">etc</a></h2>
+    <ul>	<li><a href="etc_c_curl.html" title="Interface to libcurl library">etc.c.curl</a></li>
+	<li><a href="etc_c_zlib.html" title="Interface to zlib library">etc.c.zlib</a></li>
+    </ul>
+    <h2><a href="index.html#core" title="D core modules">core</a></h2>
+    <ul>	<li><a href="core_atomic.html" title="Atomic operations">core.atomic</a></li>
+	<li><a href="core_bitop.html" title="Bitwise operations">core.bitop</a></li>
+	<li><a href="core_cpuid.html" title="CPU identification">core.cpuid</a></li>
+	<li><a href="core_exception.html" title="Root of exception hierarchy">core.exception</a></li>
+	<li><a href="core_memory.html" title="Interface to memory management">core.memory</a></li>
+	<li><a href="core_runtime.html" title="Interface to D runtime library internals">core.runtime</a></li>
+	<li><a href="core_thread.html" title="Thread management">core.thread</a></li>
+	<li><a href="core_time.html" title="Core time functionality">core.time</a></li>
+	<li><a href="core_vararg.html" title="Variable function arguments">core.vararg</a></li>
+	<li><a href="core_sync_barrier.html" title="Synchronizing progress of a group of threads">core.sync.barrier</a></li>
+	<li><a href="core_sync_condition.html" title="Synchronized condition checking">core.sync.condition</a></li>
+	<li><a href="core_sync_config.html" title="Stuff for core.sync">core.sync.config</a></li>
+	<li><a href="core_sync_exception.html" title="SyncException">core.sync.exception</a></li>
+	<li><a href="core_sync_mutex.html" title="Mutexes">core.sync.mutex</a></li>
+	<li><a href="core_sync_rwmutex.html" title="R/W mutually exclusive access">core.sync.rwmutex</a></li>
+	<li><a href="core_sync_semaphore.html" title="Semaphores">core.sync.semaphore</a></li>
+    </ul>
+</div>
+
+</div>
+<div id="content">
+    <h1>fred</h1>
+    <div id=quickindex class=quickindex></div>
+    <!-- Generated by Ddoc from fred.d -->
+<span class="d_inlinecode">FReD</span> is an acronym for Fast Regular Expressions for D, a proposed replacement for <span class="d_inlinecode">std.regex</span>.
+<p></p>
+<a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=Regular expressions">Regular expressions</a> are commonly used method of pattern matching
+  on strings, with <i>regex</i> being a catchy word for a pattern in this domain
+  specific language. Typical problems usually solved by regular expressions
+  include validation of user input and ubiquitous find &amp; replace in various text processing utilities.
+<p></p>
+
+
+  The general usage guideline is keeping regex complexity on the side of simplicity, as its capabilities
+  reside in purely character-level manipulation,  and as such are ill suited for tasks
+  involving higher level invariants like matching an integer number <u>bounded</u> in [a,b] interval.
+  Checking of this sort of higher level stuff is better left to a separate postprocessing steps.
+
+<p></p>
+<b>Synposis:</b><br>
+<pre class="d_code">  <span class="d_keyword">import</span> <span class="d_psymbol">fred</span>;
+  <span class="d_keyword">import</span> std.stdio;
+
+  <span class="d_comment">//print out all possible dd/mm/yy(yy) dates found in user input
+</span>  <span class="d_keyword">auto</span> r = regex(<span class="d_string">r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b"</span>, <span class="d_string">"g"</span>);<span class="d_comment">//g - global, find all matches
+</span>  <span class="d_keyword">foreach</span>(line; stdin.byLine)
+  {
+    <span class="d_keyword">foreach</span>(c; match(line, r))
+        writeln(c.hit);
+  }
+
+  ...
+
+  <span class="d_keyword">enum</span> ctr = ctRegex!(<span class="d_string">`^.*/(.+)/?$`</span>); <span class="d_comment">//static regex, contains precompiled native code
+</span>  <span class="d_keyword">auto</span> m2 = match(<span class="d_string">"foo/bar"</span>, ctr);   <span class="d_comment">//first match found here if any
+</span>  <span class="d_keyword">assert</span>(m2);   <span class="d_comment">//so be sure to check if there is a match, before examining contents!
+</span>  <span class="d_keyword">assert</span>(m2.captures[1] == <span class="d_string">"bar"</span>);<span class="d_comment">//captures - a range of submatches, 0 - full match
+</span>
+  ...
+  <span class="d_comment">//test if a string consists of letters
+</span>  <span class="d_keyword">assert</span>(match(<span class="d_string">"Letter"</span>, <span class="d_string">`^\p{L}+$`</span>));
+
+</pre>
+
+  The basic syntax shouldn't surprize experienced users of regular expressions.
+  Thankfully, nowdays the web is bustling with resources to help newcomers, and a good reference with tutorial
+  could be found on <a href="http://www.regular-expressions.info">regular-expressions</a>.
+  For specifics search up ECMAScript flavor.
+<p></p>
+
+
+ <center><table cellspacing=0 cellpadding=5 class=book><caption>Flags controlling the behavior of pattern matching</caption>    <tr><th>Flag</th> <th>Effect</th></tr>
+    <tr><td valign=top><b>g</b></td> <td valign=top>global; repeat over the whole input </td></tr>
+    <tr><td valign=top><b>i</b></td> <td valign=top>case insensitive</td></tr>
+    <tr><td valign=top><b>m</b></td> <td valign=top>multiline, match $ on line separators as well as end of input</td></tr>
+    <tr><td valign=top><b>x</b></td> <td valign=top>free-form syntax, ignores whitespace in pattern,
+        useful for formating complex regular expressions</td></tr>
+  </table></center>
+<p></p>
+
+
+  Advanced Syntax
+<p></p>
+
+
+  Aside from providing a well known features of regular expressions found in e.g. JavaScript,
+  FReD does support the following extensions:
+  <ul>   <li>Named groups, with Python style syntax (?P<name>re),
+        names working like aliases in addition to numbers.</li>
+    <li>Arbitrary length and complexity lookbehind with common syntax
+        (?&lt;=re) and (?&lt;!re), including lookahead in lookbehind and vise-versa </li>
+    <li>Unicode properities such as Scripts, Blocks and
+        common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.</li>
+  </ul>
+<p></p>
+
+
+<p></p>
+
+
+  Unicode support
+<p></p>
+
+
+  This library provides full Level 1 support* according to
+    <a href="http://http://unicode.org/reports/tr18/">UTS 18</a>. Specifically:
+  <ul>   <li>1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ</li>
+    <li>1.2 Unicode properties</li>
+    <li>1.3 Charactar classes with set operations</li>
+    <li>1.4 Word boundaries use full set of "word" characters</li>
+    <li>1.5 Using simple casefolding to match case
+        insensitevely across full range of codepoints</li>
+    <li>1.6 Respecting line breaks as any of
+        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A</li>
+    <li>1.7 Operating on codepoint level</li>
+  </ul>
+  *With exception being point 1.1.1, as of yet, normalization of input
+    is expected to be enforced by user.
+<p></p>
+
+
+ <center><table cellspacing=0 cellpadding=5 class=book><caption>Syntax mostly follows techincal standard</caption>   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
+syntax for unicode blocks is InBlockName</td></tr>
+   <tr><td valign=top>[a||b], [a--b], [a~~b], [a&amp;&b]</td> <td valign=top>where a, b
+    are arbitrary [...] sets; means union, set difference,
+    symmetric set difference, and intersection respectively</td></tr>
+  </table></center>
+  All matches returned by pattern matching functionality in this library
+  are slices of original input. With sole exception being replace family of functions
+  that generate new string from input.
+
+<p></p>
+<b>License:</b><br><a href="http://boost.org/LICENSE_1_0.txt">Boost License 1.0</a>.
+
+<p></p>
+<b>Authors:</b><br>Dmitry Olshansky, API and utility constructs
+    based on original <span class="d_inlinecode">std.regex</span> by Walter Bright and Andrei Alexandrescu
+
+<p></p>
+
+<dl><dt class="d_decl">struct <a name="Interval"></a><span class="ddoc_psymbol">Interval</span>;
+</dt>
+<dd><span class="d_inlinecode"><a name="Interval"></a><span class="ddoc_psymbol">Interval</span></span>  represents an interval of codepoints: [a,b).<p></p>
+
+<dl><dt class="d_decl">this(dchar <i>ch</i>);
+</dt>
+<dd>Create interval containig a single character <span class="d_inlinecode"><i>ch</i></span>.<p></p>
+
+</dd>
+<dt class="d_decl">this(dchar <i>a</i>, dchar <i>b</i>);
+</dt>
+<dd>Create Interval from inclusive range [<span class="d_inlinecode"><i>a</i></span>,<span class="d_inlinecode"><i>b</i></span>]. Contrary to internal structure, inclusive is chosen for interface.
+        The reason fro this is usability e.g. it's would force user to type the unwieldy Interval('<i>a</i>','z'+1) all over the place.<p></p>
+
+</dd>
+<dt class="d_decl">const string <a name="toString"></a><span class="ddoc_psymbol">toString</span>();
+</dt>
+<dd><p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">struct <a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span>;
+</dt>
+<dd><span class="d_inlinecode"><a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span></span> is a data structure for manipulating sets of Unicode codepoints in an efficient manner.<p></p>
+
+<dl><dt class="d_decl">ref CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(Interval <i>inter</i>);
+</dt>
+<dd>Add an <span class="d_inlinecode">interval</span> of codepoints to this set.<p></p>
+
+</dd>
+<dt class="d_decl">ref CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(dchar <i>ch</i>);
+</dt>
+<dd>Add a codepoint <span class="d_inlinecode"><i>ch</i></span> to this set.<p></p>
+
+</dd>
+<dt class="d_decl">ref CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Add <span class="d_inlinecode"><i>set</i></span> in this <i>set</i>. 
+<p></p>
+<b>Algebra:</b><br>
+this = this | <i>set</i>.<p></p>
+
+</dd>
+<dt class="d_decl">ref CodepointSet <a name="sub"></a><span class="ddoc_psymbol">sub</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Exclude <span class="d_inlinecode"><i>set</i></span> from this <i>set</i>.
+<p></p>
+<b>Algebra:</b><br>
+this = this - <i>set</i>.<p></p>
+
+</dd>
+<dt class="d_decl">ref auto <a name="symmetricSub"></a><span class="ddoc_psymbol">symmetricSub</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Make this <i>set</i> a symmetric difference with <span class="d_inlinecode"><i>set</i></span>.
+<p></p>
+<b>Algebra:</b><br>
+this = this ~ <i>set</i> (i.e. (this || <i>set</i>) -- (this &amp;&amp; <i>set</i>)).<p></p>
+
+</dd>
+<dt class="d_decl">ref CodepointSet <a name="intersect"></a><span class="ddoc_psymbol">intersect</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Intersect this <i>set</i> with <span class="d_inlinecode"><i>set</i></span>.
+<p></p>
+<b>Algebra:</b><br>
+this = this &amp; <i>set</i><p></p>
+
+</dd>
+<dt class="d_decl">const bool <a name="scanFor"></a><span class="ddoc_psymbol">scanFor</span>(dchar <i>ch</i>);
+</dt>
+<dd>Test if <i>ch</i> is present in this set, linear search done in <b><i>&Omicron;</i>(</b><span class="d_inlinecode">N</span><b><i>)</i></b> operations
+        on number of <u>intervals</u> in this set.
+        In practice linear search outperforms binary search until a certain threshold,
+        unless this is the case however it's recommended to use overloaded indexing operator.<p></p>
+
+</dd>
+<dt class="d_decl">const bool <a name="opIndex"></a><span class="ddoc_psymbol">opIndex</span>(dchar <i>ch</i>);
+</dt>
+<dd>Test if <i>ch</i> is present in this set, in <b><i>&Omicron;</i>(</b><span class="d_inlinecode">LogN</span><b><i>)</i></b> operations on number
+        of <u>intervals</u> in this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @property bool <a name="empty"></a><span class="ddoc_psymbol">empty</span>();
+</dt>
+<dd>Test if this set is <a name="empty"></a><span class="ddoc_psymbol">empty</span>.<p></p>
+
+</dd>
+<dt class="d_decl">const void <a name="printUnicodeSet"></a><span class="ddoc_psymbol">printUnicodeSet</span>(R)(R <i>sink</i>);
+</dt>
+<dd>Write out in regular expression style [\uxxxx-\uyyyy...].<p></p>
+
+</dd>
+<dt class="d_decl">const @property CodepointSet <a name="dup"></a><span class="ddoc_psymbol">dup</span>();
+</dt>
+<dd>Deep copy this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @property uint <a name="extent"></a><span class="ddoc_psymbol">extent</span>();
+</dt>
+<dd>Full covered length from first codepoint to the last one.<p></p>
+
+</dd>
+<dt class="d_decl">const @property uint <a name="chars"></a><span class="ddoc_psymbol">chars</span>();
+</dt>
+<dd>Number of codepoints stored in this set.<p></p>
+
+</dd>
+<dt class="d_decl">const bool <a name="opEquals"></a><span class="ddoc_psymbol">opEquals</span>(ref const CodepointSet <i>set</i>);
+<br>const int <a name="opCmp"></a><span class="ddoc_psymbol">opCmp</span>(ref const CodepointSet <i>set</i>);
+<br>const hash_t <a name="toHash"></a><span class="ddoc_psymbol">toHash</span>();
+</dt>
+<dd>Troika for built-in hash maps.<p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">struct <a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span>(uint prefixBits) if (prefixBits &gt; 4);
+</dt>
+<dd><span class="d_inlinecode"><a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span></span> is 1-level  <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=Trie">Trie</a>  data structure focused on lookup speeds.
+    Primary use case is to convert a previously obtained CodepointSet
+    to speed up subsequent element lookup.
+<p></p>
+<pre class="d_code">        <span class="d_keyword">auto</span> input = getLargeString();
+        Charset set;
+        set.add(unicodeAlphabetic).add('$').add('#');
+        <span class="d_keyword">auto</span> lookup = <span class="d_psymbol">CodepointTrie</span>!8(set);
+        <span class="d_keyword">int</span> count;
+        <span class="d_keyword">foreach</span>(<span class="d_keyword">dchar</span> ch; input)
+            <span class="d_keyword">if</span>(lookup[ch])
+                count++;
+</pre>
+    <span class="d_inlinecode">prefixBits</span> parameter controls number of bits used to index last level
+    and provided for tuning to a specific applications.
+    A default parameter of 8 works best in common cases though.<p></p>
+
+</dd>
+<dt class="d_decl">struct <a name="RegEx"></a><span class="ddoc_psymbol">RegEx</span>;
+</dt>
+<dd><span class="d_inlinecode"><a name="RegEx"></a><span class="ddoc_psymbol">RegEx</span></span> object holds regular expression pattern in compiled form.
+    Instances of this object are constructed via calls to <span class="d_inlinecode">regex</span>.
+    It's an intended form for caching and storage of frequently used regular expressions.<p></p>
+
+</dd>
+<dt class="d_decl">struct <a name="NativeRegEx"></a><span class="ddoc_psymbol">NativeRegEx</span>(alias Fn);
+</dt>
+<dd>A <span class="d_inlinecode">RegEx</span> object that contains specifically generated machine code.
+    As tailored code is associated  with the type as alias parameter,
+    to store these en masse use <span class="d_inlinecode">std.typecons.Tuple</span>.<p></p>
+
+</dd>
+<dt class="d_decl">template <a name="Regex"></a><span class="ddoc_psymbol">Regex</span>(Char) if (is(Char : char) || is(Char : wchar) || is(Char : dchar))</dt>
+<dd>std.regex-like <a name="Regex"></a><span class="ddoc_psymbol">Regex</span> object parametrized on character type.
+    Wraps <span class="d_inlinecode">RegEx</span>, provided for backwards compatibility only.<p></p>
+
+</dd>
+<dt class="d_decl">struct <a name="Captures"></a><span class="ddoc_psymbol">Captures</span>(R) if (isSomeString!(R));
+</dt>
+<dd><span class="d_inlinecode"><a name="Captures"></a><span class="ddoc_psymbol">Captures</span></span> object contains submatches captured during a call to <span class="d_inlinecode">match</span> or iteration over <span class="d_inlinecode">RegexMatch</span> range.
+First element of range is the whole match.
+Example, showing basic manipulation on <span class="d_inlinecode"><a name="Captures"></a><span class="ddoc_psymbol">Captures</span></span>:
+<p></p>
+<pre class="d_code"><span class="d_keyword">import</span> fred;
+<span class="d_keyword">import</span> std.range;
+
+<span class="d_keyword">auto</span> m = match(<span class="d_string">"@abc#"</span>, regex(<span class="d_string">`(\w)(\w)(\w)`</span>));
+<span class="d_keyword">auto</span> c = m.captures;
+<span class="d_keyword">assert</span>(c.pre == <span class="d_string">"@"</span>);<span class="d_comment">// part of input preceeding match
+</span><span class="d_keyword">assert</span>(c.post == <span class="d_string">"#"</span>); <span class="d_comment">// immediately after match
+</span><span class="d_keyword">assert</span>(c.hit == c[0] &amp;&amp; c.hit == <span class="d_string">"abc"</span>);<span class="d_comment">// the whole match
+</span><span class="d_keyword">assert</span>(c[2] ==<span class="d_string">"b"</span>);
+<span class="d_keyword">assert</span>(c.front == <span class="d_string">"abc"</span>);
+c.popFront();
+<span class="d_keyword">assert</span>(c.front == <span class="d_string">"a"</span>);
+<span class="d_keyword">assert</span>(c.back == <span class="d_string">"c"</span>);
+c.popBack();
+<span class="d_keyword">assert</span>(c.back == <span class="d_string">"b"</span>);
+popFrontN(c, 2);
+<span class="d_keyword">assert</span>(c.empty);
+</pre>
+<p></p>
+
+<dl><dt class="d_decl">R <a name="pre"></a><span class="ddoc_psymbol">pre</span>();
+</dt>
+<dd>Slice of input prior to the match.<p></p>
+
+</dd>
+<dt class="d_decl">R <a name="post"></a><span class="ddoc_psymbol">post</span>();
+</dt>
+<dd>Slice of input immediately after the match.<p></p>
+
+</dd>
+<dt class="d_decl">R <a name="hit"></a><span class="ddoc_psymbol">hit</span>();
+</dt>
+<dd>Slice of matched portion of input.<p></p>
+
+</dd>
+<dt class="d_decl">R <a name="front"></a><span class="ddoc_psymbol">front</span>();
+<br>R <a name="back"></a><span class="ddoc_psymbol">back</span>();
+<br>void <a name="popFront"></a><span class="ddoc_psymbol">popFront</span>();
+<br>void <a name="popBack"></a><span class="ddoc_psymbol">popBack</span>();
+<br>const bool <a name="empty"></a><span class="ddoc_psymbol">empty</span>();
+<br>R <a name="opIndex"></a><span class="ddoc_psymbol">opIndex</span>()(size_t <i>i</i>);
+</dt>
+<dd>Range interface.<p></p>
+
+</dd>
+<dt class="d_decl">R <a name="opIndex"></a><span class="ddoc_psymbol">opIndex</span>(String)(String <i>i</i>);
+</dt>
+<dd>Lookup named submatch.
+<p></p>
+<pre class="d_code">        <span class="d_keyword">import</span> fred;
+        <span class="d_keyword">import</span> std.range;
+
+        <span class="d_keyword">auto</span> m = match(<span class="d_string">"a = 42;"</span>, regex(<span class="d_string">`(?P&lt;var&gt;\w+)\s*=\s*(?P&lt;value&gt;\d+)`</span>));
+        <span class="d_keyword">auto</span> c = m.captures;
+        <span class="d_keyword">assert</span>(c[<span class="d_string">"var"</span>] == <span class="d_string">"a"</span>);
+        <span class="d_keyword">assert</span>(c[<span class="d_string">"value"</span>] == <span class="d_string">"42"</span>);
+        c.popFront();
+        <span class="d_keyword">assert</span>(c[<span class="d_string">"var"</span>] ==<span class="d_string">"a"</span>); <span class="d_comment">//named groups are unaffected by range primitives
+</span>        <span class="d_keyword">assert</span>(c.front == <span class="d_string">"a"</span>);
+</pre>
+<p></p>
+
+</dd>
+<dt class="d_decl">const size_t <a name="length"></a><span class="ddoc_psymbol">length</span>();
+</dt>
+<dd>Number of matches in this object<p></p>
+
+</dd>
+<dt class="d_decl">@property auto <a name="captures"></a><span class="ddoc_psymbol">captures</span>();
+</dt>
+<dd>A hook for compatibility with std.regex<p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">struct <a name="RegexMatch"></a><span class="ddoc_psymbol">RegexMatch</span>(R,alias Engine = ThompsonMatcher) if (isSomeString!(R));
+</dt>
+<dd>A search engine state, as returned by <span class="d_inlinecode">match</span> family of functions.
+    Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a input.
+    alias Engine specifies an engine type to use during  matching, and is automatically deduced in call to <span class="d_inlinecode">match</span>/<span class="d_inlinecode">bmatch</span>.<p></p>
+
+<dl><dt class="d_decl">R <a name="pre"></a><span class="ddoc_psymbol">pre</span>();
+<br>R <a name="post"></a><span class="ddoc_psymbol">post</span>();
+<br>R <a name="hit"></a><span class="ddoc_psymbol">hit</span>();
+</dt>
+<dd>Shorthands for captures.<a name="pre"></a><span class="ddoc_psymbol">pre</span>, captures.post, captures.hit<p></p>
+
+</dd>
+<dt class="d_decl">@property auto <a name="front"></a><span class="ddoc_psymbol">front</span>();
+<br>void <a name="popFront"></a><span class="ddoc_psymbol">popFront</span>();
+</dt>
+<dd>Functionality for processing subsequent matches of global regexes via range interface:
+<pre class="d_code">        <span class="d_keyword">import</span> fred;
+        <span class="d_keyword">auto</span> m = match(<span class="d_string">"Hello, world!"</span>, regex(<span class="d_string">`\w+`</span>, <span class="d_string">"g"</span>));
+        <span class="d_keyword">assert</span>(m.<span class="d_psymbol">front</span>.hit == <span class="d_string">"Hello"</span>);
+        m.popFront();
+        <span class="d_keyword">assert</span>(m.<span class="d_psymbol">front</span>.hit == <span class="d_string">"world"</span>);
+        m.popFront();
+        <span class="d_keyword">assert</span>(m,empty);
+</pre>
+<p></p>
+
+</dd>
+<dt class="d_decl">bool <a name="empty"></a><span class="ddoc_psymbol">empty</span>();
+</dt>
+<dd>Test if this match object is <a name="empty"></a><span class="ddoc_psymbol">empty</span>.<p></p>
+
+</dd>
+<dt class="d_decl">T <a name="opCast"></a><span class="ddoc_psymbol">opCast</span>(T : bool)();
+</dt>
+<dd>Same as !(x.empty), provided for its convenience  in conditional statements.<p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">auto <a name="regex"></a><span class="ddoc_psymbol">regex</span>(S, S2 = string)(S <i>pattern</i>, S2 <i>flags</i> = []);
+</dt>
+<dd>Compile regular expression pattern for the later execution.
+<p></p>
+<b>Parameters:</b><table class=parms><tr><td valign=top>pattern</td>
+<td valign=top>regular expression</td></tr>
+<tr><td valign=top>flags</td>
+<td valign=top>The attributes (g, i, and m accepted)</td></tr>
+</table><p></p>
+<b>Throws:</b><br><span class="d_inlinecode">RegexException</span> if there are any compilation errors.<p></p>
+
+</dd>
+<dt class="d_decl">auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, alias s)(R <i>input</i>, NativeRegEx!(s) <i>re</i>);
+</dt>
+<dd>Initiate matching of input to static regex pattern re, using Backtracking matching scheme (precompiled to machine code).
+    Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine state after first <a name="match"></a><span class="ddoc_psymbol">match</span>.<p></p>
+
+</dd>
+<dt class="d_decl">auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R)(R <i>input</i>, RegEx <i>re</i>);
+<br>auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, String)(R <i>input</i>, String <i>pat</i>);
+</dt>
+<dd>Initiate matching of input to regex pattern re, using Thompson NFA matching scheme.
+    Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine state after first <a name="match"></a><span class="ddoc_psymbol">match</span>.
+    This is the recommended method for matching regular expression.<p></p>
+
+</dd>
+<dt class="d_decl">auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R)(R <i>input</i>, RegEx <i>re</i>);
+<br>auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, String)(R <i>input</i>, String <i>pat</i>);
+</dt>
+<dd>Initiate matching of input to regex pattern re, using traditional backtracking matching scheme.
+    Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine state after first match.<p></p>
+
+</dd>
+<dt class="d_decl">R <a name="replace"></a><span class="ddoc_psymbol">replace</span>(R, alias scheme = match)(R <i>input</i>, RegEx <i>re</i>, R <i>format</i>);
+</dt>
+<dd>Construct a new string from <span class="d_inlinecode">input</span> by replacing each match with
+    string generated form match accroding to <span class="d_inlinecode">format</span> specifier.
+    To <a name="replace"></a><span class="ddoc_psymbol">replace</span> all occurances use regex with "g" flag, otherwise first occurence get replaced.
+<p></p>
+<b>Parameters:</b><table class=parms><tr><td valign=top>input</td>
+<td valign=top>string to search</td></tr>
+<tr><td valign=top>re</td>
+<td valign=top>compiled regualr expression to use</td></tr>
+<tr><td valign=top>format</td>
+<td valign=top>format string to generate replacements from</td></tr>
+</table><p></p>
+<b>Example:</b><br>
+<pre class="d_code">    <span class="d_comment">//Comify a number
+</span>    <span class="d_keyword">auto</span> com = regex(<span class="d_string">r"(?&lt;=\d)(?=(\d\d\d)+\b)"</span>,<span class="d_string">"g"</span>);
+    <span class="d_keyword">assert</span>(<span class="d_psymbol">replace</span>(<span class="d_string">"12000 + 42100 = 56000"</span>, com, <span class="d_string">","</span>) == <span class="d_string">"12,000 + 42,100 = 56,100"</span>);
+</pre>
+
+    The replacement format can reference the matches using the $&amp;, $$,
+    $', $`,  .. 9 notation:
+<pre class="d_code">    <span class="d_keyword">assert</span>(<span class="d_psymbol">replace</span>(<span class="d_string">"noon"</span>, regex(<span class="d_string">"^n"</span>), <span class="d_string">"[$&amp;]"</span>) == <span class="d_string">"[n]oon"</span>);
+</pre>
+<p></p>
+
+</dd>
+<dt class="d_decl">struct <a name="Splitter"></a><span class="ddoc_psymbol">Splitter</span>(Range,alias Engine = ThompsonMatcher) if (isSomeString!(Range));
+</dt>
+<dd>Range that splits a string using a regular expression as a
+separator.
+<p></p>
+<b>Example:</b><br>
+<pre class="d_code"><span class="d_keyword">auto</span> s1 = <span class="d_string">", abc, de,  fg, hi, "</span>;
+<span class="d_keyword">assert</span>(equal(splitter(s1, regex(<span class="d_string">", *"</span>)),
+    [<span class="d_string">""</span>, <span class="d_string">"abc"</span>, <span class="d_string">"de"</span>, <span class="d_string">"fg"</span>, <span class="d_string">"hi"</span>, <span class="d_string">""</span>]));
+</pre>
+<p></p>
+
+<dl><dt class="d_decl">bool <a name="empty"></a><span class="ddoc_psymbol">empty</span>();
+<br>void <a name="popFront"></a><span class="ddoc_psymbol">popFront</span>();
+</dt>
+<dd>ditto<p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">Splitter!(Range) <a name="splitter"></a><span class="ddoc_psymbol">splitter</span>(Range)(Range <i>r</i>, RegEx <i>pat</i>);
+</dt>
+<dd>A helper function creates a <span class="d_inlinecode">Spliiter</span> on range <span class="d_inlinecode">r</span> separated by regex <span class="d_inlinecode">pat</span>.<p></p>
+
+</dd>
+<dt class="d_decl">String[] <a name="split"></a><span class="ddoc_psymbol">split</span>(String)(String <i>input</i>, RegEx <i>rx</i>);
+</dt>
+<dd>An eager version that creates an array with splitted slices of <span class="d_inlinecode">input</span>.<p></p>
+
+</dd>
+<dt class="d_decl">class <a name="RegexException"></a><span class="ddoc_psymbol">RegexException</span>: object.Exception;
+</dt>
+<dd>Exception object thrown in case of errors during regex compilation.<p></p>
+
+<dl><dt class="d_decl">this(string <i>msg</i>);
+</dt>
+<dd><p></p>
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+    
+<br><br>
+<br><br>
+<!-- Google ad -->
+<script type="text/javascript"><!--
+/**/google_ad_client = "pub-5628673096434613";
+/**/google_ad_width = 728;
+/**/google_ad_height = 90;
+/**/google_ad_format = "728x90_as";
+/**/google_ad_channel ="6203743411";
+/**/google_page_url = document.location;
+//--></script>
+</div>
+
+
+<div id="copyright">
+Copyright Dmitry Olshansky, 2011 |
+Page generated by <a href="http://www.digitalmars.com/d/2.0/ddoc.html">Ddoc</a>.
+</div>
+
+</body>
+</html>
+
