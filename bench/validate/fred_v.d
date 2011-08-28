@@ -16,6 +16,13 @@ else version(ct_regex)
 else	
 	static assert(0, "Use -version=backtracking or -version=thompson or -version=ct_regex");
 
+version(Wchar)
+	alias wstring String;
+else version(Dchar)
+	alias dstring String;
+else
+	alias string String;
+
 int main(string[] argv)
 {
     if(argv.length < 4){
@@ -26,7 +33,8 @@ int main(string[] argv)
         auto engine = ctRegex!(import("ct_pattern"));
     else
         auto engine = regex(argv[1]);
-    auto data = cast(char[])std.file.read(argv[2]);
+    auto raw = cast(char[])std.file.read(argv[2]);
+    auto data = to!String(raw);
     auto lines = split(data, regex("\r\n|\r|\n"));
     size_t count=0;
     size_t iterations = to!size_t(argv[3]);

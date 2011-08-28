@@ -5463,6 +5463,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.next(); //load first character from behind
                 bool match = matcher.matchOneShot!(OneShot.Bwd)(t.matches) ^ (re.ir[t.pc].code == IR.LookbehindStart);
                 freelist = matcher.freelist;
+                genCounter = matcher.genCounter;
                 if(match)
                 {
                     recycle(t);
@@ -5498,6 +5499,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 bool nomatch = matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) ^ positive;
                 freelist = matcher.freelist;
+                genCounter = matcher.genCounter;
                 s.reset(index);
                 next();
                 if(nomatch)
