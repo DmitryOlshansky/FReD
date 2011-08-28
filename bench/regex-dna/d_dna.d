@@ -31,7 +31,7 @@ int main(string[] args)
         "V", "(a|c|g)", "W", "(a|t)", "Y", "(c|t)"
     ];
     auto regs = array(map!((s){ return regex(s,"ig"); })(patterns));
-    auto regs2 = array(map!((s){ return regex(s,"ig"); })(stride(patterns2, 2)));
+    auto regs2 = array(map!((s){ return regex(s,"g"); })(stride(patterns2, 2)));
     auto stripper = regex(`>.*?\n|\n`, "g");
     auto data = cast(string)std.file.read(args[1]);
     auto stripped = replace(data, stripper, "");

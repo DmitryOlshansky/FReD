@@ -111,11 +111,13 @@ import core.stdc.stdlib, std.array, std.algorithm, std.range,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
        std.functional, std.exception, std.regionallocator;
 import core.bitop;
+import core.stdc.string;
 import ascii = std.ascii;
 import std.string : representation;
 
 debug import std.stdio;
 
+private:
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
 //debug = fred_matching;
@@ -1188,8 +1190,8 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
     }
 }
 
-//ditto
-bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
+//ditto (workaround for internal tools)
+public bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
 {
 	return comparePropertyName(a, b) < 0;
 }
@@ -2924,7 +2926,8 @@ struct ShiftOr(Char)
 {
 private:
     uint[] table;
-    size_t n_length;
+    uint fChar;
+    uint n_length;
     enum charSize =  effectiveSize!Char();
     //maximum number of chars in CodepointSet to process
     enum uint charsetThreshold = 16_000;
@@ -3019,11 +3022,38 @@ public:
             return codeLength!Char(cast(dchar)ch)*charSize;
         }
         assert(memory.length == 256);
-        table = memory;
+        fChar = uint.max;
+	L_FindChar:
+        for(size_t i = 0;;)
+        {
+			switch(re.ir[i].code)
+			{
+				case IR.Char:
+					fChar = re.ir[i].data;
+					static if(charSize != 3)
+					{
+						Char buf[dchar.sizeof/Char.sizeof];
+						encode(buf, fChar);
+						fChar = buf[0];
+					}
+					fChar = fChar & 0xFF;
+					break L_FindChar;
+				case IR.GroupStart, IR.GroupEnd:
+                    i += IRL!(IR.GroupStart);
+                    break;
+                case IR.Bol, IR.Wordboundary, IR.Notwordboundary:
+                    i += IRL!(IR.Bol);
+                    break;
+				default:
+					break L_FindChar;
+			}
+		}
+		debug(fred_search) writefln("ShiftOr: %x ", fChar);
+		table = memory;
         table[] =  uint.max;
         Thread[] trs;
         Thread t = Thread(0, 0, table);
-        //TODO: locate first fixed char if any
+        //locate first fixed char if any
         n_length = 32;
         for(;;)
         {
@@ -3203,53 +3233,87 @@ public:
         }
         debug(fred_search)
         {
-            dump(table[]);
             writeln("Min length: ", n_length);
         }
     }
 
     @property bool empty() const {  return n_length == 0; }
     
-    @property uint length() const{ return cast(uint)n_length/charSize; }
-    
+    @property uint length() const{ return n_length/charSize; }
+ 
     // lookup compatible bit pattern in haystack, return starting index
     // has a useful trait: if supplied with valid UTF indexes, returns only valid UTF indexes
     // (that given the haystack in question is valid UTF string)
     size_t search(const(Char)[] haystack, size_t idx)
     {
         assert(!empty);
-        uint limit = 1u<<(n_length - 1u);
-        auto data = representation(haystack);
-        uint state = ~0;
-        debug(fred_search) writefln("Limit: %32b",limit);
-        for(size_t i=idx; i<data.length;i++){
-            static if(charSize == 1)
-            {
-                state = (state<<1) | table[data[i]];
-            }
-            else static if(charSize == 2)
-            {
-                ushort val = data[i];
-                state = (state<<1) | table[val&0xFF];
-                val >>= 8;
-                state = (state<<1) | table[val];
-            }
-            else static if(charSize == 3)
-            {
-                uint val = data[i];
-                assert(val <= dchar.max);
-                state = (state<<1) | table[val&0xFF];
-                val >>= 8;
-                state = (state<<1) | table[val&0xFF];
-                val >>= 8;
-                assert(val <= 0x10); //dchar <= 0x10FFFF
-                state = (state<<1) | table[val];
-            }
-            debug(fred_search) writefln("State: %32b", state);
-            if(!(state & limit))
-                return (i-n_length/charSize+1);
+        const(ubyte)* p = cast(ubyte*)(haystack.ptr+idx);
+		const(ubyte)* end = cast(ubyte*)(haystack.ptr + haystack.length);
+		uint state = uint.max;
+		uint limit = 1u<<(n_length - 1u);
+		debug(fred_search) writefln("Limit: %32b",limit);
+        if(fChar != uint.max)
+        {
+			while(p != end)
+			{
+				if(!~state)
+				{
+					for(;;)
+					{
+						p = cast(ubyte*)memchr(p, fChar, end - p);
+						if(!p)
+							return haystack.length;
+						if(!(cast(size_t)p & (Char.sizeof-1)))
+							break;
+						if(++p == end)
+							return haystack.length;
+					}
+					state = ~1u;
+					assert((cast(size_t)p & (Char.sizeof-1)) == 0);
+					static if(charSize == 3)
+					{
+						state = (state<<1) | table[p[1]];
+						state = (state<<1) | table[p[2]];
+						p += 3;
+					}
+				}
+				//first char is already tested, see if that's all
+				if(!(state & limit))//division rounds down for dchar
+					return (p-cast(ubyte*)haystack.ptr)/Char.sizeof
+						-length+1;
+				static if(charSize == 3)
+				{
+					state = (state<<1) | table[*++p];
+					state = (state<<1) | table[*++p];
+					state = (state<<1) | table[*++p];
+					p++;
+				}
+				else
+					state = (state<<1) | table[*++p];
+				debug(fred_search) writefln("State: %32b", state);
+			}
+		}
+		else
+		{
+			while(p != end)
+			{
+				//in this path we have to shift first
+				static if(charSize == 3)
+				{
+					state = (state<<1) | table[p[0]];
+					state = (state<<1) | table[p[1]];
+					state = (state<<1) | table[p[2]];
+					p += 4;
+				}
+				else
+					state = (state<<1) | table[*p++];
+				if(!(state & limit))//division rounds down for dchar
+					return (p-cast(ubyte*)haystack.ptr)/Char.sizeof
+						-length;
+				debug(fred_search) writefln("State: %32b", state);
+			}
         }
-        return data.length;
+        return haystack.length;
     }
     
     debug static void dump(uint[] table)
@@ -3298,7 +3362,7 @@ unittest
             auto r = regex(`abc[a-z]`);
             auto kick = Kick!Char(r, new uint[256]);
             auto x = kick.search(to!String("abbabca"), 0);
-            assert(x == 3, text("real x is ", x));
+            assert(x == 3, text("real x is ", x, " ",v.stringof));
         
             auto r2 = regex(`(ax|bd|cdy)`);
             String s2 = to!String("abdcdyabax");
@@ -4618,9 +4682,13 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
                 trackers[infiniteNesting] = index;
                   
                 $$
+                {
                     pushState($$, counter);
-                infiniteNesting--;
-                goto case;`, addr, testCode, addr+1, fixup);
+                    infiniteNesting--;
+                    goto case $$;
+                }
+                else
+                    goto case $$;`, addr, addr+1, testCode, fixup, addr+1, fixup);
         ir = ir[ir[0].length..$];
         break;
     case IR.RepeatStart, IR.RepeatQStart:
@@ -4696,13 +4764,13 @@ string ctQuickTest(Bytecode[] ir, int id)
         }
         else
         {
+            auto code = ctAtomCode(ir[pc..$], -1);
             return ctSub(`
                 int test_$$()
                 {
                     $$
                 }
-                if(test_$$() >= 0)
-                `, id, ctAtomCode(ir[pc..$], -1), id); 
+                if(test_$$() >= 0)`, id, code ? code : "return -1;", id);
         }
     }
     return "";
@@ -5544,6 +5612,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.next(); //load first character from behind
                 bool match = (matcher.matchOneShot!(OneShot.Bwd)(t.matches)==MatchResult.Match) ^ (re.ir[t.pc].code == IR.LookbehindStart);
                 freelist = matcher.freelist;
+                genCounter = matcher.genCounter;
                 if(match)
                 {
                     recycle(t);
@@ -5579,6 +5648,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 matcher.backrefed = backrefed.empty ? t.matches : backrefed;
                 bool nomatch = (matcher.matchOneShot!(OneShot.Fwd)(t.matches, IRL!(IR.LookaheadStart)) == MatchResult.Match) ^ positive;
                 freelist = matcher.freelist;
+                genCounter = matcher.genCounter;
                 s.reset(index);
                 next();
                 if(nomatch)
@@ -6619,7 +6689,7 @@ public R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
 }
 
 //produce replacement string from format using captures for substitue
-void replaceFmt(R, Capt, OutR)(R format, Capt captures, OutR sink, bool ignoreBadSubs=false)
+public void replaceFmt(R, Capt, OutR)(R format, Capt captures, OutR sink, bool ignoreBadSubs=false)
     if(isOutputRange!(OutR, ElementEncodingType!R[]) &&
         isOutputRange!(OutR, ElementEncodingType!(Capt.String)[]))
 {
@@ -6774,14 +6844,14 @@ public:
 }
 
 ///A helper function creates a $(D Spliiter) on range $(D r) separated by regex $(D pat).
-Splitter!(Range) splitter(Range)(Range r, RegEx pat)
+public Splitter!(Range) splitter(Range)(Range r, RegEx pat)
     if (is(Unqual!(typeof(Range.init[0])) : dchar))
 {
     return Splitter!(Range)(r, pat);
 }
 
 ///An eager version that creates an array with splitted slices of $(D input).
-String[] split(String)(String input, RegEx rx)
+public String[] split(String)(String input, RegEx rx)
     if(isSomeString!String)
 {
     auto a = appender!(String[])();
@@ -6791,11 +6861,11 @@ String[] split(String)(String input, RegEx rx)
 }
 
 ///Exception object thrown in case of errors during regex compilation.
-class RegexException : Exception
+public class RegexException : Exception
 {
     ///
-    this(string msg)
+    this(string msg, string file = __FILE__, size_t line = __LINE__)
     {
-        super(msg);
+        super(msg, file, line);
     }
 }
