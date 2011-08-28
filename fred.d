@@ -2688,9 +2688,15 @@ public struct NativeRegEx(alias Fn)
 }
 
 //whether ch is one of unicode newline sequences
-bool endOfLine(dchar ch, bool seenCr)
+bool endOfLine(dchar front, bool seenCr)
 {
-    return ((ch == '\n') ^ seenCr) || ch == '\r' || ch == NEL || ch == LS || ch == PS;
+    return ((front == '\n') ^ seenCr) || front == '\r' || front == NEL || front == LS || front == PS;
+}
+
+//
+bool startOfLine(dchar back, bool seenNl)
+{
+    return ((back == '\r') ^ seenNl) || back == '\n' || back == NEL || back == LS || back == PS;
 }
 
 //Test if bytecode starting at pc in program 're' can match given codepoint
@@ -3642,7 +3648,6 @@ template BacktrackingMatcher(alias hardcoded)
         DataIndex index;
         dchar front;
         bool exhausted;
-        bool seenCr;
         //backtracking machine state
         uint pc, counter;
         DataIndex lastState = 0;       //top of state stack
@@ -3666,7 +3671,6 @@ template BacktrackingMatcher(alias hardcoded)
         //
         void next()
         {    
-            seenCr = front == '\r';
             if(!s.nextChar(front, index))
                 index = s.lastIndex;
         }
@@ -3675,7 +3679,6 @@ template BacktrackingMatcher(alias hardcoded)
         {
             static if(kicked)
             {
-                //TODO: update seenCr
                 if(!s.search(kickstart, front, index))
                 {
                     index = s.lastIndex;
@@ -3891,7 +3894,7 @@ template BacktrackingMatcher(alias hardcoded)
                         pc += IRL!(IR.Bol);
                     else if((re.flags & RegexOption.multiline) 
                         && s.loopBack.nextChar(back,bi)
-                        && endOfLine(back, seenCr))
+                        && endOfLine(back, front == '\n'))
                     {
                         pc += IRL!(IR.Bol);
                     }
@@ -3899,10 +3902,13 @@ template BacktrackingMatcher(alias hardcoded)
                         goto L_backtrack;
                     break;
                 case IR.Eol:
-                    debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                    dchar back;
+                    DataIndex bi;
+                    debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                     //no matching inside \r\n
                     if(atEnd || ((re.flags & RegexOption.multiline)
-                        && endOfLine(front, seenCr)))
+                        && s.loopBack.nextChar(back,bi)
+                        && endOfLine(front, back == '\r')))
                     {
                         pc += IRL!(IR.Eol);
                     }
@@ -4274,7 +4280,7 @@ template BacktrackingMatcher(alias hardcoded)
                         pc--;
                     else if((re.flags & RegexOption.multiline) 
                         && s.loopBack.nextChar(back,bi)
-                        && endOfLine(back, seenCr)) 
+                        && endOfLine(back, front == '\n')) 
                     {
                         pc--;
                     }
@@ -4282,10 +4288,13 @@ template BacktrackingMatcher(alias hardcoded)
                         goto L_backtrack;
                     break;
                 case IR.Eol:
-                    debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                    dchar back;
+                    DataIndex bi;
+                    debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                     //no matching inside \r\n
                     if((re.flags & RegexOption.multiline) 
-                        && endOfLine(front, seenCr))
+                         && s.loopBack.nextChar(back,bi)
+                        && endOfLine(front, back == '\r'))
                     {
                         pc -= IRL!(IR.Eol);
                     }
@@ -4902,11 +4911,9 @@ string ctAtomCode(Bytecode[] ir, int addr)
         code ~= ctSub(`
                 dchar back;
                 DataIndex bi;
-                if(atStart)
-                    $$
-                else if((re.flags & RegexOption.multiline) 
+                if(atStart || ((re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, seenCr))
+                    && endOfLine(back, front == '\n')))
                 {
                     $$
                 }
@@ -4917,10 +4924,13 @@ string ctAtomCode(Bytecode[] ir, int addr)
         break;
     case IR.Eol:
         code ~= ctSub(`
-                debug(fred_matching) writefln("EOL (seen CR: %x, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                dchar back;
+                DataIndex bi;
+                debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                 //no matching inside \r\n
                 if(atEnd || ((re.flags & RegexOption.multiline) 
-                        && endOfLine(front, seenCr)))
+                         && s.loopBack.nextChar(back,bi)
+                        && endOfLine(front, back == '\r')))
                 {
                     $$
                 }
@@ -5381,7 +5391,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 if(atStart 
                     ||( (re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, false )))//TODO: startOfLine
+                    && startOfLine(back, front == '\n')))
                 {
                     t.pc += IRL!(IR.Bol);
                 }
@@ -5908,11 +5918,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             case IR.Bol:
                 dchar back;
                 DataIndex bi;
-                if(atStart)
-                    t.pc--;
-                else if((re.flags & RegexOption.multiline) 
+                if(atStart
+                    ||((re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, false))
+                    && startOfLine(back, front == '\n')))
                 {
                     t.pc--;
                 }
@@ -6305,7 +6314,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         return t;
     }
     //creates a start thread
-    Thread!DataIndex*  createStart(size_t index)
+    Thread!DataIndex*  createStart(DataIndex index)
     {
         auto t = allocate();
         t.matches.ptr[0..re.ngroup] = (Group!DataIndex).init;
