@@ -116,6 +116,7 @@ import std.string : representation;
 
 debug import std.stdio;
 
+private:
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
 //debug = fred_matching;
@@ -1188,8 +1189,8 @@ int comparePropertyName(Char)(const(Char)[] a, const(Char)[] b)
     }
 }
 
-//ditto
-bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
+//ditto (workaround for internal tools)
+public bool propertyNameLess(Char)(const(Char)[] a, const(Char)[] b)
 {
 	return comparePropertyName(a, b) < 0;
 }
@@ -4477,9 +4478,13 @@ string ctGenFixupCode(ref Bytecode[] ir, int addr, int fixup)
                 trackers[infiniteNesting] = index;
                   
                 $$
+                {
                     pushState($$, counter);
-                infiniteNesting--;
-                goto case;`, addr, testCode, addr+1, fixup);
+                    infiniteNesting--;
+                    goto case $$;
+                }
+                else
+                    goto case $$;`, addr, addr+1, testCode, fixup, addr+1, fixup);
         ir = ir[ir[0].length..$];
         break;
     case IR.RepeatStart, IR.RepeatQStart:
@@ -4555,13 +4560,13 @@ string ctQuickTest(Bytecode[] ir, int id)
         }
         else
         {
+            auto code = ctAtomCode(ir[pc..$], -1);
             return ctSub(`
                 int test_$$()
                 {
                     $$
                 }
-                if(test_$$() >= 0)
-                `, id, ctAtomCode(ir[pc..$], -1), id); 
+                if(test_$$() >= 0)`, id, code ? code : "return -1;", id);
         }
     }
     return "";
@@ -6463,7 +6468,7 @@ public R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
 }
 
 //produce replacement string from format using captures for substitue
-void replaceFmt(R, OutR)(R format, Captures!R captures, OutR sink, bool ignoreBadSubs=false)
+public void replaceFmt(R, OutR)(R format, Captures!R captures, OutR sink, bool ignoreBadSubs=false)
     if(isOutputRange!(OutR, ElementEncodingType!R[]))
 {
     enum State { Normal, Escape, Dollar };
@@ -6617,14 +6622,14 @@ public:
 }
 
 ///A helper function creates a $(D Spliiter) on range $(D r) separated by regex $(D pat).
-Splitter!(Range) splitter(Range)(Range r, RegEx pat)
+public Splitter!(Range) splitter(Range)(Range r, RegEx pat)
     if (is(Unqual!(typeof(Range.init[0])) : dchar))
 {
     return Splitter!(Range)(r, pat);
 }
 
 ///An eager version that creates an array with splitted slices of $(D input).
-String[] split(String)(String input, RegEx rx)
+public String[] split(String)(String input, RegEx rx)
     if(isSomeString!String)
 {
     auto a = appender!(String[])();
@@ -6634,11 +6639,11 @@ String[] split(String)(String input, RegEx rx)
 }
 
 ///Exception object thrown in case of errors during regex compilation.
-class RegexException : Exception
+public class RegexException : Exception
 {
     ///
-    this(string msg)
+    this(string msg, string file = __FILE__, size_t line = __LINE__)
     {
-        super(msg);
+        super(msg, file, line);
     }
 }

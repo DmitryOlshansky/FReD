@@ -1,6 +1,6 @@
 //Written in the D programming language
 /**
-    CodepointSet  utility for analyzing unicode charsets of a given regex
+    Charset -  utility for analyzing codepoint sets of a given regex
 */
 import fred, fred_uni;
 
