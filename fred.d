@@ -3703,7 +3703,8 @@ template BacktrackingMatcher(alias hardcoded)
             newStack();
             backrefed = null;
             static if(kicked)
-                kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
+                if(!(re.flags & RegexInfo.oneShot))
+                    kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
         }
         //
         bool matchFinalize()
@@ -5096,8 +5097,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     DataIndex index;
     DataIndex genCounter;    //merge trace counter, goes up on every dchar
     size_t threadSize;
-    bool matched;
-    bool seenCr;    //true if CR was processed   
+    bool matched;   
     bool exhausted;
     Allocator* alloc;
     static if(__traits(hasMember,Stream, "search"))
@@ -5114,7 +5114,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     //
     bool next()
     {
-        seenCr = front == '\r';
         if(!s.nextChar(front, index))
         {
             index =  s.lastIndex;
@@ -5150,7 +5149,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         genCounter = 0;
         static if(kicked)
         {
-            kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
+            if(!(re.flags & RegexInfo.oneShot))
+                kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
             version(fred_search) writeln("Kickstart: ", kickstart.prefix);
         }
     }
@@ -5378,11 +5378,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             case IR.Bol:
                 dchar back;
                 DataIndex bi;
-                if(atStart)
-                    t.pc += IRL!(IR.Bol);
-                else if((re.flags & RegexOption.multiline) 
+                if(atStart 
+                    ||( (re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, seenCr))
+                    && endOfLine(back, false )))//TODO: startOfLine
                 {
                     t.pc += IRL!(IR.Bol);
                 }
@@ -5396,9 +5395,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Eol:
                 debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                dchar back;
+                DataIndex bi;
                 //no matching inside \r\n
                 if(atEnd || ((re.flags & RegexOption.multiline) 
-                    && endOfLine(front, seenCr)))
+                    && endOfLine(front, s.loopBack.nextChar(back, bi)
+                        && back == '\r')))
                 {
                     t.pc += IRL!(IR.Eol);
                 }
@@ -5758,7 +5760,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     }
     enum uint RestartPc=uint.max;
     //match the input, evaluating IR without searching
-    MatchResult matchOneShot(OneShot direction, DataIndex)(Group!DataIndex[] matches, uint startPc=0)
+    MatchResult matchOneShot(OneShot direction)(Group!DataIndex[] matches, uint startPc=0)
     {
         debug(fred_matching)
         {
@@ -5910,7 +5912,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                     t.pc--;
                 else if((re.flags & RegexOption.multiline) 
                     && s.loopBack.nextChar(back,bi)
-                    && endOfLine(back, seenCr))
+                    && endOfLine(back, false))
                 {
                     t.pc--;
                 }
@@ -5922,9 +5924,12 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 break;
             case IR.Eol:
                 debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                dchar back;
+                DataIndex bi;
                 //no matching inside \r\n
                 if((re.flags & RegexOption.multiline) 
-                    && endOfLine(front, seenCr))
+                    && endOfLine(front, s.loopBack.nextChar(back, bi)
+                        && back == '\r'))
                 {
                     t.pc--;
                 }
