@@ -5,12 +5,12 @@
   $(LUCKY Regular expressions) are commonly used method of pattern matching 
   on strings, with $(I regex) being a catchy word for a pattern in this domain 
   specific language. Typical problems usually solved by regular expressions
-  include validation of user input and ubiquitous find & replace in various text processing utilities.
+  include validation of user input and ubiquitous find & replace in text processing utilities.
   
   The general usage guideline is keeping regex complexity on the side of simplicity, as its capabilities 
   reside in purely character-level manipulation,  and as such are ill suited for tasks
   involving higher level invariants like matching an integer number $(U bounded) in [a,b] interval.
-  Checking of this sort of higher level stuff is better left to a separate postprocessing steps.
+  Checks of this sort of are better addressed by additional postprocessing.
 
   Synposis:
   ---
@@ -18,7 +18,8 @@
   import std.stdio;
 
   //print out all possible dd/mm/yy(yy) dates found in user input
-  auto r = regex(r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b", "g");//g - global, find all matches
+  //g - global, find all matches
+  auto r = regex(r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b", "g");
   foreach(line; stdin.byLine)
   {
     foreach(c; match(line, r))
@@ -607,7 +608,7 @@ struct Interval
 }
 
 /**
-* $(D CodepointSet) is a data structure for manipulating sets of Unicode codepoints in an efficient manner.
+    $(D CodepointSet) is a data structure for manipulating sets of Unicode codepoints in an efficient manner.
 */
 struct CodepointSet
 {
@@ -6548,8 +6549,8 @@ public:
 Compile regular expression pattern for the later execution.
 Resulting $D(Regex) object works on inputs having same character width as $(D pattern).
 Params:
-pattern = regular expression
-flags = The _attributes (g, i, and m accepted)
+pattern = Regular expression
+flags = The _attributes (g, i, m and x accepted)
 
 Throws: $(D RegexException) if there are any compilation errors.
 */
@@ -6584,8 +6585,8 @@ template ctRegexImpl(alias pattern, string flags=[])
 }
 
 /**
-    Experimental feature. Compile regular expression using CTFE at compile 
-    time and generate optimized native machine code for matching it.
+    Experimental feature. Compile regular expression using CTFE 
+    and generate optimized native machine code for matching it.
     Returns: Regex object augmented for faster matching. 
     Currently, to exploit this advantage of you have to use it with $(D bmatch). 
     Otherwise it will work just like any other Regex instance.
@@ -6832,7 +6833,7 @@ public:
     {
         return this.save();
     }
-    
+    ///Forward range primitives.
     @property Range front()
     {
         assert(!empty && _offset <= _match.pre.length
@@ -6863,14 +6864,14 @@ public:
         }
     }
     
-    ///
+    ///ditto
     @property auto save()
     {
         return this;
     }
 }
 
-///A helper function creates a $(D Spliiter) on range $(D r) separated by regex $(D pat).
+///A helper function, creates a $(D Spliiter) on range $(D r) separated by regex $(D pat).
 public Splitter!(Range) splitter(Range, RegEx)(Range r, RegEx pat)
     if( is(BasicElementOf!Range : dchar) && is(RegEx == Regex!(BasicElementOf!Range)))
 {
