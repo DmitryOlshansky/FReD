@@ -30,9 +30,9 @@ int main(string[] argv)
         return 1;
     }
     version(ct_regex)
-        auto engine = ctRegex!(import("ct_pattern"),"g");
+        auto engine = ctRegex!(to!String(import("ct_pattern")),"g");
     else
-        auto engine = regex(argv[1],"g");
+        auto engine = regex(to!String(argv[1]),"g");
     auto raw = cast(char[])std.file.read(argv[2]);
     auto data = to!String(raw);
     size_t count=0;

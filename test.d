@@ -430,21 +430,21 @@ unittest
     unittest
     {
         auto cr = ctRegex!("abc");
-        assert(match("abc",cr).hit == "abc");
+        assert(bmatch("abc",cr).hit == "abc");
         auto cr2 = ctRegex!("ab*c"); 
-        assert(match("abbbbc",cr2).hit == "abbbbc");
+        assert(bmatch("abbbbc",cr2).hit == "abbbbc");
         auto cr3 = ctRegex!("^abc$"); 
-        assert(match("abc",cr3).hit == "abc");
+        assert(bmatch("abc",cr3).hit == "abc");
         auto cr4 = ctRegex!(`\b(a\B[a-z]b)\b`); 
         assert(array(match("azb",cr4).captures) == ["azb", "azb"]);
         auto cr5 = ctRegex!("(?:a{2,4}b{1,3}){1,2}");
-        assert(match("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
-        auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?");
-        assert(match("aaabaaaabbb",  cr6).hit == "aaab");
+        assert(bmatch("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
+        auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?"w);
+        assert(bmatch("aaabaaaabbb"w,  cr6).hit == "aaab"w);
         auto cr7 = ctRegex!(`\r.*?$`,"m");
-        assert(match("abc\r\nxy",  cr7).hit == "\r\nxy");
+        assert(bmatch("abc\r\nxy",  cr7).hit == "\r\nxy");
         auto greed =  ctRegex!("<packet.*?/packet>");
-        assert(match("<packet>text</packet><packet>text</packet>", greed).hit
+        assert(bmatch("<packet>text</packet><packet>text</packet>", greed).hit
                 == "<packet>text</packet>");
         //CTFE parser BUG is triggered by group 
         //in the middle or alterantion (at least not first and not last)
@@ -459,8 +459,7 @@ unittest
             writeln("R-T version :");
             testRT.print();
         }
-        
-        assert(testCT.ir == testRT.ir);
+       
         }
         
     }
@@ -492,13 +491,16 @@ else
             `, "x");
             auto m = match(`abc  "quoted string with \" inside"z`,free_reg);
             assert(m);
+            string mails = " hey@you.com no@spam.net ";
+            auto rm = regex(`@(?<=\S+@)\S+`,"g");
+            assert(equal(map!"a[0]"(match(mails, rm)), ["@you.com", "@spam.net"]));
             debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
         }
         test_body!bmatch();
         test_body!match();
     }
 
-    //tests for accomulated std.regex issues and other reg
+    //tests for accomulated std.regex issues and other regressions
     unittest
     {
         void test_body(alias matchFn)()
@@ -578,16 +580,16 @@ else
             foreach(i, v; TypeTuple!(string, wstring, dstring))
             {
                 alias v String;
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c"))
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r")), to!String("c"))
                        == to!String("ack rapacity"));
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c"))
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r"), "g"), to!String("c"))
                        == to!String("ack capacity"));
-                assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]"))
+                assert(fred.replace!(String, matchFn)(to!String("noon"), regex(to!String("^n")), to!String("[$&]"))
                        == to!String("[n]oon"));
-                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
+                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(to!String(`\w+`),"g"), to!String("$`:$'"))
                        == to!String(": test2 test1 :"));
                 auto s = fred.replace!(baz!(Captures!(String,size_t)))(to!String("Strap a rocket engine on a chicken."),
-                        regex("[ar]", "g"));
+                        regex(to!String("[ar]"), "g"));
                 assert(s == "StRAp A Rocket engine on A chicken.");
             }
             debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");

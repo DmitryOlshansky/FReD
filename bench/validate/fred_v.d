@@ -32,10 +32,10 @@ int main(string[] argv)
     version(ct_regex)
         auto engine = ctRegex!(import("ct_pattern"));
     else
-        auto engine = regex(argv[1]);
+        auto engine = regex(to!String(argv[1]));
     auto raw = cast(char[])std.file.read(argv[2]);
     auto data = to!String(raw);
-    auto lines = split(data, regex("\r\n|\r|\n"));
+    auto lines = split(data, regex(to!String("\r\n|\r|\n")));
     size_t count=0;
     size_t iterations = to!size_t(argv[3]);
     StopWatch sw;

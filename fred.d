@@ -28,13 +28,16 @@
   ...
 
   enum ctr = ctRegex!(`^.*/(.+)/?$`); //static regex, contains precompiled native code
-  auto m2 = match("foo/bar", ctr);   //first match found here if any
+  //use this experimental feature via bmatch
+  auto m2 = bmatch("foo/bar", ctr);   //first match found here if any
   assert(m2);   //so be sure to check if there is a match, before examining contents!
-  assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
+  assert(m2.captures[1] == "bar");//captures is a range of submatches, 0 - full match
 
   ...
+
   //test if a string consists of letters
   assert(match("Letter", `^\p{L}+$`));
+
 
   ---
 
@@ -92,7 +95,7 @@ syntax for unicode blocks is InBlockName))
     symmetric set difference, and intersection respectively))
   )
   All matches returned by pattern matching functionality in this library
-  are slices of original input. With sole exception being replace family of functions
+  are slices of original input. Sole exception being replace family of functions
   that generate new string from input.
  
   License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
@@ -158,8 +161,6 @@ enum IR:uint {
     GotoEndOr         = 0b1_01111_00, //end of an option (length of the rest)
     //... any additional atoms here   
     
-    
-
     OrStart           = 0b1_00000_01, //start of alternation group  (length)
     OrEnd             = 0b1_00000_10, //end of the or group (length,mergeIndex)
     //with this instruction order
@@ -1417,6 +1418,11 @@ enum maxCompiledLength = 2^^18;// *Bytecode.sizeof, i.e. 1Mb of bytecode alone
 enum maxCumulativeRepetitionLength = 2^^20; //amounts to up to 4 Mb of auxilary table for matching
 
 
+template BasicElementOf(Range)
+{
+    alias Unqual!(ElementEncodingType!Range) BasicElementOf;
+}
+
 struct Parser(R, bool CTFE=false)
     if (isForwardRange!R && is(ElementType!R : dchar))
 {
@@ -2484,24 +2490,26 @@ struct Parser(R, bool CTFE=false)
                        msg, origin[0..$-pat.length], pat);
         throw new RegexException(app.data);
     }
-    
+    alias BasicElementOf!R Char;
     //packages parsing results into a RegEx object
-    @property RegEx program()
+    @property Regex!Char program()
     {
-        return RegEx(this);
+        return Regex!Char(this);
     }
 }
+
 
 /**
     $(D RegEx) object holds regular expression pattern in compiled form.
     Instances of this object are constructed via calls to $(D regex).
     It's an intended form for caching and storage of frequently used regular expressions. 
 */
-public struct RegEx
+public struct Regex(Char)
 {
     //temporary workaround for identifier lookup 
     const(CodepointSet)[] charsets; //
-    Bytecode[] ir;      //compiled bytecode of pattern
+    Bytecode[] ir;      //compiled bytecode of pattern    
+
 private:
     NamedGroup[] dict;  //maps name -> user group number
     uint ngroup;        //number of internal groups
@@ -2511,7 +2519,16 @@ private:
     uint flags;         //global regex flags
     const(Trie)[]  tries; //
     uint[] backrefed; //bit array of backreferenced submatches
-
+    Kickstart!Char kickstart;
+    alias bool function(ref BacktrackingMatcher!Char) MatchFn;
+    MatchFn nativeFn;
+    
+    //attach native match function
+    public ref native(MatchFn fn)
+    {
+        nativeFn = fn;
+        return this;
+    }
     //bit access helper
     uint isBackref(uint n)
     {
@@ -2519,7 +2536,8 @@ private:
             return 0;
         return backrefed[n/32] & (1<<(n&31));
     }
-    //
+    
+    //check if searching is not needed
     void checkIfOneShot()
     {
         if(flags & RegexOption.multiline)
@@ -2539,6 +2557,7 @@ private:
             }
         }
     }
+    
     /+
         lightweight post process step,
         only essentials
@@ -2600,8 +2619,11 @@ private:
             }            
         }
         checkIfOneShot();
+        if(!(flags & RegexInfo.oneShot))
+            kickstart = Kickstart!Char(this, new uint[](256));
         debug(fred_allocation) writefln("IR processed, max threads: %d", threadCount);
     }
+    
     //IR code validator - proper nesting, illegal instructions, etc.
     void validate()
     {
@@ -2625,6 +2647,7 @@ private:
         foreach(i,v; groupBits)
             assert(v == 0, text("unclosed group, bogus # is in range ", i*32, " - ",i*32+32));
     }
+    
     //print out disassembly a program's IR
     debug public void print() const
     {
@@ -2639,6 +2662,7 @@ private:
         writeln("Total merge table size: ", hotspotTableSize);
         writeln("Max counter nesting depth: ", maxCounterDepth);
     }
+    
 	//
     this(S,bool x)(Parser!(S,x) p)
     {
@@ -2659,7 +2683,7 @@ private:
             print();
         }
         debug validate();
-    }
+    }   
 }
 
 //
@@ -2672,19 +2696,6 @@ uint lookupNamedGroup(String)(NamedGroup[] dict,String name)
             break;
     enforce(fnd < dict.length, text("no submatch named ", name));
 	return dict[fnd].group;
-}
-
-/**
-    A $(D RegEx) object that contains specifically generated machine code. 
-    As tailored code is associated  with the type as alias parameter, 
-    to store these en masse use $(D std.typecons.Tuple).
-*/
-public struct NativeRegEx(alias Fn)
-{
-    RegEx _prog;
-    alias Fn native;
-    alias _prog this;
-    this(RegEx  prog){    _prog = prog; } 
 }
 
 //whether ch is one of unicode newline sequences
@@ -2701,7 +2712,7 @@ bool startOfLine(dchar back, bool seenNl)
 
 //Test if bytecode starting at pc in program 're' can match given codepoint
 //Returns: length of matched atom if test is positive, 0 - can't tell, -1 if doesn't match
-int quickTestFwd(uint pc, dchar front, const ref RegEx re)
+int quickTestFwd(Char)(uint pc, dchar front, const ref Regex!Char re)
 {
     static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
     for(;;)
@@ -2937,89 +2948,86 @@ private:
     enum charSize =  effectiveSize!Char();
     //maximum number of chars in CodepointSet to process
     enum uint charsetThreshold = 16_000;
-
-public:
-    this(in RegEx re, uint[] memory)
+    static struct ShiftThread
     {
-        static struct Thread
+        uint[] tab;
+        uint mask;
+        uint idx;
+        uint pc, counter, hops;
+        this(uint newPc, uint newCounter, uint[] table)
         {
-            uint[] tab;
-            uint mask;
-            uint idx;
-            uint pc, counter, hops;
-            this(uint newPc, uint newCounter, uint[] table)
-            {
-                pc = newPc;
-                counter = newCounter;
-                mask = 1;
-                idx = 0;
-                hops = 0;
-                tab = table;
-            }
+            pc = newPc;
+            counter = newCounter;
+            mask = 1;
+            idx = 0;
+            hops = 0;
+            tab = table;
+        }
             
-            void setMask(uint idx, uint mask)
-            {
-                tab[idx] |= mask;
-            }
+        void setMask(uint idx, uint mask)
+        {
+            tab[idx] |= mask;
+        }
             
-            void setInvMask(uint idx, uint mask)
-            {
-                tab[idx] &= ~mask;
-            }
+        void setInvMask(uint idx, uint mask)
+        {
+            tab[idx] &= ~mask;
+        }
             
-            void set(alias setBits=setInvMask)(dchar ch)
+        void set(alias setBits=setInvMask)(dchar ch)
+        {
+            static if(charSize == 3)
             {
-                static if(charSize == 3)
+                uint val = ch, tmask = mask;
+                setBits(val&0xFF, tmask);
+                tmask <<= 1;
+                val >>= 8;
+                setBits(val&0xFF, tmask);
+                tmask <<= 1;    
+                val >>= 8;
+                assert(val <= 0x10);
+                setBits(val, tmask);
+                tmask <<= 1;  
+            }
+            else
+            {
+                Char[dchar.sizeof/Char.sizeof] buf;
+                uint tmask = mask;
+                size_t total = encode(buf, ch);
+                for(size_t i=0; i<total; i++, tmask<<=1)
                 {
-                    uint val = ch, tmask = mask;
-                    setBits(val&0xFF, tmask);
-                    tmask <<= 1;
-                    val >>= 8;
-                    setBits(val&0xFF, tmask);
-                    tmask <<= 1;    
-                    val >>= 8;
-                    assert(val <= 0x10);
-                    setBits(val, tmask);
-                    tmask <<= 1;  
-                }
-                else
-                {
-                    Char[dchar.sizeof/Char.sizeof] buf;
-                    uint tmask = mask;
-                    size_t total = encode(buf, ch);
-                    for(size_t i=0; i<total; i++, tmask<<=1)
+                    static if(charSize == 1)
+                        setBits(buf[i], tmask);
+                    else static if(charSize == 2)
                     {
-                        static if(charSize == 1)
-                            setBits(buf[i], tmask);
-                        else static if(charSize == 2)
-                        {
-                            setBits(buf[i]&0xFF, tmask);
-                            tmask <<= 1;
-                            setBits(buf[i]>>8, tmask);
-                        }
+                        setBits(buf[i]&0xFF, tmask);
+                        tmask <<= 1;
+                        setBits(buf[i]>>8, tmask);
                     }
                 }
             }
-            void add(dchar ch){ return set!setInvMask(ch); }
-            void advance(uint s)
-            {
-                mask <<= s;
-                idx += s;
-            }
-            @property bool full(){    return !mask; }
         }
-        static Thread fork(Thread t, uint newPc, uint newCounter)
+        void add(dchar ch){ return set!setInvMask(ch); }
+        void advance(uint s)
         {
-            Thread nt = t;
+            mask <<= s;
+            idx += s;
+        }
+        @property bool full(){    return !mask; }
+    }
+        static ShiftThread fork(ShiftThread t, uint newPc, uint newCounter)
+        {
+            ShiftThread nt = t;
             nt.pc = newPc;
             nt.counter = newCounter;
             return nt;
         }
-        static Thread fetch(ref Thread[] worklist)
+        static ShiftThread fetch(ref ShiftThread[] worklist)
         {
             auto t = worklist[$-1];
             worklist.length -= 1;
-            worklist.assumeSafeAppend();
+            if(!__ctfe)
+                worklist.assumeSafeAppend();
             return t;
         }
         static uint charLen(uint ch)
@@ -3027,6 +3035,10 @@ public:
             assert(ch <= 0x10FFFF);
             return codeLength!Char(cast(dchar)ch)*charSize;
         }
+public:
+    this(const ref Regex!Char re, uint[] memory)
+    {
+        
         assert(memory.length == 256);
         fChar = uint.max;
 	L_FindChar:
@@ -3057,8 +3069,8 @@ public:
 		debug(fred_search) writefln("ShiftOr: %x ", fChar);
 		table = memory;
         table[] =  uint.max;
-        Thread[] trs;
-        Thread t = Thread(0, 0, table);
+        ShiftThread[] trs;
+        ShiftThread t = ShiftThread(0, 0, table);
         //locate first fixed char if any
         n_length = 32;
         for(;;)
@@ -3339,19 +3351,19 @@ unittest
         {
             alias v Char;
             alias immutable(v)[] String;
-            auto r = regex(`abc$`);
+            auto r = regex(to!String(`abc$`));
             auto kick = Kick!Char(r, new uint[256]);
             assert(kick.length == 3, text(Kick.stringof," ",v.stringof, " == ", kick.length));
-            auto r2 = regex(`(abc){2}a+`);
+            auto r2 = regex(to!String(`(abc){2}a+`));
             kick = Kick!Char(r2, new uint[256]);
             assert(kick.length == 7, text(Kick.stringof,v.stringof," == ", kick.length));
-            auto r3 = regex(`\b(a{2}b{3}){2,4}`);
+            auto r3 = regex(to!String(`\b(a{2}b{3}){2,4}`));
             kick = Kick!Char(r3, new uint[256]);
             assert(kick.length == 10, text(Kick.stringof,v.stringof," == ", kick.length));
-            auto r4 = regex(`\ba{2}c\bxyz`);
+            auto r4 = regex(to!String(`\ba{2}c\bxyz`));
             kick = Kick!Char(r4, new uint[256]);
             assert(kick.length == 6, text(Kick.stringof,v.stringof, " == ", kick.length));
-            auto r5 = regex(`\ba{2}c\b`);
+            auto r5 = regex(to!String(`\ba{2}c\b`));
             kick = Kick!Char(r5, new uint[256]);
             size_t x = kick.search("aabaacaa", 0);
             assert(x == 3, text(Kick.stringof,v.stringof," == ", kick.length));
@@ -3365,12 +3377,12 @@ unittest
         {
             alias v Char;
             alias immutable(v)[] String;
-            auto r = regex(`abc[a-z]`);
+            auto r = regex(to!String(`abc[a-z]`));
             auto kick = Kick!Char(r, new uint[256]);
             auto x = kick.search(to!String("abbabca"), 0);
             assert(x == 3, text("real x is ", x, " ",v.stringof));
         
-            auto r2 = regex(`(ax|bd|cdy)`);
+            auto r2 = regex(to!String(`(ax|bd|cdy)`));
             String s2 = to!String("abdcdyabax");
             kick = Kick!Char(r2, new uint[256]);
             x = kick.search(s2, 0);
@@ -3379,13 +3391,13 @@ unittest
             assert(x == 3, text("real x is ", x));
             x = kick.search(s2, x+1);
             assert(x == 8, text("real x is ", x));
-            auto rdot = regex(`...`);
+            auto rdot = regex(to!String(`...`));
             kick = Kick!Char(rdot, new uint[256]);
             assert(kick.length == 0);
-            kick = Kick!Char(regex(`a(b+|c+)x`), new uint[256]);
+            auto rN = regex(to!String(`a(b+|c+)x`));
+            kick = Kick!Char(rN, new uint[256]);
             assert(kick.length == 3);
             assert(kick.search("ababx",0) == 2);
-            assert(kick.search("abaacca",0) == 3);
             assert(kick.search("abaacba",0) == 3);//expected inexact
             
         }
@@ -3395,17 +3407,6 @@ unittest
 }
 
 alias ShiftOr Kickstart;
-        
-
-/**
-    std.regex-like Regex object parametrized on character type.
-    Wraps $(D RegEx), provided for backwards compatibility only.
-*/
-template Regex(Char)
-    if(is(Char : char) || is(Char : wchar) || is(Char : dchar))
-{
-    alias RegEx Regex;
-}
 
 //Simple UTF-string stream abstraction (w/o normalization and such)
 struct Input(Char)
@@ -3627,8 +3628,7 @@ struct StreamTester(Char)
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions.
 +/
-template BacktrackingMatcher(alias hardcoded)
-{
+
     struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(is(Char : dchar))
     {
@@ -3642,7 +3642,7 @@ template BacktrackingMatcher(alias hardcoded)
         enum stateSize = State.sizeof / size_t.sizeof;
         enum initialStack = 1<<16;
         alias const(Char)[] String;
-        RegEx re;           //regex program
+        Regex!Char re;           //regex program
         //Stream state
         Stream s;
         DataIndex index;
@@ -3659,7 +3659,6 @@ template BacktrackingMatcher(alias hardcoded)
         static if(__traits(hasMember,Stream, "search"))
         {
             enum kicked = true;
-            Kickstart!Char kickstart;
         }
         else
             enum kicked = false;
@@ -3679,7 +3678,7 @@ template BacktrackingMatcher(alias hardcoded)
         {
             static if(kicked)
             {
-                if(!s.search(kickstart, front, index))
+                if(!s.search(re.kickstart, front, index))
                 {
                     index = s.lastIndex;
                 }
@@ -3695,7 +3694,7 @@ template BacktrackingMatcher(alias hardcoded)
             memory = chunk[1..$];
         }
         //
-        this(RegEx program, Stream stream, Allocator* allocator)
+        this(Regex!Char program, Stream stream, Allocator* allocator)
         {
             re = program;
             s = stream;
@@ -3705,9 +3704,6 @@ template BacktrackingMatcher(alias hardcoded)
             trackers = alloc.newArray!(DataIndex[])(re.ngroup+1);
             newStack();
             backrefed = null;
-            static if(kicked)
-                if(!(re.flags & RegexInfo.oneShot))
-                    kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
         }
         //
         bool matchFinalize()
@@ -3750,7 +3746,7 @@ template BacktrackingMatcher(alias hardcoded)
                 return m;
             }
             static if(kicked)
-                auto searchFn = kickstart.empty ? &this.next :&this.search;
+                auto searchFn = re.kickstart.empty ? &this.next :&this.search;
             else
                 auto searchFn = &this.next;
             for(;;)
@@ -3774,23 +3770,21 @@ template BacktrackingMatcher(alias hardcoded)
             exhausted = true;
             return false;
         }
-        static if(is(typeof(hardcoded(this))))
-        {
-       
-            bool matchImpl()
-            {
-               return hardcoded(this);
-      
-            }
-        }
-        else
-        {
+        
         /+
-            match subexpression against input, using provided malloc'ed array as stack,
+            match subexpression against input,
             results are stored in matches
         +/
         bool matchImpl()
         {
+            static if(is(typeof(re.nativeFn(this))))
+            {
+                if(re.nativeFn)
+                {
+                    version(fred_ct) debug writeln("using C-T matcher");
+                    return re.nativeFn(this);
+                }
+            }
             pc = 0;
             counter = 0;
             lastState = 0;
@@ -4118,7 +4112,6 @@ template BacktrackingMatcher(alias hardcoded)
             }
             assert(0);
         }
-        }
         
         //helper function, saves engine state
         void pushState(uint pc, uint counter)
@@ -4172,7 +4165,7 @@ template BacktrackingMatcher(alias hardcoded)
         }
         
         /+
-            Match subexpression against input, executing re.ir backwards, using provided malloc'ed array as stack.
+            Match subexpression against input, executing re.ir backwards.
             Results are stored in matches
         +/
         bool matchBackImpl()
@@ -4520,7 +4513,6 @@ template BacktrackingMatcher(alias hardcoded)
             return true;
         }
     }
-}
 
 //state of codegenerator
 struct CtState
@@ -5101,7 +5093,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     ThreadList!DataIndex clist, nlist;
     DataIndex[] merge;
     Group!DataIndex[] backrefed;
-    RegEx re;           //regex program
+    Regex!Char re;           //regex program
     Stream s;
     dchar front;
     DataIndex index;
@@ -5113,7 +5105,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     static if(__traits(hasMember,Stream, "search"))
     {
         enum kicked = true;
-        Kickstart!Char kickstart;
     }
     else
         enum kicked = false;
@@ -5137,7 +5128,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         static if(kicked)
         {
             //TODO: update seenCr
-            if(!s.search(kickstart, front, index))
+            if(!s.search(re.kickstart, front, index))
             {
                 index = s.lastIndex;
                 return false;
@@ -5147,7 +5138,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         assert(0);
     }
     //
-    this()(RegEx program, Stream stream, Allocator* allocator)
+    this()(Regex!Char program, Stream stream, Allocator* allocator)
     {
         re = program;
         s = stream;
@@ -5157,12 +5148,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         if(re.hotspotTableSize)
             merge = alloc.newArray!(DataIndex[])(re.hotspotTableSize);
         genCounter = 0;
-        static if(kicked)
-        {
-            if(!(re.flags & RegexInfo.oneShot))
-                kickstart = Kickstart!Char(re, alloc.newArray!(uint[])(256));
-            version(fred_search) writeln("Kickstart: ", kickstart.prefix);
-        }
     }
     this(S)(ref ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
     {
@@ -5206,7 +5191,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         static if(kicked)
         {
-            auto searchFn = kickstart.empty ? &this.next : &this.search;
+            auto searchFn = re.kickstart.empty ? &this.next : &this.search;
         }
         else
             auto searchFn = &this.next;
@@ -5404,7 +5389,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 break;
             case IR.Eol:
-                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                debug(fred_matching) writefln("EOL (front 0x%x) %s",  front, s[index..s.lastIndex]);
                 dchar back;
                 DataIndex bi;
                 //no matching inside \r\n
@@ -5932,7 +5917,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
                 }
                 break;
             case IR.Eol:
-                debug(fred_matching) writefln("EOL (seen CR: %s, front 0x%x) %s", seenCr, front, s[index..s.lastIndex]);
+                debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                 dchar back;
                 DataIndex bi;
                 //no matching inside \r\n
@@ -6392,41 +6377,48 @@ public:
     {
         return _empty ? _input[] : _input[0 .. matches[0].begin];
     }
+
     ///Slice of input immediately after the match.
     @property R post() 
     {
         return _empty ? _input[] : _input[matches[0].end .. $];
     }
+    
     ///Slice of matched portion of input.
     @property R hit() 
     {
         assert(!_empty);
         return _input[matches[0].begin .. matches[0].end];
     }
+    
     ///Range interface.
     @property R front() 
     {
         assert(!empty);
         return _input[matches[f].begin .. matches[f].end];
     }
+    
     ///ditto
     @property R back() 
     {
         assert(!empty);
         return _input[matches[b-1].begin .. matches[b-1].end];
     }
+    
     ///ditto
     void popFront()
     {   
         assert(!empty);
         ++f;   
     }
+    
     ///ditto
     void popBack()
     {
         assert(!empty);
         --b;   
     }
+    
     ///ditto
     @property bool empty() const { return _empty || f >= b; }
     
@@ -6463,27 +6455,28 @@ public:
     
     ///Number of matches in this object
     @property size_t length() const { return b-f;  }
+
     ///A hook for compatibility with std.regex
     @property ref captures(){ return this; }
 }
 
 /**
     A search engine state, as returned by $(D match) family of functions. 
-    Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a input. 
-    alias Engine specifies an engine type to use during  matching, and is automatically deduced in call to $(D match)/$(D bmatch).
+    Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a given input. 
+    alias Engine specifies an engine type to use during matching, and is automatically deduced in a call to $(D match)/$(D bmatch).
 */
 public struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
 {
 private:
-    alias Unqual!(typeof(R.init[0])) Char;
+    alias BasicElementOf!R Char;
     alias Engine!Char EngineType;
     EngineType _engine;
     Allocator _alloc;
     R _input;
     Captures!(R,EngineType.DataIndex) _captures;
     //
-    this(RegEx prog, R input)
+    this(Regex!Char prog, R input)
     {
         _input = input;
         auto stack = RegionAllocatorStack(1<<20, GCScan.no);
@@ -6492,22 +6485,26 @@ private:
         _captures = Captures!(R,EngineType.DataIndex)(this);
         _captures._empty = !_engine.match(_captures.matches);
     }
+    
 public:
     ///Shorthands for captures.pre, captures.post, captures.hit
     @property R pre()
     {
         return _captures.pre;
     }
+
     ///ditto
     @property R post()
     {
         return _captures.post;
     }
+    
     ///ditto
     @property R hit()
     {
         return _captures.hit;
     }
+    
     /**
         Functionality for processing subsequent matches of global regexes via range interface:
         ---
@@ -6524,6 +6521,7 @@ public:
     {
         return _captures;
     }
+    
     ///ditto
     void popFront()
     { //previous one can have escaped references from Capture object
@@ -6531,72 +6529,81 @@ public:
         _captures.newMatches();
         _captures._empty = !_engine.match(_captures.matches);
     }
+    
+    ///ditto 
+    auto save(){ return this; }
+    
     ///Test if this match object is empty.
     @property bool empty(){ return _captures._empty; }
     
     ///Same as !(x.empty), provided for its convenience  in conditional statements.
     T opCast(T:bool)(){ return !empty; }
+    
     //
     @property auto captures(){ return _captures; }
+    
 }
 
 /**
 Compile regular expression pattern for the later execution.
+Resulting $D(Regex) object works on inputs having same character width as $(D pattern).
 Params:
 pattern = regular expression
 flags = The _attributes (g, i, and m accepted)
 
 Throws: $(D RegexException) if there are any compilation errors.
 */
-public auto regex(S, S2=string)(S pattern, S2 flags=[])
+public auto regex(S, S2=string)(S pattern, S2 flags="")
     if(isSomeString!S && isSomeString!S2)
 {
     if(!__ctfe)
     {
         auto parser = Parser!(Unqual!(typeof(pattern)))(pattern, flags);
-        Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
+        Regex!(BasicElementOf!S) r = parser.program;
         return r;
     }
     else
     {
         auto parser = Parser!(Unqual!(typeof(pattern)), true)(pattern, flags);
-        Regex!(Unqual!(typeof(S.init[0]))) r = parser.program;
+        Regex!(BasicElementOf!S) r = parser.program;
         return r;
     }
 }
 
-template ctRegexImpl(string pattern, string flags=[])
+template ctRegexImpl(alias pattern, string flags=[])
 {
     enum r = regex(pattern, flags);
+    alias BasicElementOf!(typeof(pattern)) Char;
     enum source = ctGenRegEx(r.ir);
-    bool func(T)(ref T matcher)
+    bool func(ref BacktrackingMatcher!Char matcher)
     {
         version(fred_ct) debug pragma(msg, source);
         mixin(source);
     }
-    enum nr = NativeRegEx!(func)(r);
+    enum nr = r.native(&func);
 }
 
-public template ctRegex(string pattern, string flags=[])
+/**
+    Experimental feature. Compile regular expression using CTFE at compile 
+    time and generate optimized native machine code for matching it.
+    Returns: Regex object augmented for faster matching. 
+    Currently, to exploit this advantage of you have to use it with $(D bmatch). 
+    Otherwise it will work just like any other Regex instance.
+*/
+public template ctRegex(alias pattern, alias flags=[])
 {
     enum ctRegex = ctRegexImpl!(pattern, flags).nr;
 }
 
 /**
-    Initiate matching of input to static regex pattern re, using Backtracking matching scheme (precompiled to machine code).
-    Returns a $(D RegexMatch) object holding engine state after first match.
-*/
-public auto match(R, alias s)(R input, NativeRegEx!s re)
-{
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!(re.native))(re, input);
-}
-
-/**
-    Initiate matching of input to regex pattern re, using Thompson NFA matching scheme.
+    Initiate matching of input to regex pattern re, 
+    using Thompson NFA matching scheme.
     Returns a $(D RegexMatch) object holding engine state after first match.
     This is the recommended method for matching regular expression.
 */
-public auto match(R)(R input, RegEx re)
+
+public auto match(R, RegEx)(R input, RegEx re)
+    if(is(RegEx == Regex!(BasicElementOf!R)))
 {
     return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(re, input);
 }
@@ -6609,19 +6616,22 @@ public auto match(R, String)(R input, String pat)
 }
 
 /**
-    Initiate matching of input to regex pattern re, using traditional backtracking matching scheme.
-    Returns a $(D RegexMatch) object holding engine state after first match.
+    Initiate matching of input to regex pattern re, 
+    using traditional backtracking matching scheme.
+    Returns a $(D RegexMatch) object holding engine
+    state after first match.
 */
-public auto bmatch(R)(R input, RegEx re)
+public auto bmatch(R, RegEx)(R input, RegEx re)
+    if(is(RegEx == Regex!(BasicElementOf!R)))
 {
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(re, input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher)(re, input);
 }
 
 ///ditto
 public auto bmatch(R, String)(R input, String pat)
     if(isSomeString!String)
 {
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!"")(regex(pat), input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher)(regex(pat), input);
 }
 
 /**
@@ -6631,7 +6641,7 @@ public auto bmatch(R, String)(R input, String pat)
 
     Params: 
     input = string to search
-    re = compiled regualr expression to use
+    re = compiled regular expression to use
     format = format string to generate replacements from
     
     Example:
@@ -6647,8 +6657,8 @@ public auto bmatch(R, String)(R input, String pat)
     assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
     ---
 */
-public R replace(R, alias scheme=match)(R input, RegEx re, R format)
-    if(isSomeString!R)
+public R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
+    if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R)))
 {
     auto app = appender!(R)();
     auto matches = scheme(input, re);
@@ -6669,8 +6679,8 @@ public R replace(R, alias scheme=match)(R input, RegEx re, R format)
     with the return value from dg.
 
     Params:
-    s = String to search.
-    pattern = Regular expression pattern.
+    s = string to search
+    re = compiled regular expression
     dg = delegate to use
 
     Returns: the resulting string.
@@ -6686,8 +6696,8 @@ public R replace(R, alias scheme=match)(R input, RegEx re, R format)
     assert(s == "StRAp A Rocket engine on A chicken.");
     ---
 */
-public R replace(alias fun, R,alias scheme=match)(R input, RegEx re)
-    if(isSomeString!R)
+public R replace(alias fun, R, RegEx, alias scheme=match)(R input, RegEx re)
+    if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R)))
 {
     auto app = appender!(R)();
     auto matches = scheme(input, re);
@@ -6803,7 +6813,7 @@ private:
     size_t _offset;
     alias RegexMatch!(Range, Engine) Rx; 
     Rx _match;
-    this(Range input, RegEx separator)
+    this(Range input, Regex!(BasicElementOf!Range) separator)
     {
         _input = input;
         separator.flags |= RegexOption.global;
@@ -6829,11 +6839,13 @@ public:
                 && _match.pre.length <= _input.length);
         return _input[_offset .. min($, _match.pre.length)];
     }
+    
     ///ditto
     @property bool empty()
     {
         return _offset > _input.length;
     }
+    
     ///ditto
     void popFront()
     {
@@ -6850,7 +6862,8 @@ public:
             _match.popFront;
         }
     }
-    //
+    
+    ///
     @property auto save()
     {
         return this;
@@ -6858,15 +6871,15 @@ public:
 }
 
 ///A helper function creates a $(D Spliiter) on range $(D r) separated by regex $(D pat).
-public Splitter!(Range) splitter(Range)(Range r, RegEx pat)
-    if (is(Unqual!(typeof(Range.init[0])) : dchar))
+public Splitter!(Range) splitter(Range, RegEx)(Range r, RegEx pat)
+    if( is(BasicElementOf!Range : dchar) && is(RegEx == Regex!(BasicElementOf!Range)))
 {
     return Splitter!(Range)(r, pat);
 }
 
 ///An eager version that creates an array with splitted slices of $(D input).
-public String[] split(String)(String input, RegEx rx)
-    if(isSomeString!String)
+public String[] split(String, RegEx)(String input, RegEx rx)
+    if(isSomeString!String && is(RegEx == Regex!(BasicElementOf!String)))
 {
     auto a = appender!(String[])();
     foreach(e; splitter(input, rx))
