@@ -3016,30 +3016,29 @@ private:
         }
         @property bool full(){    return !mask; }
     }
-        static ShiftThread fork(ShiftThread t, uint newPc, uint newCounter)
-        {
-            ShiftThread nt = t;
-            nt.pc = newPc;
-            nt.counter = newCounter;
-            return nt;
-        }
-        static ShiftThread fetch(ref ShiftThread[] worklist)
-        {
-            auto t = worklist[$-1];
-            worklist.length -= 1;
-            if(!__ctfe)
-                worklist.assumeSafeAppend();
-            return t;
-        }
-        static uint charLen(uint ch)
-        {
-            assert(ch <= 0x10FFFF);
-            return codeLength!Char(cast(dchar)ch)*charSize;
-        }
+	static ShiftThread fork(ShiftThread t, uint newPc, uint newCounter)
+	{
+		ShiftThread nt = t;
+		nt.pc = newPc;
+		nt.counter = newCounter;
+		return nt;
+	}
+	static ShiftThread fetch(ref ShiftThread[] worklist)
+	{
+		auto t = worklist[$-1];
+		worklist.length -= 1;
+		if(!__ctfe)
+			worklist.assumeSafeAppend();
+		return t;
+	}
+	static uint charLen(uint ch)
+	{
+		assert(ch <= 0x10FFFF);
+		return codeLength!Char(cast(dchar)ch)*charSize;
+	}
 public:
     this(const ref Regex!Char re, uint[] memory)
     {
-        
         assert(memory.length == 256);
         fChar = uint.max;
 	L_FindChar:
@@ -3261,18 +3260,19 @@ public:
     @property uint length() const{ return n_length/charSize; }
  
     // lookup compatible bit pattern in haystack, return starting index
-    // has a useful trait: if supplied with valid UTF indexes, returns only valid UTF indexes
+    // has a useful trait: if supplied with valid UTF indexes, 
+    // returns only valid UTF indexes
     // (that given the haystack in question is valid UTF string)
     size_t search(const(Char)[] haystack, size_t idx)
     {
         assert(!empty);
-        const(ubyte)* p = cast(ubyte*)(haystack.ptr+idx);
-		const(ubyte)* end = cast(ubyte*)(haystack.ptr + haystack.length);
+        auto p = cast(const(ubyte)*)(haystack.ptr+idx);
 		uint state = uint.max;
 		uint limit = 1u<<(n_length - 1u);
 		debug(fred_search) writefln("Limit: %32b",limit);
         if(fChar != uint.max)
         {
+			const(ubyte)* end = cast(ubyte*)(haystack.ptr + haystack.length);
 			while(p != end)
 			{
 				if(!~state)
@@ -3302,34 +3302,58 @@ public:
 						-length+1;
 				static if(charSize == 3)
 				{
-					state = (state<<1) | table[*++p];
-					state = (state<<1) | table[*++p];
-					state = (state<<1) | table[*++p];
-					p++;
+					state = (state<<1) | table[p[1]];
+					state = (state<<1) | table[p[2]];
+					state = (state<<1) | table[p[3]];
+					p+=4;
 				}
 				else
-					state = (state<<1) | table[*++p];
+				{
+					state = (state<<1) | table[p[1]];
+					p++;
+				}
 				debug(fred_search) writefln("State: %32b", state);
 			}
 		}
 		else
 		{
-			while(p != end)
+			//in this path we have to shift first
+			static if(charSize == 3)
 			{
-				//in this path we have to shift first
-				static if(charSize == 3)
+				const(ubyte)* end = cast(ubyte*)(haystack.ptr + haystack.length);
+				while(p != end)
 				{
 					state = (state<<1) | table[p[0]];
 					state = (state<<1) | table[p[1]];
 					state = (state<<1) | table[p[2]];
 					p += 4;
-				}
-				else
-					state = (state<<1) | table[*p++];
-				if(!(state & limit))//division rounds down for dchar
-					return (p-cast(ubyte*)haystack.ptr)/Char.sizeof
+					if(!(state & limit))//division rounds down for dchar
+						return (p-cast(ubyte*)haystack.ptr)/Char.sizeof
 						-length;
-				debug(fred_search) writefln("State: %32b", state);
+				}
+			}
+			else
+			{
+				auto len = cast(ubyte*)(haystack.ptr + haystack.length) - p;
+				size_t i  = 0;
+				if(len & 1)
+				{
+					state = (state<<1) | table[p[i++]];
+					if(!(state & limit))
+						return idx+i/Char.sizeof-length;
+				}
+				while(i<len)
+				{
+					state = (state<<1) | table[p[i++]];
+					if(!(state & limit))
+						return idx+i/Char.sizeof
+							-length;
+					state = (state<<1) | table[p[i++]];
+					if(!(state & limit))
+						return idx+i/Char.sizeof
+							-length;
+					debug(fred_search) writefln("State: %32b", state);
+				}
 			}
         }
         return haystack.length;
@@ -5082,7 +5106,8 @@ struct ThreadList(DataIndex)
 enum OneShot { Fwd, Bwd };
 
 /+
-   Thomspon matcher does all matching in lockstep, never looking at the same char twice
+   Thomspon matcher does all matching in lockstep, 
+   never looking at the same char twice
 +/
 struct ThompsonMatcher(Char, Stream=Input!Char)
     if(is(Char : dchar))
@@ -5109,10 +5134,13 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     }
     else
         enum kicked = false;
+        
     //true if it's start of input
     @property bool atStart(){   return index == 0; }
+    
     //true if it's end of input
     @property bool atEnd(){  return index == s.lastIndex && s.atEnd; }
+    
     //
     bool next()
     {
@@ -5123,6 +5151,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         return true;
     }
+    
     //
     bool search()
     {
@@ -5138,6 +5167,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         assert(0);
     }
+    
     //
     this()(Regex!Char program, Stream stream, Allocator* allocator)
     {
@@ -5150,6 +5180,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             merge = alloc.newArray!(DataIndex[])(re.hotspotTableSize);
         genCounter = 0;
     }
+    
     this(S)(ref ThompsonMatcher!(Char,S) matcher, Bytecode[] piece, Stream stream)
     {
         s = stream;
@@ -5161,6 +5192,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         genCounter = matcher.genCounter;
         freelist = matcher.freelist;
     }
+    
     //
     this(this)
     {
@@ -5168,11 +5200,13 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         debug(fred_allocation) writeln("ThompsonVM postblit!");
         //free list is  efectively shared ATM
     }
+    
     enum MatchResult{
         NoMatch,
         PartialMatch,
         Match,
     }
+    
     /+
         the usual match the input and fill matches
     +/
@@ -5257,9 +5291,9 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         if(matched && !(re.flags & RegexOption.global))
            exhausted = true;
-        //TODO: partial matching
         return matched;
     }
+    
     /+
         handle succesful threads
     +/
@@ -5277,6 +5311,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         matched = true;
     }
+    
     /+
         match thread against codepoint, cutting trough all 0-width instructions
         and taking care of control flow, then add it to nlist
