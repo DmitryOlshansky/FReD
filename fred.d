@@ -22,21 +22,26 @@
   auto r = regex(r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b", "g");
   foreach(line; stdin.byLine)
   {
+    //match returns a range that can be iterated 
+    //to get all of subsequent matches
     foreach(c; match(line, r))
         writeln(c.hit);
   }
 
   ...
 
-  enum ctr = ctRegex!(`^.*/(.+)/?$`); //static regex, contains precompiled native code
-  //use this experimental feature via bmatch
-  auto m2 = bmatch("foo/bar", ctr);   //first match found here if any
-  assert(m2);   //so be sure to check if there is a match, before examining contents!
+  //create static regex at compile-time, that contains fast native code
+  enum ctr = ctRegex!(`^.*/([^/]+)/?$`); 
+
+  //works just like normal regex:
+  auto m2 = match("foo/bar", ctr);   //first match found here if any
+  assert(m2);   // be sure to check if there is a match, before examining contents!
   assert(m2.captures[1] == "bar");//captures is a range of submatches, 0 - full match
 
   ...
 
-  //test if a string consists of letters
+  //result of match is directly testable with if/assert/while
+  //e.g. test if a string consists of letters:
   assert(match("Letter", `^\p{L}+$`));
 
 
@@ -62,13 +67,12 @@
   FReD does support the following extensions:
   $(UL
     $(LI Named groups, with Python style syntax (?P<name>re), 
-        names working like aliases in addition to numbers.)
+        with names working like aliases in addition to direct numbers.)
     $(LI Arbitrary length and complexity lookbehind with common syntax 
         (?<=re) and (?<!re), including lookahead in lookbehind and vise-versa )
     $(LI Unicode properities such as Scripts, Blocks and 
         common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.)
   )
-
 
   Unicode support
 
@@ -88,21 +92,23 @@
   *With exception being point 1.1.1, as of yet, normalization of input 
     is expected to be enforced by user.
 
- $(BOOKTABLE Syntax mostly follows techincal standard,
+ $(BOOKTABLE Syntax mostly follows technical standard,
    $(TR $(TD \p{PropertyName}, \P{PropertyName}) $(TD unicode property sets, 
 syntax for unicode blocks is InBlockName))
    $(TR $(TD [a||b], [a--b], [a~~b], [a&&b]) $(TD where a, b 
     are arbitrary [...] sets; means union, set difference,
     symmetric set difference, and intersection respectively))
   )
+
   All matches returned by pattern matching functionality in this library
-  are slices of original input. Sole exception being replace family of functions
+  are slices of original input. Notable exception being replace family of functions
   that generate new string from input.
  
   License: $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
  
-  Authors: Dmitry Olshansky, API and utility constructs 
-    based on original $(D std.regex) by Walter Bright and Andrei Alexandrescu
+  Authors: Dmitry Olshansky, 
+
+  API and utility constructs are based on original $(D std.regex) by Walter Bright and Andrei Alexandrescu
   
   Copyright: Copyright Dmitry Olshansky, 2011
  +/
@@ -110,18 +116,19 @@ syntax for unicode blocks is InBlockName))
 module fred;
 
 import fred_uni;//unicode property tables
-import core.stdc.stdlib, std.array, std.algorithm, std.range,
+import std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip, 
        std.functional, std.exception, std.regionallocator;
-import core.bitop;
-import core.stdc.string;
+import core.bitop, core.stdc.string;
 import ascii = std.ascii;
 import std.string : representation;
 
 debug import std.stdio;
 
 private:
+@safe:
+
 //uncomment to get a barrage of debug info
 //debug = fred_parser;
 //debug = fred_matching;
@@ -282,18 +289,25 @@ struct Bytecode
     
     //bit twiddling helpers
     @property uint data() const { return raw & 0x003f_ffff; }
+    
     //ditto
     @property uint sequence() const { return 2+((raw >>22) & 0x3); }
+    
     //ditto
     @property IR code() const { return cast(IR)(raw>>24); }
+    
     //ditto
     @property bool hotspot() const { return hasMerge(code); }
+    
     //test the class of this instruction
     @property bool isAtom() const { return isAtomIR(code); }
+    
     //ditto
     @property bool isStart() const { return isStartIR(code); }
+    
     //ditto
     @property bool isEnd() const { return isEndIR(code); }
+    
     //number of arguments for this instruction
     @property int args() const { return immediateParamsIR(code); }
     
@@ -326,8 +340,8 @@ struct Bytecode
     }
     
     //human readable name of instruction
-    @property string mnemonic() const
-    {
+    @trusted @property string mnemonic() const
+    {//@@@BUG@@@ to is @system
         return to!string(code);
     }
     
@@ -361,7 +375,7 @@ struct Bytecode
 static assert(Bytecode.sizeof == 4);
 
 //debugging tool, prints out instruction along with opcodes
-string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
+@trusted string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
 {
     auto output = appender!string();
     formattedWrite(output,"%s", irb[pc].mnemonic);
@@ -393,8 +407,6 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
         break;
     case IR.GroupStart, IR.GroupEnd:
         uint n = irb[pc].data;
-        //
-        //Ouch: '!vthis->csym' on line 713 in file 'glue.c'
         string name;
         foreach(v;dict)
             if(v.group == n)
@@ -424,27 +436,33 @@ string disassemble(in Bytecode[] irb, uint pc, in NamedGroup[] dict=[])
 }
 
 //another pretty printer, writes out the bytecode of a regex and where the pc is
-void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc=uint.max,int indent=3,size_t index=0)
+@trusted void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc=uint.max,int indent=3,size_t index=0)
     if (isOutputRange!(Sink,Char))
-{
-    while(irb.length>0){
+{//formattedWrite is @system
+    while(irb.length>0)
+    {
         formattedWrite(sink,"%3d",index);
-        if (pc==0 && irb[0].code!=IR.Char){
+        if(pc==0 && irb[0].code!=IR.Char)
+        {
             for (int i=0;i<indent-2;++i)
                 put(sink,"=");
             put(sink,"> ");
-        } else {
-            if (isEndIR(irb[0].code)){
+        } 
+        else
+        {
+            if(isEndIR(irb[0].code))
+            {
                 indent-=2;
             }
-            if (indent>0){
+            if(indent>0)
+            {
                 string spaces="             ";
                 put(sink,spaces[0..(indent%spaces.length)]);
                 for (size_t i=indent/spaces.length;i>0;--i)
                     put(sink,spaces);
             }
         }
-        if (irb[0].code==IR.Char)
+        if(irb[0].code==IR.Char)
         {
             put(sink,`"`);
             int i=0;
@@ -461,20 +479,23 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc
             }
             index+=i;
             irb=irb[i..$];
-        } else {
+        }
+        else
+        {
             put(sink,irb[0].mnemonic);
             put(sink,"(");
             formattedWrite(sink,"%d",irb[0].data);
             int nArgs= irb[0].args;
-            for (int iarg=0;iarg<nArgs;++iarg){
-                if (iarg+1<irb.length){
+            for(int iarg=0;iarg<nArgs;++iarg)
+            {
+                if(iarg+1<irb.length)
                     formattedWrite(sink,",%d",irb[iarg+1].data);
-                } else {
+                else
                     put(sink,"*error* incomplete irb stream");
-                }
             }
             put(sink,")");
-            if (isStartIR(irb[0].code)){
+            if(isStartIR(irb[0].code))
+            {
                 indent+=2;
             }
             index+=lengthOfIR(irb[0].code);
@@ -485,16 +506,16 @@ void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc
 }
 
 //wrappers for CTFE
-void insertInPlaceAlt(T)(ref T[] arr, size_t idx, T[] items...)
+@trusted void insertInPlaceAlt(T)(ref T[] arr, size_t idx, T[] items...)
 {
-   if(__ctfe)
-       arr = arr[0..idx] ~ items ~ arr[idx..$];
+    if(__ctfe)
+        arr = arr[0..idx] ~ items ~ arr[idx..$];
     else
         insertInPlace(arr, idx, items);
 }
 
 //ditto
-void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
+@trusted void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 {
     //if(__ctfe)
         arr = arr[0..from]~items~arr[to..$];
@@ -503,8 +524,8 @@ void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
 }
 
 //ditto
-void moveAllAlt(T)(T[] src, T[] dest)
-{
+@trusted void moveAllAlt(T)(T[] src, T[] dest)
+{//moveAll is @system
     if(__ctfe)
         foreach(i,v; src)
             dest[i] = v;
@@ -516,9 +537,10 @@ void moveAllAlt(T)(T[] src, T[] dest)
 alias RegionAllocator Allocator;
 
 //Regular expression engine/parser options:
-// global - search  nonoverlapping matches in input
+// global - search  all nonoverlapping matches in input
 // casefold - case insensitive matching, do casefolding on match in unicode mode
 // freeform - ignore whitespace in pattern, to match space use [ ] or \s
+// multiline - switch  ^, $ detect start and end of linesinstead of just start and end of input
 enum RegexOption: uint { global = 0x1, casefold = 0x2, freeform = 0x4, nonunicode = 0x8, multiline = 0x10 };
 alias TypeTuple!('g', 'i', 'x', 'U', 'm') RegexOptionNames;//do not reorder this list
 static assert( RegexOption.max < 0x80);
@@ -560,7 +582,7 @@ struct NamedGroup
 struct Group(DataIndex)
 {
     DataIndex begin, end;
-    string toString() const
+    @trusted string toString() const
     {
         auto a = appender!string();
         formattedWrite(a, "%s..%s", begin, end);
@@ -568,14 +590,10 @@ struct Group(DataIndex)
     }
 }
 
-/// $(D Interval)  represents an interval of codepoints: [a,b).
-struct Interval
+//$(D Interval)  represents an interval of codepoints: [a,b).
+public struct Interval
 {
-    //
-    struct
-    {
-        uint begin, end;
-    }
+    uint begin, end;
 
     ///Create interval containig a single character $(D ch).
     this(dchar ch)
@@ -584,10 +602,10 @@ struct Interval
         end = ch+1;
     }
     
-    /**
+    /++
         Create Interval from inclusive range [$(D a),$(D b)]. Contrary to internal structure, inclusive is chosen for interface.
-        The reason fro this is usability e.g. it's would force user to type the unwieldy Interval('a','z'+1) all over the place.
-    */
+        The reason for this is usability e.g. it's would force user to type the unwieldy Interval('a','z'+1) all over the place.
+    +/
     this(dchar a, dchar b)
     {
         assert(a <= b);
@@ -596,7 +614,7 @@ struct Interval
     }
     
     ///
-    string toString()const
+    @trusted string toString()const
     {
         auto s = appender!string;
         formattedWrite(s,"%s(%s)..%s(%s)",
@@ -607,10 +625,10 @@ struct Interval
 
 }
 
-/**
+/++
     $(D CodepointSet) is a data structure for manipulating sets of Unicode codepoints in an efficient manner.
-*/
-struct CodepointSet
++/
+public struct CodepointSet
 {
 private:
     enum uint endOfRange = 0x110000;
@@ -618,17 +636,17 @@ private:
 
 public:
     ///Add an $(D interval) of codepoints to this set.
-    ref CodepointSet add(Interval inter)
+    @trusted ref CodepointSet add(Interval inter)
     {
         debug(fred_charset) writeln("Inserting ",inter);
         if(ivals.empty)
         {
             insertInPlaceAlt(ivals, 0, inter.begin, inter.end);
             return this;
-        }
+        }//assumeSorted is @system
         auto svals = assumeSorted(ivals);
         auto s = svals.lowerBound(inter.begin).length;
-        auto e = s+svals[s..svals.length].lowerBound(inter.end).length;//TODO: could do slightly better
+        auto e = s+svals[s..svals.length].lowerBound(inter.end).length;
         debug(fred_charset)  writeln("Indexes: ", s,"  ", e);
         if(s & 1)
         {
@@ -670,7 +688,7 @@ public:
     }
     ///Exclude $(D set) from this set.
     ///Algebra: this = this - set.
-    ref CodepointSet sub(in CodepointSet set)
+    @trusted ref CodepointSet sub(in CodepointSet set)
     {
         if(empty)
         {
@@ -738,7 +756,7 @@ public:
     }
     ///Make this set a symmetric difference with $(D set).
     ///Algebra: this = this ~ set (i.e. (this || set) -- (this && set)).
-    ref symmetricSub(in CodepointSet set)
+    @trusted ref symmetricSub(in CodepointSet set)
     {
         auto a = CodepointSet(ivals.dup);
         a.intersect(set);
@@ -748,7 +766,7 @@ public:
     }
     ///Intersect this set with $(D set).
     ///Algebra: this = this & set
-    ref CodepointSet intersect(in CodepointSet set)
+    @trusted ref CodepointSet intersect(in CodepointSet set)
     {
         if(empty || set.empty)
         {
@@ -803,7 +821,7 @@ public:
     }
     
     //this = !this (i.e. [^...] in regex syntax)
-    ref CodepointSet negate()
+    @trusted ref CodepointSet negate()
     {
         if(empty)
         {
@@ -835,8 +853,9 @@ public:
     /**
         Test if ch is present in this set, linear search done in $(BIGOH N) operations 
         on number of $(U intervals) in this set.
-        In practice linear search outperforms binary search until a certain threshold,
-        unless this is the case however it's recommended to use overloaded indexing operator.
+        In practice linear search outperforms binary search until a certain threshold.
+        Unless number of elements is known to be small in advance it's recommended 
+        to use overloaded indexing operator.
     */
     bool scanFor(dchar ch) const
     {
@@ -851,7 +870,7 @@ public:
         Test if ch is present in this set, in $(BIGOH LogN) operations on number 
         of $(U intervals) in this set.
     */
-    bool opIndex(dchar ch)const
+    @trusted bool opIndex(dchar ch)const
     {
         auto svals = assumeSorted!"a <= b"(ivals);
         auto s = svals.lowerBound(cast(uint)ch).length;
@@ -862,7 +881,7 @@ public:
     @property bool empty() const {   return ivals.empty; }
     
     ///Write out in regular expression style [\uxxxx-\uyyyy...].
-    void printUnicodeSet(R)(R sink) const
+    @safe void printUnicodeSet(R)(R sink) const
         if(isOutputRange!(R, const(char)[]))
     {
         sink("[");
@@ -954,7 +973,7 @@ public:
     }
     
     //Random access range of intervals in this set.
-    @property auto byInterval() const
+    @trusted @property auto byInterval() const
     {
         return cast(const(Interval)[])ivals;
     }
@@ -968,12 +987,12 @@ public:
 }    
 
 /**
-    $(D CodepointTrie) is 1-level  $(LUCKY Trie)  data structure focused on lookup speeds.
+    $(D CodepointTrie) is 1-level  $(LUCKY Trie) of codepoints.
     Primary use case is to convert a previously obtained CodepointSet 
-    to speed up subsequent element lookup.
+    in order to speed up subsequent element lookup.
 
     ---
-        auto input = getLargeString();
+        auto input = ...;
         Charset set;
         set.add(unicodeAlphabetic).add('$').add('#');
         auto lookup = CodepointTrie!8(set);
@@ -1003,8 +1022,8 @@ struct CodepointTrie(uint prefixBits)
     bool negative;
     
     //debugging tool
-    debug static void printBlock(in size_t[] block)
-    {
+    @trusted debug static void printBlock(in size_t[] block)
+    {//@@@BUG@@@ write is @system
         for(uint k=0; k<prefixSize; k++)
         {
             if((k & 15) == 0)
@@ -1017,8 +1036,8 @@ struct CodepointTrie(uint prefixBits)
     }
     
     //ditto
-    debug void desc() const
-    {
+    @trusted debug void desc() const
+    {//@@@BUG@@@ writeln is @system
         writeln(indexes);
         writeln("***Blocks***");
         for(uint i=0; i<data.length; i+=prefixWordSize)
@@ -1030,7 +1049,7 @@ struct CodepointTrie(uint prefixBits)
     
 public:
     //create a trie from CodepointSet set
-    this(in CodepointSet s)
+    @trusted this(in CodepointSet s)
     {
         if(s.empty)
             return;
@@ -1098,7 +1117,7 @@ public:
     }
 
     //!= 0 if contains char ch
-    bool opIndex(dchar ch) const
+    @trusted bool opIndex(dchar ch) const
     {
         assert(ch < 0x110000);
         uint ind = ch>>prefixBits;
@@ -1108,7 +1127,7 @@ public:
     }
     
     //invert trie (trick internal for regular expressions, has aliasing problem)
-    private auto negated() const
+    @trusted private auto negated() const
     {
         CodepointTrie t = cast(CodepointTrie)this;//shallow copy, need to subvert type system?
         t.negative = !negative;
@@ -1206,7 +1225,7 @@ unittest
 }
                         
 //Gets array of all of common case eqivalents of given codepoint (fills provided array & returns a slice of it)
-dchar[] getCommonCasing(dchar ch, dchar[] range)
+@trusted dchar[] getCommonCasing(dchar ch, dchar[] range)
 {
     CommonCaseEntry cs;
     size_t i=1, j=0;
@@ -1251,7 +1270,7 @@ unittest
 }
 
 //
-CodepointSet caseEnclose(in CodepointSet set)
+@trusted CodepointSet caseEnclose(in CodepointSet set)
 {
     CodepointSet n;
     for(size_t i=0;i<set.ivals.length; i+=2)
@@ -1307,7 +1326,7 @@ auto memoizeExpr(string expr)()
 /+
     fetch codepoint set corresponding to a name (InBlock or binary property)
 +/
-const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
+@trusted const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
 {
     alias comparePropertyName ucmp;
     CodepointSet s;
@@ -1375,7 +1394,7 @@ const(CodepointSet) getUnicodeSet(in char[] name, bool negated,  bool casefold)
 }
 
 //basic stack, just in case it gets used anywhere else then Parser
-struct Stack(T, bool CTFE=false)
+@trusted struct Stack(T, bool CTFE=false)
 {
     static if(!CTFE)
         Appender!(T[]) stack;//compiles but bogus at CTFE
@@ -1444,7 +1463,7 @@ struct Parser(R, bool CTFE=false)
     const(Trie)[] tries; //
     uint[] backrefed; //bitarray for groups
     
-    this(S)(R pattern, S flags)
+    @trusted this(S)(R pattern, S flags)
         if(isSomeString!S)
     {
         pat = origin = pattern;
@@ -1553,8 +1572,8 @@ struct Parser(R, bool CTFE=false)
     }
     
     //
-    void parseFlags(S)(S flags)
-    {
+    @trusted void parseFlags(S)(S flags)
+    {//@@@BUG@@@ text is @system
         foreach(ch; flags)//flags are ASCII anyway
         {
         L_FlagSwitch:
@@ -1579,7 +1598,7 @@ struct Parser(R, bool CTFE=false)
     }
     
     //parse and store IR for regex pattern
-    void parseRegex()
+    @trusted void parseRegex()
     {
         fixupStack.push(0);
         groupStack.push(1);//0 - whole match
@@ -1771,8 +1790,8 @@ struct Parser(R, bool CTFE=false)
     }
    
     //parse and store IR for atom-quantifier pair
-    void parseQuantifier(uint offset)
-    {
+    @trusted void parseQuantifier(uint offset)
+    {//moveAll is @system
         uint replace = ir[offset].code == IR.Nop;
         if(empty && !replace)
             return;
@@ -2332,8 +2351,8 @@ struct Parser(R, bool CTFE=false)
         charsetToIr(vstack.top);
     }
     //try to generate optimal IR code for this CodepointSet
-    void charsetToIr(in CodepointSet set)
-    {
+    @trusted void charsetToIr(in CodepointSet set)
+    {//@@@BUG@@@ writeln is @system
         uint chars = set.chars();
         if(chars < Bytecode.maxSequence)
         {
@@ -2370,8 +2389,8 @@ struct Parser(R, bool CTFE=false)
     }
     
     //parse and generate IR for escape stand alone escape sequence
-    void parseEscape()
-    {
+    @trusted void parseEscape()
+    {//accesses array of appender 
 
         switch(current)
         {
@@ -2483,7 +2502,7 @@ struct Parser(R, bool CTFE=false)
 	}
     
     //
-    void error(string msg)
+    @trusted void error(string msg)
     {
         auto app = appender!string();
         ir = null;
@@ -2521,15 +2540,7 @@ private:
     const(Trie)[]  tries; //
     uint[] backrefed; //bit array of backreferenced submatches
     Kickstart!Char kickstart;
-    alias bool function(ref BacktrackingMatcher!Char) MatchFn;
-    MatchFn nativeFn;
     
-    //attach native match function
-    public ref native(MatchFn fn)
-    {
-        nativeFn = fn;
-        return this;
-    }
     //bit access helper
     uint isBackref(uint n)
     {
@@ -2563,8 +2574,8 @@ private:
         lightweight post process step,
         only essentials
     +/
-    void lightPostprocess()
-    {
+    @trusted void lightPostprocess()
+    {//@@@BUG@@@ write is @system
         struct FixedStack(T)
         {
             T[] arr;
@@ -2626,8 +2637,8 @@ private:
     }
     
     //IR code validator - proper nesting, illegal instructions, etc.
-    void validate()
-    {
+    @trusted void validate()
+    {//@@@BUG@@@ text is @system
         uint[] groupBits = new uint[ngroup/32+1];
         for(uint pc=0; pc<ir.length; pc+=ir[pc].length)
         {
@@ -2650,8 +2661,8 @@ private:
     }
     
     //print out disassembly a program's IR
-    debug public void print() const
-    {
+    @trusted debug public void print() const
+    {//@@@BUG@@@ write is system
         import std.stdio;
         writefln("PC\tINST\n");
         prettyPrint(delegate void(const(char)[] s){ write(s); },ir);
@@ -2690,6 +2701,7 @@ private:
 //
 uint lookupNamedGroup(String)(NamedGroup[] dict,String name) 
 {
+    //@@@BUG@@@ kills "-inline"
 	//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
     uint fnd;
     for(fnd = 0; fnd<dict.length; fnd++)
@@ -2713,7 +2725,7 @@ bool startOfLine(dchar back, bool seenNl)
 
 //Test if bytecode starting at pc in program 're' can match given codepoint
 //Returns: length of matched atom if test is positive, 0 - can't tell, -1 if doesn't match
-int quickTestFwd(Char)(uint pc, dchar front, const ref Regex!Char re)
+int quickTestFwd(RegEx)(uint pc, dchar front, const ref RegEx re)
 {
     static assert(IRL!(IR.OrChar) == 1);//used in code processing IR.OrChar 
     for(;;)
@@ -2923,6 +2935,30 @@ public struct SampleGenerator(Char)
     }
 }
 
+/**
+    A $(D StaticRegex) is $(D Regex) object that contains specially 
+    generated machine code to speed up matching. 
+    Implicitly convertible to normal $(D Regex), 
+    however doing so will result in loosing this additional capability.
+*/
+public struct StaticRegex(Char)
+{
+private:
+    alias BacktrackingMatcher!(true) Matcher;
+    alias bool function(ref Matcher!Char) MatchFn;
+    MatchFn nativeFn;
+public:
+    Regex!Char _regex;
+    alias _regex this;
+    this(Regex!Char re, MatchFn fn)
+    {
+        _regex = re;
+        nativeFn = fn;
+        
+    }
+
+}
+
 //utility for shiftOr, returns a minimum number of bytes to test in a Char
 uint effectiveSize(Char)()
 {
@@ -2948,7 +2984,7 @@ private:
     uint n_length;
     enum charSize =  effectiveSize!Char();
     //maximum number of chars in CodepointSet to process
-    enum uint charsetThreshold = 16_000;
+    enum uint charsetThreshold = 32_000;
     static struct ShiftThread
     {
         uint[] tab;
@@ -3016,6 +3052,7 @@ private:
         }
         @property bool full(){    return !mask; }
     }
+    
 	static ShiftThread fork(ShiftThread t, uint newPc, uint newCounter)
 	{
 		ShiftThread nt = t;
@@ -3023,7 +3060,8 @@ private:
 		nt.counter = newCounter;
 		return nt;
 	}
-	static ShiftThread fetch(ref ShiftThread[] worklist)
+	
+    @trusted static ShiftThread fetch(ref ShiftThread[] worklist)
 	{
 		auto t = worklist[$-1];
 		worklist.length -= 1;
@@ -3031,13 +3069,15 @@ private:
 			worklist.assumeSafeAppend();
 		return t;
 	}
-	static uint charLen(uint ch)
+	
+    static uint charLen(uint ch)
 	{
 		assert(ch <= 0x10FFFF);
 		return codeLength!Char(cast(dchar)ch)*charSize;
 	}
+    
 public:
-    this(const ref Regex!Char re, uint[] memory)
+    @trusted this(const ref Regex!Char re, uint[] memory)
     {
         assert(memory.length == 256);
         fChar = uint.max;
@@ -3263,7 +3303,7 @@ public:
     // has a useful trait: if supplied with valid UTF indexes, 
     // returns only valid UTF indexes
     // (that given the haystack in question is valid UTF string)
-    size_t search(const(Char)[] haystack, size_t idx)
+    @trusted size_t search(const(Char)[] haystack, size_t idx)
     {
         assert(!empty);
         auto p = cast(const(ubyte)*)(haystack.ptr+idx);
@@ -3359,8 +3399,8 @@ public:
         return haystack.length;
     }
     
-    debug static void dump(uint[] table)
-    {
+    @system debug static void dump(uint[] table)
+    {//@@@BUG@@@ writef(ln) is @system
         for(size_t i=0; i<table.length; i+=4)
         {
             writefln("%32b %32b %32b %32b",table[i], table[i+1], table[i+2], table[i+3]);
@@ -3370,7 +3410,8 @@ public:
 
 unittest
 {
-    void test_fixed(alias Kick)()
+
+    @trusted void test_fixed(alias Kick)()
     {   
         foreach(i, v; TypeTuple!(char, wchar, dchar))
         {
@@ -3396,7 +3437,7 @@ unittest
             assert(x == 8, text(Kick.stringof,v.stringof," == ", kick.length));
         }
     }
-    void test_flex(alias Kick)()
+    @trusted void test_flex(alias Kick)()
     {
         foreach(i, v;TypeTuple!(char, wchar, dchar))
         {
@@ -3433,7 +3474,7 @@ unittest
 
 alias ShiftOr Kickstart;
 
-//Simple UTF-string stream abstraction (w/o normalization and such)
+//Simple UTF-string abstraction compatible with stream interface
 struct Input(Char)
     if(is(Char :dchar))
 {
@@ -3510,7 +3551,7 @@ struct Input(Char)
     @property auto loopBack(){   return BackLooper(this); }
 }
 
-/// Test stream against simple UTF-string stream abstraction (w/o normalization and such)
+// Test stream against simple UTF-string stream abstraction (w/o normalization and such)
 struct StreamTester(Char)
     if (is(Char:dchar))
 {
@@ -3522,23 +3563,29 @@ struct StreamTester(Char)
     size_t[] splits;
     size_t pos;
     
-    /// adds the next chunk to the stream
-    bool addNextChunk(){
-        if (splits.length<pos){
+    //adds the next chunk to the stream
+    bool addNextChunk()
+    {
+        if(splits.length<pos)
+        {
             ++pos;
-            if (pos<splits.length){
+            if(pos<splits.length)
+            {
                 assert(splits[pos-1]<=splits[pos],"splits is not ordered");
                 stream.addChunk(allStr[splits[pos-1]..splits[pos]]);
-            } else {
+            }
+            else
+            {
                 stream.addChunk(allStr[splits[pos-1]..$]);
                 stream.hasEnd=true;
             }
             return true;
-        } else {
-            return false;
         }
+        else
+            return false;
     }
-    /// constructs Input object out of plain string
+    
+    //constructs Input object out of plain string
     this(String input, size_t[] splits)
     {
         allStr=input;
@@ -3548,22 +3595,27 @@ struct StreamTester(Char)
         if (splits.length) {
             stream.addChunk(allStr);
             stream.hasEnd=true;
-        } else {
+        } 
+        else 
             stream.addChunk(allStr[0..splits[0]]);
-        }
     }
-    /// codepoint at current stream position
+    
+    //codepoint at current stream position
     bool nextChar(ref dchar res, ref size_t pos)
     {
         bool ret=stream.nextChar(res,pos);
         dchar refRes;
         size_t refPos;
-        if (!res) {
-            if (stream.hasEnd && refStream.nextChar(refRes,refPos)) {
-                throw new Exception("stream eneded too early",__FILE__,__LINE__);
+        if(!res)
+        {
+            if (stream.hasEnd && refStream.nextChar(refRes,refPos))
+            {
+                throw new Exception("stream eneded too early");
             }
             return false;
-        } else {
+        }
+        else
+        {
             bool refRet=refStream.nextChar(refRes,refPos);
             enforce(refRet==ret,"stream contiinued past end");
             enforce(refRes==res,"incorrect char "~res~" vs "~refRes);
@@ -3571,29 +3623,37 @@ struct StreamTester(Char)
             return true;
         }
     }
-    @property bool atEnd(){
+    
+    @property bool atEnd()
+    {
         enforce(!stream.atEnd || refStream.atEnd,"stream ended too early");
         return stream.atEnd;
     }
+    
     bool search(Kickstart)(ref Kickstart kick, ref dchar res, ref ulong pos)
     {
         bool ret=stream.search(kick,res,pos);
         dchar refRes;
         size_t refPos;
-        if (ret){
+        if(ret)
+        {
             bool refRet=refStream.search(kick,refRes,refPos);
             enforce(refRet,"stream found spurious kickstart match");
             enforce(refRes==res,"stream found different kickstart match "~res~" vs "~refRes);
             enforce(refPos==(pos &~(255UL<<48)),"stream found different pos for kickstart match, non normalized input?: "~to!string(pos)~" vs "~to!string(refPos));
-        } else if (hasEnd) {
+        } 
+        else if(hasEnd)
+        {
             enforce(!refStream.search(kick,refRes,refPos),"stream missed kickstart match");
         }
         return ret;
     }
-    ///index of at End position
+    
+    //index of at End position
     @property size_t lastIndex(){   return _origin.length; }
         
-    String opSlice(size_t start, size_t end){
+    String opSlice(size_t start, size_t end)
+    {
         return _origin[start..end];
     }
     
@@ -3612,38 +3672,45 @@ struct StreamTester(Char)
         bool nextChar(ref dchar res,ref ulong pos)
         {
             bool ret=backlooper.nextChar(res,pos);
-            if (ret){
+            if(ret)
+            {
                 dchar refRes;
                 size_t refPos;
                 bool refRet=refBacklooper.nextChar(refRes,refPos);
                 enforce(refRet,"stream backlooper goes back beyond start");
                 enforce(refRes==res,"stream backlooper has different char "~res~" vs "~refRes);
                 enforce(refPos==(pos &~(255UL<<48)),"stream backlooper has different pos: "~to!string(pos)~" vs "~to!string(refPos));
-            } else if (refBacklooper.nextChar(refPos,refPos)){
+            } 
+            else if (refBacklooper.nextChar(refPos,refPos))
+            {
                 enforce(refPos+historySize<=(startPos &~(255UL<<48)),"stream backlooper stopped before historyWindow");
             }
             return ret;
         }
         @property atEnd(){
-            if (backlooper.atEnd){
+            if(backlooper.atEnd)
+            {
                 dchar res;
                 size_t pos;
-                if (refBacklooper.nextChar(res,pos)) {
+                if (refBacklooper.nextChar(res,pos)) 
+                {
                     // this should be mostly true for already normalized/decoded stuff
                     enforce(pos+backlooper.streamBuf.historySize<=(startPos &~(255UL<<48)),"backlooper stream ended too early");
                 }
-            } else {
+            } 
+            else 
+            {
                 enforce(backlooper.atEnd,"backlooper stream did not end");
             }
             return backlooper.atEnd;
         }
         @property auto loopBack(){   return Input(_origin, _index); }
         
-        ///support for backtracker engine, might not be present
+        //support for backtracker engine, might not be present
         void reset(size_t index){   _index = index+std.utf.stride(_origin, index);  }
         
         String opSlice(size_t start, size_t end){   return _origin[end..start]; }
-        ///index of at End position
+        //index of at End position
         @property size_t lastIndex(){   return 0; }
     }
     @property auto loopBack(){   return BackLooper(this); }
@@ -3653,8 +3720,9 @@ struct StreamTester(Char)
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions.
 +/
-
-    struct BacktrackingMatcher(Char, Stream=Input!Char)
+template BacktrackingMatcher(bool CTregex)
+{
+    @trusted struct BacktrackingMatcher(Char, Stream=Input!Char)
         if(is(Char : dchar))
     {
         alias Stream.DataIndex DataIndex;
@@ -3667,7 +3735,10 @@ struct StreamTester(Char)
         enum stateSize = State.sizeof / size_t.sizeof;
         enum initialStack = 1<<16;
         alias const(Char)[] String;
-        Regex!Char re;           //regex program
+        static if(CTregex)
+            StaticRegex!Char re;
+        else
+            Regex!Char re;           //regex program
         //Stream state
         Stream s;
         DataIndex index;
@@ -3688,17 +3759,16 @@ struct StreamTester(Char)
         else
             enum kicked = false;
         
-        //
         @property bool atStart(){ return index == 0; }
-        //
+        
         @property bool atEnd(){ return index == s.lastIndex && s.atEnd; }
-        //
+        
         void next()
         {    
             if(!s.nextChar(front, index))
                 index = s.lastIndex;
         }
-        //
+        
         void search()
         {
             static if(kicked)
@@ -3712,12 +3782,14 @@ struct StreamTester(Char)
                 next();
         }
         
+        //
         void newStack()
         {
             auto chunk = alloc.newArray!(size_t[])(initialStack*(stateSize + re.ngroup*(Group!DataIndex).sizeof/size_t.sizeof)+1);
             chunk[0] = cast(size_t)(memory.ptr);
             memory = chunk[1..$];
         }
+        
         //
         this(Regex!Char program, Stream stream, Allocator* allocator)
         {
@@ -3730,6 +3802,7 @@ struct StreamTester(Char)
             newStack();
             backrefed = null;
         }
+        
         //
         bool matchFinalize()
         {
@@ -3802,7 +3875,7 @@ struct StreamTester(Char)
         +/
         bool matchImpl()
         {
-            static if(is(typeof(re.nativeFn(this))))
+            static if(CTregex && is(typeof(re.nativeFn(this))))
             {
                 if(re.nativeFn)
                 {
@@ -4224,7 +4297,7 @@ struct StreamTester(Char)
                     break;
                 case IR.Char:
                     if(atEnd || front != re.ir[pc].data)
-                       goto L_backtrack;
+                        goto L_backtrack;
                     pc--;
                     next();
                 break;
@@ -4287,7 +4360,7 @@ struct StreamTester(Char)
                         bool af = wordTrie[front];
                         bool ab = wordTrie[back];
                         if(af ^ ab)
-                           goto L_backtrack;
+                            goto L_backtrack;
                     }
                     pc--;
                     break;
@@ -4311,7 +4384,7 @@ struct StreamTester(Char)
                     debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                     //no matching inside \r\n
                     if((re.flags & RegexOption.multiline) 
-                         && s.loopBack.nextChar(back,bi)
+                            && s.loopBack.nextChar(back,bi)
                         && endOfLine(front, back == '\r'))
                     {
                         pc -= IRL!(IR.Eol);
@@ -4517,7 +4590,7 @@ struct StreamTester(Char)
                     else
                         goto L_backtrack;
                     break;
-                 case IR.Nop:
+                    case IR.Nop:
                     pc --;
                     break;
                 case IR.LookbehindStart:
@@ -4538,6 +4611,7 @@ struct StreamTester(Char)
             return true;
         }
     }
+}
 
 //state of codegenerator
 struct CtState
@@ -4547,7 +4621,7 @@ struct CtState
 }
 
 //very shitty string formatter, $$ replaced with next argument converted to string
-string ctSub( U...)(string format, U args)
+@trusted string ctSub( U...)(string format, U args)
 {
     bool seenDollar;
     foreach(i, ch; format)
@@ -4572,6 +4646,7 @@ string ctSub( U...)(string format, U args)
     }
     return format;
 }
+
 //
 CtState ctGenBlock(Bytecode[] ir, int addr)
 {
@@ -5109,7 +5184,7 @@ enum OneShot { Fwd, Bwd };
    Thomspon matcher does all matching in lockstep, 
    never looking at the same char twice
 +/
-struct ThompsonMatcher(Char, Stream=Input!Char)
+@trusted struct ThompsonMatcher(Char, Stream=Input!Char)
     if(is(Char : dchar))
 {
     alias Stream.DataIndex DataIndex;
@@ -5141,7 +5216,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
     //true if it's end of input
     @property bool atEnd(){  return index == s.lastIndex && s.atEnd; }
     
-    //
     bool next()
     {
         if(!s.nextChar(front, index))
@@ -5152,12 +5226,10 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         return true;
     }
     
-    //
     bool search()
     {
         static if(kicked)
         {
-            //TODO: update seenCr
             if(!s.search(re.kickstart, front, index))
             {
                 index = s.lastIndex;
@@ -5168,7 +5240,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         assert(0);
     }
     
-    //
     this()(Regex!Char program, Stream stream, Allocator* allocator)
     {
         re = program;
@@ -5193,7 +5264,6 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         freelist = matcher.freelist;
     }
     
-    //
     this(this)
     {
         merge = merge.dup;
@@ -5207,9 +5277,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         Match,
     }
     
-    /+
-        the usual match the input and fill matches
-    +/
+    //match the input and fill matches
     bool match(Group!DataIndex[] matches)
     {
         debug(fred_matching)
@@ -5859,6 +5927,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         return (matched?MatchResult.Match:MatchResult.NoMatch);
     }
+    
     /+
         a version of eval that executes IR backwards
     +/
@@ -6288,6 +6357,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             }
         }while(t);
     }
+    
     //get a dirty recycled Thread
     Thread!DataIndex* allocate()
     {
@@ -6296,7 +6366,8 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         freelist = freelist.next;
         return t;
     }
-    //
+    
+    //reserve memory for Threads
     void reserve(size_t size)
     {
         void[] mem = alloc.allocate(threadSize*size)[0 .. threadSize*size];
@@ -6306,12 +6377,14 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
             (cast(Thread!DataIndex*)&mem[i-threadSize]).next = cast(Thread!DataIndex*)&mem[i];
         (cast(Thread!DataIndex*)&mem[i-threadSize]).next = null;
     }
+    
     //dispose a thread
     void recycle(Thread!DataIndex* t)
     {
         t.next = freelist;
         freelist = t;
     }
+    
     //dispose list of threads
     void recycle(ref ThreadList!DataIndex list)
     {
@@ -6324,6 +6397,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         }
         list = list.init;
     }
+    
     //creates a copy of master thread with given pc
     Thread!DataIndex* fork(Thread!DataIndex* master, uint pc, uint counter)
     {
@@ -6334,6 +6408,7 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
         t.uopCounter = 0;
         return t;
     }
+    
     //creates a start thread
     Thread!DataIndex*  createStart(DataIndex index)
     {
@@ -6348,33 +6423,33 @@ struct ThompsonMatcher(Char, Stream=Input!Char)
 }
 
 /**
-$(D Captures) object contains submatches captured during a call to $(D match) or iteration over $(D RegexMatch) range.
-First element of range is the whole match.
-Example, showing basic manipulation on $(D Captures):
+    $(D Captures) object contains submatches captured during a call to $(D match) or iteration over $(D RegexMatch) range.
+    First element of range is the whole match.
+    Example, showing basic operations on $(D Captures):
     
-----
-import fred;
-import std.range;
+    ----
+    import fred;
+    import std.range;
  
-auto m = match("@abc#", regex(`(\w)(\w)(\w)`));
-auto c = m.captures;
-assert(c.pre == "@");// part of input preceeding match
-assert(c.post == "#"); // immediately after match
-assert(c.hit == c[0] && c.hit == "abc");// the whole match
-assert(c[2] =="b");
-assert(c.front == "abc");
-c.popFront();
-assert(c.front == "a");
-assert(c.back == "c");
-c.popBack();
-assert(c.back == "b");
-popFrontN(c, 2);
-assert(c.empty);
-----
+    auto m = match("@abc#", regex(`(\w)(\w)(\w)`));
+    auto c = m.captures;
+    assert(c.pre == "@");// part of input preceeding match
+    assert(c.post == "#"); // immediately after match
+    assert(c.hit == c[0] && c.hit == "abc");// the whole match
+    assert(c[2] =="b");
+    assert(c.front == "abc");
+    c.popFront();
+    assert(c.front == "a");
+    assert(c.back == "c");
+    c.popBack();
+    assert(c.back == "b");
+    popFrontN(c, 2);
+    assert(c.empty);
+    ----
 */
-struct Captures(R,DIndex)
+@trusted struct Captures(R,DIndex)
     if(isSomeString!R)
-{
+{//@trusted because of union inside
     alias DIndex DataIndex;
     alias R String;
 private:
@@ -6389,6 +6464,7 @@ private:
     uint f, b;
     uint ngroup;
     NamedGroup[] names;
+    
     this(alias Engine)(ref RegexMatch!(R,Engine) rmatch)
     {
         _input = rmatch._input;
@@ -6398,15 +6474,18 @@ private:
         b = ngroup;
         f = 0;
     }
+    
     @property Group!DataIndex[] matches()
     {
        return ngroup > smallString ? big_matches : small_matches[0..ngroup];
     }
+    
     void newMatches()
     {
         if(ngroup > smallString)
             big_matches = new Group!DataIndex[ngroup];
     }
+    
 public:
     ///Slice of input prior to the match.
     @property R pre() 
@@ -6497,11 +6576,11 @@ public:
 }
 
 /**
-    A search engine state, as returned by $(D match) family of functions. 
+    A regex engine state, as returned by $(D match) family of functions. 
     Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a given input. 
     alias Engine specifies an engine type to use during matching, and is automatically deduced in a call to $(D match)/$(D bmatch).
 */
-public struct RegexMatch(R, alias Engine=ThompsonMatcher)
+@trusted public struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
 {
 private:
@@ -6511,7 +6590,7 @@ private:
     Allocator _alloc;
     R _input;
     Captures!(R,EngineType.DataIndex) _captures;
-    //
+    
     this(Regex!Char prog, R input)
     {
         _input = input;
@@ -6522,7 +6601,9 @@ private:
         _captures._empty = !_engine.match(_captures.matches);
     }
     
+    ~this(){}
 public:
+    
     ///Shorthands for captures.pre, captures.post, captures.hit
     @property R pre()
     {
@@ -6550,7 +6631,7 @@ public:
         m.popFront();
         assert(m.front.hit == "world");
         m.popFront();
-        assert(m,empty);
+        assert(m.empty);
         ---
     */
     @property auto front()
@@ -6581,13 +6662,13 @@ public:
 }
 
 /**
-Compile regular expression pattern for the later execution.
-Resulting $D(Regex) object works on inputs having same character width as $(D pattern).
-Params:
-pattern = Regular expression
-flags = The _attributes (g, i, m and x accepted)
+    Compile regular expression pattern for the later execution.
+    Resulting $D(Regex) object works on inputs having same character width as $(D pattern).
+    Params:
+    pattern = Regular expression
+    flags = The _attributes (g, i, m and x accepted)
 
-Throws: $(D RegexException) if there are any compilation errors.
+    Throws: $(D RegexException) if there are any compilation errors.
 */
 public auto regex(S, S2=string)(S pattern, S2 flags="")
     if(isSomeString!S && isSomeString!S2)
@@ -6611,20 +6692,19 @@ template ctRegexImpl(alias pattern, string flags=[])
     enum r = regex(pattern, flags);
     alias BasicElementOf!(typeof(pattern)) Char;
     enum source = ctGenRegEx(r.ir);
-    bool func(ref BacktrackingMatcher!Char matcher)
+    alias BacktrackingMatcher!(true) Matcher;
+    bool func(ref Matcher!Char matcher)
     {
         version(fred_ct) debug pragma(msg, source);
         mixin(source);
     }
-    enum nr = r.native(&func);
+    enum nr = StaticRegex!Char(r, &func);
 }
 
 /**
     Experimental feature. Compile regular expression using CTFE 
     and generate optimized native machine code for matching it.
-    Returns: Regex object augmented for faster matching. 
-    Currently, to exploit this advantage of you have to use it with $(D bmatch). 
-    Otherwise it will work just like any other Regex instance.
+    Returns: StaticRegex object for faster matching. 
 */
 public template ctRegex(alias pattern, alias flags=[])
 {
@@ -6635,7 +6715,8 @@ public template ctRegex(alias pattern, alias flags=[])
     Initiate matching of input to regex pattern re, 
     using Thompson NFA matching scheme.
     Returns a $(D RegexMatch) object holding engine state after first match.
-    This is the recommended method for matching regular expression.
+
+    This is the $(U recommended) method for matching regular expression.
 */
 
 public auto match(R, RegEx)(R input, RegEx re)
@@ -6645,29 +6726,43 @@ public auto match(R, RegEx)(R input, RegEx re)
 }
 
 ///ditto
-public auto match(R, String)(R input, String pat)
+public auto match(R, String)(R input, String re)
     if(isSomeString!String)
 {
-    return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(regex(pat), input);
+    return RegexMatch!(Unqual!(typeof(input)),ThompsonMatcher)(regex(re), input);
+}
+
+///Match regular expression using statically generated $(D StaticRegex).
+public auto match(R, RegEx)(R input, RegEx re)
+    if(is(RegEx == StaticRegex!(BasicElementOf!R)))
+{
+    return RegexMatch!(Unqual!(typeof(input)),BacktrackingMatcher!true)(re, input);
 }
 
 /**
     Initiate matching of input to regex pattern re, 
-    using traditional backtracking matching scheme.
+    using traditional $(LUCKY backtracking) matching scheme.
     Returns a $(D RegexMatch) object holding engine
     state after first match.
 */
 public auto bmatch(R, RegEx)(R input, RegEx re)
     if(is(RegEx == Regex!(BasicElementOf!R)))
 {
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher)(re, input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!false)(re, input);
 }
 
 ///ditto
-public auto bmatch(R, String)(R input, String pat)
+public auto bmatch(R, String)(R input, String re)
     if(isSomeString!String)
 {
-    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher)(regex(pat), input);
+    return RegexMatch!(Unqual!(typeof(input)), BacktrackingMatcher!false)(regex(re), input);
+}
+
+///Same as above, but leveraging statically crafted machine code in $(D StaticRegex).
+public auto bmatch(R, RegEx)(R input, RegEx re)
+    if(is(RegEx == StaticRegex!(BasicElementOf!R)))
+{
+    return RegexMatch!(Unqual!(typeof(input)),BacktrackingMatcher!true)(re, input);
 }
 
 /**
@@ -6693,7 +6788,7 @@ public auto bmatch(R, String)(R input, String pat)
     assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
     ---
 */
-public R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
+public @trusted R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
     if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R)))
 {
     auto app = appender!(R)();
@@ -6732,7 +6827,7 @@ public R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
     assert(s == "StRAp A Rocket engine on A chicken.");
     ---
 */
-public R replace(alias fun, R, RegEx, alias scheme=match)(R input, RegEx re)
+public @trusted R replace(alias fun, R, RegEx, alias scheme=match)(R input, RegEx re)
     if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R)))
 {
     auto app = appender!(R)();
@@ -6749,7 +6844,8 @@ public R replace(alias fun, R, RegEx, alias scheme=match)(R input, RegEx re)
 }
 
 //produce replacement string from format using captures for substitue
-public void replaceFmt(R, Capt, OutR)(R format, Capt captures, OutR sink, bool ignoreBadSubs=false)
+public @trusted void replaceFmt(R, Capt, OutR)
+    (R format, Capt captures, OutR sink, bool ignoreBadSubs=false)
     if(isOutputRange!(OutR, ElementEncodingType!R[]) &&
         isOutputRange!(OutR, ElementEncodingType!(Capt.String)[]))
 {
@@ -6849,8 +6945,9 @@ private:
     size_t _offset;
     alias RegexMatch!(Range, Engine) Rx; 
     Rx _match;
-    this(Range input, Regex!(BasicElementOf!Range) separator)
-    {
+    
+    @trusted this(Range input, Regex!(BasicElementOf!Range) separator)
+    {//@@@BUG@@@ generated opAssign of RegexMatch is not @trusted
         _input = input;
         separator.flags |= RegexOption.global;
         if (_input.empty)
@@ -6863,11 +6960,13 @@ private:
             _match = Rx(separator, _input);
         }
     }
+    
 public:    
     auto ref opSlice()
     {
         return this.save();
     }
+
     ///Forward range primitives.
     @property Range front()
     {
@@ -6913,8 +7012,8 @@ public Splitter!(Range) splitter(Range, RegEx)(Range r, RegEx pat)
     return Splitter!(Range)(r, pat);
 }
 
-///An eager version that creates an array with splitted slices of $(D input).
-public String[] split(String, RegEx)(String input, RegEx rx)
+///An eager version of $(D splitter) that creates an array with splitted slices of $(D input).
+public @trusted String[] split(String, RegEx)(String input, RegEx rx)
     if(isSomeString!String && is(RegEx == Regex!(BasicElementOf!String)))
 {
     auto a = appender!(String[])();
@@ -6927,8 +7026,8 @@ public String[] split(String, RegEx)(String input, RegEx rx)
 public class RegexException : Exception
 {
     ///
-    this(string msg, string file = __FILE__, size_t line = __LINE__)
-    {
+    @trusted this(string msg, string file = __FILE__, size_t line = __LINE__)
+    {//@@@BUG@@@ Exception constructor is not @safe
         super(msg, file, line);
     }
 }

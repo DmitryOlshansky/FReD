@@ -225,24 +225,30 @@ function listanchors()
   <span class="d_keyword">import</span> std.stdio;
 
   <span class="d_comment">//print out all possible dd/mm/yy(yy) dates found in user input
-</span>  <span class="d_keyword">auto</span> r = regex(<span class="d_string">r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b"</span>, <span class="d_string">"g"</span>);<span class="d_comment">//g - global, find all matches
-</span>  <span class="d_keyword">foreach</span>(line; stdin.byLine)
+</span>  <span class="d_comment">//g - global, find all matches
+</span>  <span class="d_keyword">auto</span> r = regex(<span class="d_string">r"\b[0-9][0-9]?/[0-9][0-9]?/[0-9][0-9](?:[0-9][0-9])?\b"</span>, <span class="d_string">"g"</span>);
+  <span class="d_keyword">foreach</span>(line; stdin.byLine)
   {
-    <span class="d_keyword">foreach</span>(c; match(line, r))
+    <span class="d_comment">//match returns a range that can be iterated
+</span>    <span class="d_comment">//to get all of subsequent matches
+</span>    <span class="d_keyword">foreach</span>(c; match(line, r))
         writeln(c.hit);
   }
 
   ...
 
-  <span class="d_keyword">enum</span> ctr = ctRegex!(<span class="d_string">`^.*/(.+)/?$`</span>); <span class="d_comment">//static regex, contains precompiled native code
-</span>  <span class="d_comment">//use this experimental feature via bmatch
-</span>  <span class="d_keyword">auto</span> m2 = bmatch(<span class="d_string">"foo/bar"</span>, ctr);   <span class="d_comment">//first match found here if any
-</span>  <span class="d_keyword">assert</span>(m2);   <span class="d_comment">//so be sure to check if there is a match, before examining contents!
+  <span class="d_comment">//create static regex at compile-time, that contains fast native code
+</span>  <span class="d_keyword">enum</span> ctr = ctRegex!(<span class="d_string">`^.*/([^/]+)/?$`</span>);
+
+  <span class="d_comment">//works just like normal regex:
+</span>  <span class="d_keyword">auto</span> m2 = match(<span class="d_string">"foo/bar"</span>, ctr);   <span class="d_comment">//first match found here if any
+</span>  <span class="d_keyword">assert</span>(m2);   <span class="d_comment">// be sure to check if there is a match, before examining contents!
 </span>  <span class="d_keyword">assert</span>(m2.captures[1] == <span class="d_string">"bar"</span>);<span class="d_comment">//captures is a range of submatches, 0 - full match
 </span>
   ...
 
-  <span class="d_comment">//test if a string consists of letters
+  <span class="d_comment">//result of match is directly testable with if/assert/while
+</span>  <span class="d_comment">//e.g. test if a string consists of letters:
 </span>  <span class="d_keyword">assert</span>(match(<span class="d_string">"Letter"</span>, <span class="d_string">`^\p{L}+$`</span>));
 
 
@@ -272,15 +278,12 @@ function listanchors()
   Aside from providing a well known features of regular expressions found in e.g. JavaScript,
   FReD does support the following extensions:
   <ul>   <li>Named groups, with Python style syntax (?P<name>re),
-        names working like aliases in addition to numbers.</li>
+        with names working like aliases in addition to direct numbers.</li>
     <li>Arbitrary length and complexity lookbehind with common syntax
         (?&lt;=re) and (?&lt;!re), including lookahead in lookbehind and vise-versa </li>
     <li>Unicode properities such as Scripts, Blocks and
         common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.</li>
   </ul>
-<p></p>
-
-
 <p></p>
 
 
@@ -305,26 +308,127 @@ function listanchors()
 <p></p>
 
 
- <center><table cellspacing=0 cellpadding=5 class=book><caption>Syntax mostly follows techincal standard</caption>   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
+ <center><table cellspacing=0 cellpadding=5 class=book><caption>Syntax mostly follows technical standard</caption>   <tr><td valign=top>\p{PropertyName}, \P{PropertyName}</td> <td valign=top>unicode property sets,
 syntax for unicode blocks is InBlockName</td></tr>
    <tr><td valign=top>[a||b], [a--b], [a~~b], [a&amp;&b]</td> <td valign=top>where a, b
     are arbitrary [...] sets; means union, set difference,
     symmetric set difference, and intersection respectively</td></tr>
   </table></center>
+<p></p>
+
+
   All matches returned by pattern matching functionality in this library
-  are slices of original input. Sole exception being replace family of functions
+  are slices of original input. Notable exception being replace family of functions
   that generate new string from input.
 
 <p></p>
 <b>License:</b><br><a href="http://boost.org/LICENSE_1_0.txt">Boost License 1.0</a>.
 
 <p></p>
-<b>Authors:</b><br>Dmitry Olshansky, API and utility constructs
-    based on original <span class="d_inlinecode">std.regex</span> by Walter Bright and Andrei Alexandrescu
+<b>Authors:</b><br>Dmitry Olshansky,
+<p></p>
+
+
+  API and utility constructs are based on original <span class="d_inlinecode">std.regex</span> by Walter Bright and Andrei Alexandrescu
 
 <p></p>
 
-<dl><dt class="d_decl">struct <a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span>(uint prefixBits) if (prefixBits &gt; 4);
+<dl><dt class="d_decl">struct <a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span>;
+</dt>
+<dd><span class="d_inlinecode"><a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span></span> is a data structure for manipulating sets of Unicode codepoints in an efficient manner.<p></p>
+
+<dl><dt class="d_decl">ref @trusted CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(Interval <i>inter</i>);
+</dt>
+<dd>Add an <span class="d_inlinecode">interval</span> of codepoints to this set.<p></p>
+
+</dd>
+<dt class="d_decl">ref @safe CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(dchar <i>ch</i>);
+</dt>
+<dd>Add a codepoint <span class="d_inlinecode"><i>ch</i></span> to this set.<p></p>
+
+</dd>
+<dt class="d_decl">ref @safe CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Add <span class="d_inlinecode"><i>set</i></span> in this <i>set</i>. 
+<p></p>
+<b>Algebra:</b><br>
+this = this | <i>set</i>.<p></p>
+
+</dd>
+<dt class="d_decl">ref @trusted CodepointSet <a name="sub"></a><span class="ddoc_psymbol">sub</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Exclude <span class="d_inlinecode"><i>set</i></span> from this <i>set</i>.
+<p></p>
+<b>Algebra:</b><br>
+this = this - <i>set</i>.<p></p>
+
+</dd>
+<dt class="d_decl">ref @trusted auto <a name="symmetricSub"></a><span class="ddoc_psymbol">symmetricSub</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Make this <i>set</i> a symmetric difference with <span class="d_inlinecode"><i>set</i></span>.
+<p></p>
+<b>Algebra:</b><br>
+this = this ~ <i>set</i> (i.e. (this || <i>set</i>) -- (this &amp;&amp; <i>set</i>)).<p></p>
+
+</dd>
+<dt class="d_decl">ref @trusted CodepointSet <a name="intersect"></a><span class="ddoc_psymbol">intersect</span>(in CodepointSet <i>set</i>);
+</dt>
+<dd>Intersect this <i>set</i> with <span class="d_inlinecode"><i>set</i></span>.
+<p></p>
+<b>Algebra:</b><br>
+this = this &amp; <i>set</i><p></p>
+
+</dd>
+<dt class="d_decl">const @safe bool <a name="scanFor"></a><span class="ddoc_psymbol">scanFor</span>(dchar <i>ch</i>);
+</dt>
+<dd>Test if <i>ch</i> is present in this set, linear search done in <b><i>&Omicron;</i>(</b><span class="d_inlinecode">N</span><b><i>)</i></b> operations
+        on number of <u>intervals</u> in this set.
+        In practice linear search outperforms binary search until a certain threshold.
+        Unless number of elements is known to be small in advance it's recommended
+        to use overloaded indexing operator.<p></p>
+
+</dd>
+<dt class="d_decl">const @trusted bool <a name="opIndex"></a><span class="ddoc_psymbol">opIndex</span>(dchar <i>ch</i>);
+</dt>
+<dd>Test if <i>ch</i> is present in this set, in <b><i>&Omicron;</i>(</b><span class="d_inlinecode">LogN</span><b><i>)</i></b> operations on number
+        of <u>intervals</u> in this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @property @safe bool <a name="empty"></a><span class="ddoc_psymbol">empty</span>();
+</dt>
+<dd>Test if this set is <a name="empty"></a><span class="ddoc_psymbol">empty</span>.<p></p>
+
+</dd>
+<dt class="d_decl">const void <a name="printUnicodeSet"></a><span class="ddoc_psymbol">printUnicodeSet</span>(R)(R <i>sink</i>);
+</dt>
+<dd>Write out in regular expression style [\uxxxx-\uyyyy...].<p></p>
+
+</dd>
+<dt class="d_decl">const @property @safe CodepointSet <a name="dup"></a><span class="ddoc_psymbol">dup</span>();
+</dt>
+<dd>Deep copy this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @property @safe uint <a name="extent"></a><span class="ddoc_psymbol">extent</span>();
+</dt>
+<dd>Full covered length from first codepoint to the last one.<p></p>
+
+</dd>
+<dt class="d_decl">const @property @safe uint <a name="chars"></a><span class="ddoc_psymbol">chars</span>();
+</dt>
+<dd>Number of codepoints stored in this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @safe bool <a name="opEquals"></a><span class="ddoc_psymbol">opEquals</span>(ref const CodepointSet <i>set</i>);
+<br>const @safe int <a name="opCmp"></a><span class="ddoc_psymbol">opCmp</span>(ref const CodepointSet <i>set</i>);
+<br>const @safe hash_t <a name="toHash"></a><span class="ddoc_psymbol">toHash</span>();
+</dt>
+<dd>Troika for built-in hash maps.<p></p>
+
+</dd>
+</dl>
+</dd>
+<dt class="d_decl">struct <a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span>(uint prefixBits) if (prefixBits &gt; 4);
 </dt>
 <dd><span class="d_inlinecode"><a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span></span> is 1-level  <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=Trie">Trie</a>  data structure focused on lookup speeds.
     Primary use case is to convert a previously obtained CodepointSet
@@ -351,55 +455,37 @@ syntax for unicode blocks is InBlockName</td></tr>
     It's an intended form for caching and storage of frequently used regular expressions.<p></p>
 
 </dd>
-<dt class="d_decl">struct <a name="StreamTester"></a><span class="ddoc_psymbol">StreamTester</span>(Char) if (is(Char : dchar));
+<dt class="d_decl">struct <a name="StaticRegex"></a><span class="ddoc_psymbol">StaticRegex</span>(Char);
 </dt>
-<dd>Test stream against simple UTF-string stream abstraction (w/o normalization and such)<p></p>
+<dd>A <span class="d_inlinecode"><a name="StaticRegex"></a><span class="ddoc_psymbol">StaticRegex</span></span> is <span class="d_inlinecode">Regex</span> object that contains specially
+    generated machine code to speed up matching.
+    Implicitly convertible to normal <span class="d_inlinecode">Regex</span>,
+    however doing so will result in loosing this additional capability.<p></p>
 
-<dl><dt class="d_decl">bool <a name="addNextChunk"></a><span class="ddoc_psymbol">addNextChunk</span>();
-</dt>
-<dd>adds the next chunk to the stream<p></p>
-
-</dd>
-<dt class="d_decl">auto this(String <i>input</i>, size_t[] <i>splits</i>);
-</dt>
-<dd>constructs Input object out of plain string<p></p>
-
-</dd>
-<dt class="d_decl">bool <a name="nextChar"></a><span class="ddoc_psymbol">nextChar</span>(ref dchar <i>res</i>, ref size_t <i>pos</i>);
-</dt>
-<dd>codepoint at current stream position<p></p>
-
-</dd>
-<dt class="d_decl">size_t <a name="lastIndex"></a><span class="ddoc_psymbol">lastIndex</span>();
-</dt>
-<dd>index of at End position<p></p>
-
-</dd>
-</dl>
 </dd>
 <dt class="d_decl">struct <a name="Captures"></a><span class="ddoc_psymbol">Captures</span>(R,DIndex) if (isSomeString!(R));
 </dt>
 <dd><span class="d_inlinecode"><a name="Captures"></a><span class="ddoc_psymbol">Captures</span></span> object contains submatches captured during a call to <span class="d_inlinecode">match</span> or iteration over <span class="d_inlinecode">RegexMatch</span> range.
-First element of range is the whole match.
-Example, showing basic manipulation on <span class="d_inlinecode"><a name="Captures"></a><span class="ddoc_psymbol">Captures</span></span>:
+    First element of range is the whole match.
+    Example, showing basic operations on <span class="d_inlinecode"><a name="Captures"></a><span class="ddoc_psymbol">Captures</span></span>:
 <p></p>
-<pre class="d_code"><span class="d_keyword">import</span> fred;
-<span class="d_keyword">import</span> std.range;
+<pre class="d_code">    <span class="d_keyword">import</span> fred;
+    <span class="d_keyword">import</span> std.range;
 
-<span class="d_keyword">auto</span> m = match(<span class="d_string">"@abc#"</span>, regex(<span class="d_string">`(\w)(\w)(\w)`</span>));
-<span class="d_keyword">auto</span> c = m.captures;
-<span class="d_keyword">assert</span>(c.pre == <span class="d_string">"@"</span>);<span class="d_comment">// part of input preceeding match
-</span><span class="d_keyword">assert</span>(c.post == <span class="d_string">"#"</span>); <span class="d_comment">// immediately after match
-</span><span class="d_keyword">assert</span>(c.hit == c[0] &amp;&amp; c.hit == <span class="d_string">"abc"</span>);<span class="d_comment">// the whole match
-</span><span class="d_keyword">assert</span>(c[2] ==<span class="d_string">"b"</span>);
-<span class="d_keyword">assert</span>(c.front == <span class="d_string">"abc"</span>);
-c.popFront();
-<span class="d_keyword">assert</span>(c.front == <span class="d_string">"a"</span>);
-<span class="d_keyword">assert</span>(c.back == <span class="d_string">"c"</span>);
-c.popBack();
-<span class="d_keyword">assert</span>(c.back == <span class="d_string">"b"</span>);
-popFrontN(c, 2);
-<span class="d_keyword">assert</span>(c.empty);
+    <span class="d_keyword">auto</span> m = match(<span class="d_string">"@abc#"</span>, regex(<span class="d_string">`(\w)(\w)(\w)`</span>));
+    <span class="d_keyword">auto</span> c = m.captures;
+    <span class="d_keyword">assert</span>(c.pre == <span class="d_string">"@"</span>);<span class="d_comment">// part of input preceeding match
+</span>    <span class="d_keyword">assert</span>(c.post == <span class="d_string">"#"</span>); <span class="d_comment">// immediately after match
+</span>    <span class="d_keyword">assert</span>(c.hit == c[0] &amp;&amp; c.hit == <span class="d_string">"abc"</span>);<span class="d_comment">// the whole match
+</span>    <span class="d_keyword">assert</span>(c[2] ==<span class="d_string">"b"</span>);
+    <span class="d_keyword">assert</span>(c.front == <span class="d_string">"abc"</span>);
+    c.popFront();
+    <span class="d_keyword">assert</span>(c.front == <span class="d_string">"a"</span>);
+    <span class="d_keyword">assert</span>(c.back == <span class="d_string">"c"</span>);
+    c.popBack();
+    <span class="d_keyword">assert</span>(c.back == <span class="d_string">"b"</span>);
+    popFrontN(c, 2);
+    <span class="d_keyword">assert</span>(c.empty);
 </pre>
 <p></p>
 
@@ -460,7 +546,7 @@ popFrontN(c, 2);
 </dd>
 <dt class="d_decl">struct <a name="RegexMatch"></a><span class="ddoc_psymbol">RegexMatch</span>(R,alias Engine = ThompsonMatcher) if (isSomeString!(R));
 </dt>
-<dd>A search engine state, as returned by <span class="d_inlinecode">match</span> family of functions.
+<dd>A regex engine state, as returned by <span class="d_inlinecode">match</span> family of functions.
     Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a given input.
     alias Engine specifies an engine type to use during matching, and is automatically deduced in a call to <span class="d_inlinecode">match</span>/<span class="d_inlinecode">bmatch</span>.<p></p>
 
@@ -482,7 +568,7 @@ popFrontN(c, 2);
         m.popFront();
         <span class="d_keyword">assert</span>(m.<span class="d_psymbol">front</span>.hit == <span class="d_string">"world"</span>);
         m.popFront();
-        <span class="d_keyword">assert</span>(m,empty);
+        <span class="d_keyword">assert</span>(m.empty);
 </pre>
 <p></p>
 
@@ -502,7 +588,7 @@ popFrontN(c, 2);
 <dt class="d_decl">auto <a name="regex"></a><span class="ddoc_psymbol">regex</span>(S, S2 = string)(S <i>pattern</i>, S2 <i>flags</i> = "");
 </dt>
 <dd>Compile regular expression pattern for the later execution.
-Resulting $D(Regex) object works on inputs having same character width as <span class="d_inlinecode">pattern</span>.
+    Resulting $D(Regex) object works on inputs having same character width as <span class="d_inlinecode">pattern</span>.
 <p></p>
 <b>Parameters:</b><table class=parms><tr><td valign=top>pattern</td>
 <td valign=top>Regular expression</td></tr>
@@ -516,27 +602,36 @@ Resulting $D(Regex) object works on inputs having same character width as <span 
 <dd>Experimental feature. Compile regular expression using CTFE
     and generate optimized native machine code for matching it.
 <p></p>
-<b>Returns:</b><br>Regex object augmented for faster matching.
-    Currently, to exploit this advantage of you have to use it with <span class="d_inlinecode">bmatch</span>.
-    Otherwise it will work just like any other Regex instance.<p></p>
+<b>Returns:</b><br>StaticRegex object for faster matching.<p></p>
 
 </dd>
 <dt class="d_decl">auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
-<br>auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, String)(R <i>input</i>, String <i>pat</i>);
+<br>auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, String)(R <i>input</i>, String <i>re</i>);
 </dt>
 <dd>Initiate matching of input to regex pattern re,
     using Thompson NFA matching scheme.
     Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine state after first <a name="match"></a><span class="ddoc_psymbol">match</span>.
-    This is the recommended method for matching regular expression.<p></p>
+<p></p>
+This is the <u>recommended</u> method for matching regular expression.<p></p>
+
+</dd>
+<dt class="d_decl">auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
+</dt>
+<dd>Match regular expression using statically generated <span class="d_inlinecode">StaticRegex</span>.<p></p>
 
 </dd>
 <dt class="d_decl">auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
-<br>auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, String)(R <i>input</i>, String <i>pat</i>);
+<br>auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, String)(R <i>input</i>, String <i>re</i>);
 </dt>
 <dd>Initiate matching of input to regex pattern re,
-    using traditional backtracking matching scheme.
+    using traditional <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=backtracking">backtracking</a> matching scheme.
     Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine
     state after first match.<p></p>
+
+</dd>
+<dt class="d_decl">auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
+</dt>
+<dd>Same as above, but leveraging statically crafted machine code in <span class="d_inlinecode">StaticRegex</span>.<p></p>
 
 </dd>
 <dt class="d_decl">R <a name="replace"></a><span class="ddoc_psymbol">replace</span>(R, alias scheme = match, RegEx)(R <i>input</i>, RegEx <i>re</i>, R <i>format</i>);
@@ -594,14 +689,14 @@ separator.
 </dd>
 <dt class="d_decl">String[] <a name="split"></a><span class="ddoc_psymbol">split</span>(String, RegEx)(String <i>input</i>, RegEx <i>rx</i>);
 </dt>
-<dd>An eager version that creates an array with splitted slices of <span class="d_inlinecode">input</span>.<p></p>
+<dd>An eager version of <span class="d_inlinecode">splitter</span> that creates an array with splitted slices of <span class="d_inlinecode">input</span>.<p></p>
 
 </dd>
 <dt class="d_decl">class <a name="RegexException"></a><span class="ddoc_psymbol">RegexException</span>: object.Exception;
 </dt>
 <dd>Exception object thrown in case of errors during regex compilation.<p></p>
 
-<dl><dt class="d_decl">this(string <i>msg</i>, string <i>file</i> = __FILE__, size_t <i>line</i> = __LINE__);
+<dl><dt class="d_decl">@trusted  this(string <i>msg</i>, string <i>file</i> = __FILE__, size_t <i>line</i> = __LINE__);
 </dt>
 <dd><p></p>
 
