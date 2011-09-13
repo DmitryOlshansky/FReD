@@ -4932,7 +4932,7 @@ string ctAtomCode(Bytecode[] ir, int addr)
                 {
                     $$
                     $$
-                }`,  addr >= 0 ? "next();" :"", ir[i].data, nextInstr);
+                }`,   ir[i].data, addr >= 0 ? "next();" :"", nextInstr);
         }
         code ~= ctSub( `
             $$`, bailOut);
