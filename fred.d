@@ -30,7 +30,7 @@
 
   ...
 
-  //create static regex at compile-time, that contains fast native code
+  //create static regex at compile-time, contains fast native code
   enum ctr = ctRegex!(`^.*/([^/]+)/?$`);
 
   //works just like normal regex:
@@ -2491,16 +2491,24 @@ struct Parser(R, bool CTFE=false)
 	{
         alias comparePropertyName ucmp;
         enum MAX_PROPERTY = 128;
-		enforce(next() && current == '{', "{ expected ");
         char[MAX_PROPERTY] result;
         uint k=0;
-        while(k<MAX_PROPERTY && next() && current !='}' && current !=':')
-            if(current != '-' && current != ' ' && current != '_')
-                result[k++] = cast(char)ascii.toLower(current);
-        enforce(k != MAX_PROPERTY, "invalid property name");
+        enforce(next());
+		if(current == '{')
+        {
+            while(k<MAX_PROPERTY && next() && current !='}' && current !=':')
+                if(current != '-' && current != ' ' && current != '_')
+                    result[k++] = cast(char)ascii.toLower(current);
+            enforce(k != MAX_PROPERTY, "invalid property name");
+            enforce(current == '}', "} expected ");
+        }
+        else
+        {//single char properties e.g.: \pL, \pN ...
+            enforce(current < 0x80, "invalid property name");
+            result[k++] = cast(char)current;
+        }
 		auto s = getUnicodeSet(result[0..k], negated, cast(bool)(re_flags & RegexOption.casefold));
 		enforce(!s.empty, "unrecognized unicode property spec");
-		enforce(current == '}', "} expected ");
 		next();
 		return s;
 	}

@@ -6,7 +6,10 @@ import std.file;
 import std.stdio;
 import std.datetime;
 import std.conv;
+import std.string;
+
 import fred;
+
 version(backtracking)
 	alias bmatch matchFn;
 else version(thompson)	
@@ -35,7 +38,7 @@ int main(string[] argv)
         auto engine = regex(to!String(argv[1]));
     auto raw = cast(char[])std.file.read(argv[2]);
     auto data = to!String(raw);
-    auto lines = split(data, regex(to!String("\r\n|\r|\n")));
+    auto lines = std.string.split(data, "\n");
     size_t count=0;
     size_t iterations = to!size_t(argv[3]);
     StopWatch sw;

@@ -4,7 +4,7 @@ a project proposed as source level compatible replacement for std.regex
 
 Package contents
 --------------------------
-bench\*          - sample programs for benchmarking and comparing results (D vs C++ libraries)
+bench\*          - sample programs for benchmarking (D vs C++ libraries)
 streamDecode.d   - upcoming stream regex support
 fred.d           - core library
 fred_uni.d       - unicode tables for properties

@@ -254,7 +254,7 @@ unittest
         TestVectors(   `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
         TestVectors(   "\U00010400{2}",  "\U00010428\U00010400 ",   "y",   "$&", "\U00010428\U00010400", "i"),
         TestVectors(   `[adzУ-Я]{4}`,    "DzюА"                     "y",   "$&", "DzЮа", "i"),
-        TestVectors(   `\p{L}\p{Lu}{10}`, "абвгдеЖЗИКЛ",        "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(   `\p{L}\p{Lu}{10}`, "абвгдеЖЗИКЛ",            "y",   "$&", "абвгдеЖЗИКЛ", "i"),
         TestVectors(   `(?:Dåb){3}`,  "DåbDÅBdÅb",                  "y",   "$&", "DåbDÅBdÅb", "i"),
 //escapes:
         TestVectors(    `\u0041\u005a\U00000065\u0001`,         "AZe\u0001",       "y",   "$&", "AZe\u0001"),  
@@ -270,6 +270,8 @@ unittest
         TestVectors(    `\b\w+\b`,  " abde4 ",  "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  " abde4",   "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  "abde4 ",   "y", "$&", "abde4"),
+        TestVectors(    `\pL\pS`,   "a\u02DA",  "y", "$&", "a\u02DA"),
+        TestVectors(    `\pX`,      "",         "c", "-",  "-"),
 // ^, $, \b, \B, multiline :
         TestVectors(    `\r.*?$`,    "abc\r\nxy", "y", "$&", "\r\nxy", "m"),
         TestVectors(    `^a$^b$`,    "a\r\nb\n",  "n", "$&", "-", "m"),
@@ -285,6 +287,7 @@ unittest
         TestVectors(    `\B^.`,      "ab",        "n", "-",  "-"),
         TestVectors(    `^ab\Bc\B`,  "\r\nabcd",  "y", "$&", "abc", "m"),
         TestVectors(    `^.*$`,      "12345678",  "y", "$&", "12345678"),
+        
 // luckily obtained regression on incremental matching in backtracker
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
