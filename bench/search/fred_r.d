@@ -5,6 +5,7 @@ module main;
 import std.file;
 import std.stdio;
 import std.datetime;
+import std.conv;
 
 import fred;
 version(backtracking)
@@ -15,7 +16,13 @@ else version(ct_regex)
 	alias match matchFn;
 else	
 	static assert(0, "Use -version=backtracking or -version=thompson or -version=ct_regex");
-
+version(Wchar)
+	alias wstring String;
+else version(Dchar)
+	alias dstring String;
+else
+	alias string String;
+	
 int main(string[] argv)
 {
     if(argv.length < 3){
@@ -23,10 +30,11 @@ int main(string[] argv)
         return 1;
     }
     version(ct_regex)
-        auto engine = ctRegex!(import("ct_pattern"),"g");
+        auto engine = ctRegex!(to!String(import("ct_pattern")),"g");
     else
-        auto engine = regex(argv[1],"g");
-    auto data = cast(char[])std.file.read(argv[2]);
+        auto engine = regex(to!String(argv[1]),"g");
+    auto raw = cast(char[])std.file.read(argv[2]);
+    auto data = to!String(raw);
     size_t count=0;
     StopWatch sw;
     sw.start();

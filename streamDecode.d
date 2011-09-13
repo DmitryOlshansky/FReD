@@ -7,6 +7,7 @@ import std.stdio, std.format;
 import std.range;
 import std.conv:to;
 import std.math;
+import std.exception:Exception,enforce;
 
 /// core of the streaming/decoding/caching engine
 enum QC { Yes, No, Maybe, Invalid };
@@ -17,10 +18,125 @@ QC quickCheck(dchar ch)
     return QC.Yes;
 }
 
+immutable(string) decodeNextChar=`
+        // decodes next char in newC and newPos, might exit if more chuncks are requested
+        dchar newC=chunkAtt[chunkPos];
+        ulong newPos=chunkPos+chunkStart;
+        ++chunkPos;
+        static if (is(Char==wchar)){
+            if ((newC & ~0x7F)!=0){
+                writefln("nextChar wchar decoding");
+                if ((newC >= 0xD800 && newC <= 0xDBFF)){
+                    if (chunkPos<chunkAtt.length){
+                        dchar c2 = chunkAtt[chunkPos];
+                        assert(c2 >= 0xDC00 && c2 <= 0xDFFF,"invalid surrogate low value");
+                        newC = ((newC - 0xD7C0) << 10) + (c2 - 0xDC00); // could fuse constants...
+                        ++chunkPos;
+                    } else {
+                        maybeCompleteBuf(decodedPos);
+                        bufPushNonNormal(decodedChar,decodedPos);
+                        decodedChar=newC;
+                        decodedPos=newPos;
+                        status=Status.BufCharPartial;
+                        enforce(!hasEnd,"coding error");
+                        return false;
+                    }
+                } else {
+                    assert(newC < 0xDC00 || newC > 0xDFFF,"unexpected low surrogate");
+                }
+            }
+        } else static if (is(Char==char)){
+            if (newC & 0x80){ // needs more decoding
+                writefln("nextChar char decoding");
+                switch(newC>>4){ // here we could assert((newC&0x40)!=0), and use 0b11&(newC>>4) in the switch which is more compact, possibly genearting better switch table
+                case 0b1101:
+                    if (chunkPos<chunkAtt.length){
+                        dchar c2=chunkAtt[chunkPos];
+                        ++chunkPos;
+                        assert((c2&0b1100_0000)==0x80,"encoding error");
+                        newC=(newC<<7)+c2-0b0110_0000_1000_0000; // fused consts
+                    } else {
+                        maybeCompleteBuf(decodedPos);
+                        bufPushNonNormal(decodedChar,decodedPos);
+                        decodedChar=newC-0b1100_0000;
+                        decodedPos=newPos;
+                        status=Status.BufCharPartial;
+                        enforce(!hasEnd,"encoding error");
+                        return false;
+                    }
+                    break;
+                case 0b1110:
+                    assert((newC & 0b1_1000)!=0b1000,"encoding error");
+                    if (chunkPos+1<chunkAtt.length){
+                        dchar c2=chunkAtt[chunkPos];
+                        assert((c2&0b1100_0000)==0x80,"encoding error");
+                        dchar c3=chunkAtt[chunkPos+1];
+                        assert((c3&0b1100_0000)==0x80,"encoding error");
+                        chunkPos+=2;
+                        newC=(newC<<14)+(c2<<7)+c3-0b0011_1000_0100_0000_1000_0000; // fused consts
+                    } else {
+                        maybeCompleteBuf(decodedPos);
+                        bufPushNonNormal(decodedChar,decodedPos);
+                        if (chunkPos<chunkAtt.length){
+                            dchar c2=chunkAtt[chunkPos];
+                            assert((c2&0b1100_0000)==0x80,"encoding error");
+                            ++chunkPos;
+                            decodedChar=(newC<<7)+c2-0b0111_0000_1000_0000; // fused consts
+                        } else {
+                            decodedChar=newC-0b1110_0000;
+                        }
+                        decodedPos=newPos;
+                        status=Status.BufCharPartial;
+                        enforce(!hasEnd,"encoding error");
+                        return false;
+                    }
+                    break;
+                case 0b1111:
+                    assert((newC & 0b1100)!=0b0100,"encoding error");
+                    if (chunkPos+2<chunkAtt.length){
+                        dchar c2=chunkAtt[chunkPos];
+                        assert((c2&0b1100_0000)==0x80,"encoding error");
+                        dchar c3=chunkAtt[chunkPos+1];
+                        assert((c3&0b1100_0000)==0x80,"encoding error");
+                        dchar c4=chunkAtt[chunkPos+2];
+                        assert((c4&0b1100_0000)==0x80,"encoding error");
+                        chunkPos+=3;
+                        newC=(newC<<21)+(c2<<14)+(c3<<7)+c4-0b0001_1110_0010_0000_0100_0000_1000_0000; // fused consts
+                    } else {
+                        maybeCompleteBuf(decodedPos);
+                        bufPushNonNormal(decodedChar,decodedPos);
+                        if (chunkPos+1<chunkAtt.length){
+                            dchar c2=chunkAtt[chunkPos];
+                            assert((c2&0b1100_0000)==0x80,"encoding error");
+                            dchar c3=chunkAtt[chunkPos+1];
+                            assert((c3&0b1100_0000)==0x80,"encoding error");
+                            chunkPos+=2;
+                            decodedChar=(newC<<14)+(c2<<7)+c3-0b0011_1100_0100_0000_1000_0000; // fused consts
+                        } else if (chunkPos<chunkAtt.length){
+                            dchar c2=chunkAtt[chunkPos];
+                            assert((c2&0b1100_0000)==0x80,"encoding error");
+                            ++chunkPos;
+                            decodedChar=(newC<<7)+c2-0b0111_1000_1000_0000; // fused consts
+                        } else {
+                            decodedChar=newC-0b1111_0000;
+                        }
+                        decodedPos=newPos;
+                        status=Status.BufCharPartial;
+                        enforce(!hasEnd,"encoding error");
+                        return false;
+                    }
+                    break;
+                default:
+                    assert(0,"encoding error");
+                }
+            }
+        }
+`;
 /// Simple UTF-string stream abstraction with caching
 struct StreamCBuf(Char)
     if(is(Char : dchar))//any char
 {
+    alias ulong DataIndex;
     alias const(Char)[] String;
     /// current chunk of the string
     String chunkAtt;
@@ -47,7 +163,7 @@ struct StreamCBuf(Char)
     /// index of the first char of the current chunk
     ulong chunkStart;
     /// if the end of the current chunk is the end of the stream
-    bool hasEnd;
+    public bool hasEnd;
     /// * if status is DirectCharOne cached quickcheck=yes char that will be returned 
     ///   if the next char is also quickcheck=yes (the normal case).
     /// * if status is BufCharPartial it contains the partially decoded char
@@ -158,12 +274,7 @@ struct StreamCBuf(Char)
         if (status==Status.DirectCharOne){ // normal case
             if (chunkAtt.length>chunkPos)
             {
-                dchar newC=chunkAtt[chunkPos];
-                ulong newPos=chunkPos+chunkStart;
-                ++chunkPos;
-                static if (!is(Char==dchar)){
-                    // maybe decode more, or create a partial state, guarantee history and return false
-                }
+                mixin(decodeNextChar); // expand if you need to debug...
                 switch (quickCheck(newC)){
                 case QC.Yes: // normal case
                     res=decodedChar;
@@ -223,25 +334,32 @@ struct StreamCBuf(Char)
             --bufPos;
         }
         if (status==Status.BufCharPartial){
-            static if (!is(Char==dchar)){
-                while (chunkAtt.length>chunkPos){
-                    dchar newC=chunkAtt[chunkPos];
+            static if (is(Char==wchar)){
+                if (chunkPos<chunkAtt.length){
+                    dchar c2 = chunkAtt[chunkPos];
+                    assert(c2 >= 0xDC00 && c2 <= 0xDFFF,"invalid surrogate low value");
+                    decodedChar = ((decodedChar - 0xD7C0) << 10) + (c2 - 0xDC00); // could fuse constants...
                     ++chunkPos;
-                    // combine with decodedChar
-                    // if not combinable --chunkPos;
-                    // if did combine
                     bufPushNonNormal(decodedChar,decodedPos);
                     status=Status.BufChar;
                     return nextChar(res,pos);
-                }
-                if (hasEnd){
-                    res=decodedChar;
-                    pos=decodedPos;
-                    status=Status.End;
-                    return true;
                 } else {
-                    return false;
+                    enforce(!hasEnd,"encoding error");
+                    return false; // request more chuncks
                 }
+            } else static if (is(Char==char)){
+                while (chunkPos<chunkAtt.length){ // we don't really check the length of the encoding, might generate invalid chars with invalid encodings
+                    dchar c2=chunkAtt[chunkPos];
+                    if ((c2&0b1100_0000)!=0b1000_0000) break;
+                    decodedChar=(decodedChar<<7)+c2-0x80;
+                    ++chunkPos;
+                }
+                if (chunkPos>=chunkAtt.length){
+                    if (!hasEnd) return false; // request more chuncks
+                }
+                bufPushNonNormal(decodedChar,decodedPos);
+                status=Status.BufChar;
+                return nextChar(res,pos);
             } else {
                 assert(0);
             }
@@ -252,12 +370,7 @@ struct StreamCBuf(Char)
         QC qc=QC.Invalid;
         while (1){
             if (chunkAtt.length>chunkPos){
-                dchar newC=chunkAtt[chunkPos];
-                ulong newPos=chunkPos+chunkStart; // store???
-                ++chunkPos;
-                static if (!is(Char==dchar)){
-                    // maybe decode more, or create a partial state, guarantee history and return false
-                }
+                mixin(decodeNextChar); // expand if you need to debug...
                 qc=quickCheck(newC);
                 if (Status.DirectCharNone || bufReadSize==0){
                     if (qc==QC.Yes){
@@ -437,6 +550,7 @@ struct StreamCBuf(Char)
     /// an iterator that goes back in history.
     /// is invalidated by nextPos or addChunk
     static struct BackLooper{
+        alias ulong DataIndex;
         StreamCBuf *streamBuf;
         ulong bound;
         ulong pos;
@@ -450,6 +564,67 @@ struct StreamCBuf(Char)
         /// returns the next char going back from the current position
         bool nextChar(ref dchar res,ref ulong rpos)
         {
+            // decoding as function, not mixin as less critical then forward step
+            // returns false if decoding fails
+            bool decodeNextChar(ref dchar newC){
+                --pos;
+                newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
+                static if (is(Char==wchar)){
+                    if ((newC & ~0x7F)!=0){
+                        if (newC >= 0xDC00 && newC <= 0xDFFF){
+                            if (pos<=bound){
+                                // ignoring partially encoded char
+                                return false;
+                            }
+                            --pos;
+                            dchar c1=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
+                            assert(c1 >= 0xD800 && c1 <= 0xDBFF,"invalid encoding");
+                            newC = ((c1 - 0xD7C0) << 10) + (newC - 0xDC00); // could fuse constants...
+                        } else {
+                            assert(newC < 0xD800 || newC > 0xDBFF,"encoding error (high surrogate)");
+                        }
+                    }
+                } else static if (is(Char==char)){
+                    if ((newC & 0x80)!=0){
+                        assert((newC & 0b1100_0000)==0b1000_0000,"encoding error");
+                        int shift=0;
+                        newC &= ~0b1000_0000;
+                        for(;;){
+                            if (pos<=bound) {
+                                // ignoring partially encoded char
+                                return false;
+                            }
+                            --pos;
+                            dchar c2=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
+                            if ((c2 & 0b1100_0000)!=0b1000_0000){
+                                switch(c2>>4){
+                                case 0b1101:
+                                    assert(shift==7);
+                                    newC|=(c2&~0b1100_000)<<7;
+                                    break;
+                                case 0b1110:
+                                    assert((c2&0b1000)!=0,"encoding error");
+                                    assert(shift==14);
+                                    newC|=(c2&~0b1100_000)<<14;
+                                    break;
+                                case 0b1111:
+                                    assert((c2&0b0100)!=0,"encoding error");
+                                    assert(shift==21);
+                                    newC|=(c2&~0b1100_000)<<21;
+                                    break;
+                                default:
+                                    assert(0,"encoding error");
+                                }
+                            } else {
+                                newC|=(c2 & ~0b1000_0000)<<shift;
+                                shift+=7;
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+            dchar newC;
             switch (status)
             {
             case Access.InBuf:
@@ -482,18 +657,14 @@ struct StreamCBuf(Char)
                         return false;
                     }
                 }
-                --pos;
-                dchar newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
-                /// maybe decode more into newC for char/wchar, and update pos
+                if (!decodeNextChar(newC)) return false;
                 res=newC;
                 rpos=pos;
                 return true;
             case Access.PostBuf:
                 if(pos <= bound)
                     return false;
-                --pos;
-                dchar newC=streamBuf.chunkAtt[cast(size_t)(pos - streamBuf.chunkStart)];
-                /// maybe decode more into newC for char/wchar, and update pos
+                if (!decodeNextChar(newC)) return false;
                 res=newC;
                 rpos=pos;
                 return true;
@@ -547,16 +718,19 @@ struct StreamCBuf(Char)
 unittest
 {
     import std.stdio;
+    alias char Char;
     dchar[] charBuf = new dchar[1024];
     ulong[] indexes = new ulong[1024];
-    auto stream = StreamCBuf!dchar(charBuf, indexes, 8);
+    auto stream = StreamCBuf!Char(charBuf, indexes, 8);
     dchar ch,ch2;
     ulong index,index2;
-    dstring fullStr="Hello,another chunk";
-    dstring hello = fullStr[0..6];
-    dstring another = fullStr[6..$];
+    alias immutable(Char)[] String;
+    String fullStr="Hello,another chunk";
+    String hello = fullStr[0..6];
+    String another = fullStr[6..$];
+    String emptyStr="";
     size_t ii=0;
-    auto chunks = [""d,hello,""d,another,""d];
+    auto chunks = [emptyStr,hello,emptyStr,another,emptyStr];
     foreach(ichunk,chunk;chunks){
         debug(StreamTest){
             writefln("pippo pre addChunk(%s)",chunk);
@@ -570,6 +744,9 @@ unittest
         size_t i=ii;
         while(stream.nextChar(ch, index))
         {
+            debug(StreamTest){
+                writefln("stream.nextChar('%s',%s)",ch,index);
+            }
             assert(ch == fullStr[i]);
             assert(index == i);
             i++;
@@ -598,7 +775,7 @@ unittest
         assert(((ichunk==1)?(i == ii+chunk.length-1):(i ==  ii+chunk.length)));// OK, last one waits possible normalization
         ii=i;
     }
-    stream.addChunk(""d, true);
+    stream.addChunk(emptyStr, true);
     assert(index == fullStr.length - 2); //one char awaits normalization
     assert(ii == fullStr.length - 1); //note the difference
     {

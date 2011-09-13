@@ -246,14 +246,15 @@ unittest
         TestVectors(  `\p{Lu}+`,                      "абвГДЕ",   "y",  "$&",      "ГДЕ"),
         TestVectors(  `^\p{Currency Symbol}\p{Sc}`    "$₤",       "y",  "$&",      "$₤"),  
         TestVectors(  `\p{Common}\p{Thai}`            "!ฆ",       "y",  "$&",      "!ฆ"), 
-        TestVectors(  `[\d\s]*\D`,     "12 \t3\U00001680\u0F20_2",        "y",  "$&", "12 \t3\U00001680\u0F20_"),
+        TestVectors(  `[\d\s]*\D`,  "12 \t3\U00001680\u0F20_2",   "y",  "$&", "12 \t3\U00001680\u0F20_"), 
+        TestVectors(  `[c-wф]фф`, "ффф", "y", "$&", "ффф"),
 //case insensitive:
         TestVectors(   `^abcdEf$`,           "AbCdEF"               "y",   "$&", "AbCdEF",      "i"),
         TestVectors(   `Русский язык`,    "рУсскИй ЯзЫк",           "y",   "$&", "рУсскИй ЯзЫк",     "i"),
         TestVectors(   `ⒶⒷⓒ` ,        "ⓐⓑⒸ",                   "y",   "$&", "ⓐⓑⒸ",      "i"),
         TestVectors(   "\U00010400{2}",  "\U00010428\U00010400 ",   "y",   "$&", "\U00010428\U00010400", "i"),
         TestVectors(   `[adzУ-Я]{4}`,    "DzюА"                     "y",   "$&", "DzЮа", "i"),
-        TestVectors(   `\p{L}\p{Letter}{10}`, "абвгдеЖЗИКЛ",        "y",   "$&", "абвгдеЖЗИКЛ", "i"),
+        TestVectors(   `\p{L}\p{Lu}{10}`, "абвгдеЖЗИКЛ",            "y",   "$&", "абвгдеЖЗИКЛ", "i"),
         TestVectors(   `(?:Dåb){3}`,  "DåbDÅBdÅb",                  "y",   "$&", "DåbDÅBdÅb", "i"),
 //escapes:
         TestVectors(    `\u0041\u005a\U00000065\u0001`,         "AZe\u0001",       "y",   "$&", "AZe\u0001"),  
@@ -269,6 +270,8 @@ unittest
         TestVectors(    `\b\w+\b`,  " abde4 ",  "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  " abde4",   "y", "$&", "abde4"),
         TestVectors(    `\b\w+\b`,  "abde4 ",   "y", "$&", "abde4"),
+        TestVectors(    `\pL\pS`,   "a\u02DA",  "y", "$&", "a\u02DA"),
+        TestVectors(    `\pX`,      "",         "c", "-",  "-"),
 // ^, $, \b, \B, multiline :
         TestVectors(    `\r.*?$`,    "abc\r\nxy", "y", "$&", "\r\nxy", "m"),
         TestVectors(    `^a$^b$`,    "a\r\nb\n",  "n", "$&", "-", "m"),
@@ -284,29 +287,39 @@ unittest
         TestVectors(    `\B^.`,      "ab",        "n", "-",  "-"),
         TestVectors(    `^ab\Bc\B`,  "\r\nabcd",  "y", "$&", "abc", "m"),
         TestVectors(    `^.*$`,      "12345678",  "y", "$&", "12345678"),
+        
 // luckily obtained regression on incremental matching in backtracker
         TestVectors(  `^(?:(?:([0-9A-F]+)\.\.([0-9A-F]+)|([0-9A-F]+))\s*;\s*([^ ]*)\s*#|# (?:\w|_)+=((?:\w|_)+))`,
             "0020  ; White_Space # ", "y", "$1-$2-$3", "--0020"),
 //lookahead
-        TestVectors("(foo.)(?=(bar))",     "foobar foodbar", "y", "$&-$1-$2", "food-food-bar" ),
-        TestVectors(`\b(\d+)[a-z](?=\1)`,  "123a123",        "y", "$&-$1", "123a-123" ),
-        TestVectors(`\$(?!\d{3})\w+`,      "$123 $abc",      "y", "$&", "$abc"),
-        TestVectors(`(abc)(?=(ed(f))\3)`,    "abcedff",      "y", "-", "-"),
+        TestVectors(    "(foo.)(?=(bar))",     "foobar foodbar", "y", "$&-$1-$2", "food-food-bar" ),
+        TestVectors(    `\b(\d+)[a-z](?=\1)`,  "123a123",        "y", "$&-$1", "123a-123" ),
+        TestVectors(    `\$(?!\d{3})\w+`,      "$123 $abc",      "y", "$&", "$abc"),
+        TestVectors(    `(abc)(?=(ed(f))\3)`,    "abcedff",      "y", "-", "-"),
+        TestVectors(    `\b[A-Za-z0-9.]+(?=(@(?!gmail)))`, "a@gmail,x@com",  "y", "$&-$1", "x-@"),
+        TestVectors(    `x()(abc)(?=(d)(e)(f)\2)`,   "xabcdefabc", "y", "$&", "xabc"),
+        TestVectors(    `x()(abc)(?=(d)(e)(f)()\3\4\5)`,   "xabcdefdef", "y", "$&", "xabc"),
 //lookback
-        TestVectors(   `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
-        TestVectors(   `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),
-        TestVectors(   `(?<=Dåb)x\w`,  "DåbDÅBxdÅb",  "y",   "$&", "xd", "i"),
-        TestVectors(   `(?<=(ab*c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
-        TestVectors(   `(?<=(ab*?c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
-        TestVectors(   `(?<=(a.*?c))x`,   "ababbcxac",  "y",   "$&-$1", "x-abbc"),
-        TestVectors(   `(?<=(a{2,4}b{1,3}))x`,   "yyaaaabx",  "y",   "$&-$1", "x-aaaab"),
-        TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aabbbaaaab"),
-        TestVectors(   `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
-        TestVectors(   `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
-        TestVectors(   `(?<=(abc|def|aef))x`,    "aefx", "y",        "$&-$1",  "x-aef"),
-        TestVectors(   `(?<=(abc|dabc))(x)`,    "dabcx", "y",        "$&-$1-$2",  "x-abc-x"),
-        TestVectors(   `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
-        TestVectors(   `(?<=((ab|da)*))x`,    "abdaabx", "y",        "$&-$2-$1",  "x-ab-abdaab"),
+        TestVectors(    `(?<=(ab))\d`,    "12ba3ab4",    "y",   "$&-$1", "4-ab",  "i"),
+        TestVectors(    `\w(?<!\d)\w`,   "123ab24",  "y",   "$&", "ab"),
+        TestVectors(    `(?<=Dåb)x\w`,  "DåbDÅBxdÅb",  "y",   "$&", "xd", "i"),
+        TestVectors(    `(?<=(ab*c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
+        TestVectors(    `(?<=(ab*?c))x`,   "abbbbcxac",  "y",   "$&-$1", "x-abbbbc"),
+        TestVectors(    `(?<=(a.*?c))x`,   "ababbcxac",  "y",   "$&-$1", "x-abbc"),
+        TestVectors(    `(?<=(a{2,4}b{1,3}))x`,   "yyaaaabx",  "y",   "$&-$1", "x-aaaab"),
+        TestVectors(    `(?<=((?:a{2,4}b{1,3}){1,2}))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aabbbaaaab"),
+        TestVectors(    `(?<=((?:a{2,4}b{1,3}){1,2}?))x`,   "aabbbaaaabx",  "y",   "$&-$1", "x-aaaab"),
+        TestVectors(    `(?<=(abc|def|aef))x`,    "abcx", "y",        "$&-$1",  "x-abc"),
+        TestVectors(    `(?<=(abc|def|aef))x`,    "aefx", "y",        "$&-$1",  "x-aef"),
+        TestVectors(    `(?<=(abc|dabc))(x)`,    "dabcx", "y",        "$&-$1-$2",  "x-abc-x"),
+        TestVectors(    `(?<=(|abc))x`,        "dabcx", "y",        "$&-$1",  "x-"),
+        TestVectors(    `(?<=((ab|da)*))x`,    "abdaabx", "y",        "$&-$2-$1",  "x-ab-abdaab"),
+        TestVectors(    `a(?<=(ba(?<=(aba)(?<=aaba))))`, "aabaa", "y", "$&-$1-$2", "a-ba-aba"),
+        TestVectors(    `.(?<!b).`,   "bax",  "y", "$&", "ax"),
+        TestVectors(    `(?<=b(?<!ab)).`,   "abbx",  "y", "$&", "x"),
+//mixed lookaround
+        TestVectors(   `a(?<=a(?=b))b`,    "ab", "y",      "$&", "ab"),
+        TestVectors(   `a(?<=a(?!b))c`,    "ac", "y",      "$&", "ac"),
         ];
     string produceExpected(M,String)(auto ref M m, String fmt)
     {
@@ -387,6 +400,7 @@ unittest
             enum tvd = tv[v];
             enum r = regex(tvd.pattern, tvd.flags);
             auto nr = regex(tvd.pattern, tvd.flags);
+            
             debug
             {
                 writeln(" Test #", a, " pattern: ", tvd.pattern);
@@ -403,7 +417,6 @@ unittest
                 assert(equal(r.ir, nr.ir), text("!C-T regex! failed to compile pattern #", a ,": ", tvd.pattern));
             
         }
-        //enum x = regex(tv[141].pattern);
         debug writeln("!!! FReD C-T test done !!!");
     }
     
@@ -420,21 +433,24 @@ unittest
     unittest
     {
         auto cr = ctRegex!("abc");
-        assert(match("abc",cr).hit == "abc");
+        assert(bmatch("abc",cr).hit == "abc");
         auto cr2 = ctRegex!("ab*c"); 
-        assert(match("abbbbc",cr2).hit == "abbbbc");
+        assert(bmatch("abbbbc",cr2).hit == "abbbbc");
         auto cr3 = ctRegex!("^abc$"); 
-        assert(match("abc",cr3).hit == "abc");
+        assert(bmatch("abc",cr3).hit == "abc");
         auto cr4 = ctRegex!(`\b(a\B[a-z]b)\b`); 
         assert(array(match("azb",cr4).captures) == ["azb", "azb"]);
         auto cr5 = ctRegex!("(?:a{2,4}b{1,3}){1,2}");
-        assert(match("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
-        auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?");
-        assert(match("aaabaaaabbb",  cr6).hit == "aaab");
+        assert(bmatch("aaabaaaabbb", cr5).hit == "aaabaaaabbb");
+        auto cr6 = ctRegex!("(?:a{2,4}b{1,3}){1,2}?"w);
+        assert(bmatch("aaabaaaabbb"w,  cr6).hit == "aaab"w);
         auto cr7 = ctRegex!(`\r.*?$`,"m");
-        assert(match("abc\r\nxy",  cr7).hit == "\r\nxy");
+        assert(bmatch("abc\r\nxy",  cr7).hit == "\r\nxy");
+        auto greed =  ctRegex!("<packet.*?/packet>");
+        assert(bmatch("<packet>text</packet><packet>text</packet>", greed).hit
+                == "<packet>text</packet>");
         //CTFE parser BUG is triggered by group 
-        //in the middle (at least not first and not last) in regex
+        //in the middle or alterantion (at least not first and not last)
         version(fred_bug)
         {
         enum testCT = regex(`abc|(edf)|xyz`);
@@ -446,8 +462,7 @@ unittest
             writeln("R-T version :");
             testRT.print();
         }
-        
-        assert(testCT.ir == testRT.ir);
+       
         }
         
     }
@@ -465,13 +480,30 @@ else
             foreach(m; matchFn(s, r1))
                 test ~= m.hit;
             assert(equal(test, [ "a", "quick", "brown", "fox", "jumps", "over", "a", "lazy", "dog"]));
+            auto free_reg = regex(`
+                                  
+                abc
+                \s+
+                "
+                (
+                        [^"]+
+                    |   \\ "
+                )+
+                "
+                z
+            `, "x");
+            auto m = match(`abc  "quoted string with \" inside"z`,free_reg);
+            assert(m);
+            string mails = " hey@you.com no@spam.net ";
+            auto rm = regex(`@(?<=\S+@)\S+`,"g");
+            assert(equal(map!"a[0]"(match(mails, rm)), ["@you.com", "@spam.net"]));
             debug writeln("!!! FReD FLAGS test done "~matchFn.stringof~" !!!");
         }
         test_body!bmatch();
         test_body!match();
     }
 
-    //tests for accomulated std.regex issues and other reg
+    //tests for accomulated std.regex issues and other regressions
     unittest
     {
         void test_body(alias matchFn)()
@@ -537,7 +569,8 @@ else
     }
     //@@@BUG@@@ template function doesn't work inside unittest block
     version(unittest)
-    String baz(String)(RegexMatch!(String) m)
+    Cap.String baz(Cap)(Cap m)
+    if (is(Cap==Captures!(Cap.String,Cap.DataIndex)))
     {
         return std.string.toUpper(m.hit);
     }
@@ -550,16 +583,16 @@ else
             foreach(i, v; TypeTuple!(string, wstring, dstring))
             {
                 alias v String;
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r"), to!String("c"))
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r")), to!String("c"))
                        == to!String("ack rapacity"));
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex("r", "g"), to!String("c"))
+                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r"), "g"), to!String("c"))
                        == to!String("ack capacity"));
-                assert(fred.replace!(String, matchFn)(to!String("noon"), regex("^n"), to!String("[$&]"))
+                assert(fred.replace!(String, matchFn)(to!String("noon"), regex(to!String("^n")), to!String("[$&]"))
                        == to!String("[n]oon"));
-                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(`\w+`,"g"), to!String("$`:$'"))
+                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(to!String(`\w+`),"g"), to!String("$`:$'"))
                        == to!String(": test2 test1 :"));
-                auto s = fred.replace!(baz!String)(to!String("Strap a rocket engine on a chicken."),
-                        regex("[ar]", "g"));
+                auto s = fred.replace!(baz!(Captures!(String,size_t)))(to!String("Strap a rocket engine on a chicken."),
+                        regex(to!String("[ar]"), "g"));
                 assert(s == "StRAp A Rocket engine on A chicken.");
             }
             debug writeln("!!! Replace test done "~matchFn.stringof~"  !!!");
@@ -627,9 +660,9 @@ int main(string[] argv)
         string s = argv[2];
         try
         {
-            auto re = regex(s);
+            auto re = regex(s, argv.length > 3 ? argv[3] : "");
             write(" OK \n");
-            re.print();
+            debug re.print();
         }
         catch(Exception ex)
         {
@@ -648,8 +681,8 @@ int main(string[] argv)
             if(pat.empty)
                 return 0;
             auto inp = argv[3];
-            auto m = match(to!wstring(inp), regex(pat));
-            writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m.captures);
+            auto m = match(to!string(inp), regex(pat, argv.length > 4 ? argv[4] : ""));
+            writefln("Match status: %s\nResult: %s",m.empty ? "NO" : "YES", m);
         }
         catch(Exception ex)
         {
