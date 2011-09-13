@@ -237,7 +237,7 @@ function listanchors()
 
   ...
 
-  <span class="d_comment">//create static regex at compile-time, that contains fast native code
+  <span class="d_comment">//create static regex at compile-time, contains fast native code
 </span>  <span class="d_keyword">enum</span> ctr = ctRegex!(<span class="d_string">`^.*/([^/]+)/?$`</span>);
 
   <span class="d_comment">//works just like normal regex:
@@ -276,11 +276,11 @@ function listanchors()
 
 
   Aside from providing a well known features of regular expressions found in e.g. JavaScript,
-  FReD does support the following extensions:
-  <ul>   <li>Named groups, with Python style syntax (?P<name>re),
+  FReD does support the following extensions.
+  <ul>   <li>Named groups, with Python style syntax (?P&lt;name&gt;re),
         with names working like aliases in addition to direct numbers.</li>
     <li>Arbitrary length and complexity lookbehind with common syntax
-        (?&lt;=re) and (?&lt;!re), including lookahead in lookbehind and vise-versa </li>
+        (?&lt;=re) and (?&lt;!re), including lookahead in lookbehind and vise-versa. </li>
     <li>Unicode properities such as Scripts, Blocks and
         common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.</li>
   </ul>
@@ -293,15 +293,15 @@ function listanchors()
 
   This library provides full Level 1 support* according to
     <a href="http://http://unicode.org/reports/tr18/">UTS 18</a>. Specifically:
-  <ul>   <li>1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ</li>
-    <li>1.2 Unicode properties</li>
-    <li>1.3 Charactar classes with set operations</li>
-    <li>1.4 Word boundaries use full set of "word" characters</li>
+  <ul>   <li>1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ.</li>
+    <li>1.2 Unicode properties.</li>
+    <li>1.3 Charactar classes with set operations.</li>
+    <li>1.4 Word boundaries use full set of "word" characters.</li>
     <li>1.5 Using simple casefolding to match case
-        insensitevely across full range of codepoints</li>
+        insensitevely across full range of codepoints.</li>
     <li>1.6 Respecting line breaks as any of
-        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A</li>
-    <li>1.7 Operating on codepoint level</li>
+        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A.</li>
+    <li>1.7 Operating on codepoint level.</li>
   </ul>
   *With exception being point 1.1.1, as of yet, normalization of input
     is expected to be enforced by user.
@@ -335,7 +335,10 @@ syntax for unicode blocks is InBlockName</td></tr>
 
 <dl><dt class="d_decl">struct <a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span>;
 </dt>
-<dd><span class="d_inlinecode"><a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span></span> is a data structure for manipulating sets of Unicode codepoints in an efficient manner.<p></p>
+<dd><span class="d_inlinecode"><a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span></span> is a data structure for manipulating sets
+    of Unicode codepoints in an efficient manner.
+    Instances of <a name="CodepointSet"></a><span class="ddoc_psymbol">CodepointSet</span> have half-reference semantics akin to dynamic arrays,
+    to obtain a unique copy use <span class="d_inlinecode">dup</span>.<p></p>
 
 <dl><dt class="d_decl">ref @trusted CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(Interval <i>inter</i>);
 </dt>
@@ -349,7 +352,7 @@ syntax for unicode blocks is InBlockName</td></tr>
 </dd>
 <dt class="d_decl">ref @safe CodepointSet <a name="add"></a><span class="ddoc_psymbol">add</span>(in CodepointSet <i>set</i>);
 </dt>
-<dd>Add <span class="d_inlinecode"><i>set</i></span> in this <i>set</i>. 
+<dd>Add <span class="d_inlinecode"><i>set</i></span> in this <i>set</i>.
 <p></p>
 <b>Algebra:</b><br>
 this = this | <i>set</i>.<p></p>
@@ -426,15 +429,25 @@ this = this &amp; <i>set</i><p></p>
 <dd>Troika for built-in hash maps.<p></p>
 
 </dd>
+<dt class="d_decl">const @safe auto <a name="opSlice"></a><span class="ddoc_psymbol">opSlice</span>();
+</dt>
+<dd>Forward range of all codepoints in this set.<p></p>
+
+</dd>
+<dt class="d_decl">const @property @trusted auto <a name="byInterval"></a><span class="ddoc_psymbol">byInterval</span>();
+</dt>
+<dd>Random access range of intervals in this set.<p></p>
+
+</dd>
 </dl>
 </dd>
 <dt class="d_decl">struct <a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span>(uint prefixBits) if (prefixBits &gt; 4);
 </dt>
-<dd><span class="d_inlinecode"><a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span></span> is 1-level  <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=Trie">Trie</a>  data structure focused on lookup speeds.
+<dd><span class="d_inlinecode"><a name="CodepointTrie"></a><span class="ddoc_psymbol">CodepointTrie</span></span> is 1-level  <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=Trie">Trie</a> of codepoints.
     Primary use case is to convert a previously obtained CodepointSet
-    to speed up subsequent element lookup.
+    in order to speed up subsequent element lookup.
 <p></p>
-<pre class="d_code">        <span class="d_keyword">auto</span> input = getLargeString();
+<pre class="d_code">        <span class="d_keyword">auto</span> input = ...;
         Charset set;
         set.add(unicodeAlphabetic).add('$').add('#');
         <span class="d_keyword">auto</span> lookup = <span class="d_psymbol">CodepointTrie</span>!8(set);
@@ -447,6 +460,17 @@ this = this &amp; <i>set</i><p></p>
     and provided for tuning to a specific applications.
     A default parameter of 8 works best in common cases though.<p></p>
 
+<dl><dt class="d_decl">auto this(in CodepointSet <i>s</i>);
+</dt>
+<dd>Create a trie from CodepointSet <span class="d_inlinecode">set</span>.<p></p>
+
+</dd>
+<dt class="d_decl">const bool <a name="opIndex"></a><span class="ddoc_psymbol">opIndex</span>(dchar <i>ch</i>);
+</dt>
+<dd>Test if contains <span class="d_inlinecode"><i>ch</i></span>.<p></p>
+
+</dd>
+</dl>
 </dd>
 <dt class="d_decl">struct <a name="Regex"></a><span class="ddoc_psymbol">Regex</span>(Char);
 </dt>
@@ -554,7 +578,7 @@ this = this &amp; <i>set</i><p></p>
 <br>R <a name="post"></a><span class="ddoc_psymbol">post</span>();
 <br>R <a name="hit"></a><span class="ddoc_psymbol">hit</span>();
 </dt>
-<dd>Shorthands for captures.<a name="pre"></a><span class="ddoc_psymbol">pre</span>, captures.post, captures.hit<p></p>
+<dd>Shorthands for front.<a name="pre"></a><span class="ddoc_psymbol">pre</span>, front.post, front.hit<p></p>
 
 </dd>
 <dt class="d_decl">@property auto <a name="front"></a><span class="ddoc_psymbol">front</span>();
@@ -583,6 +607,11 @@ this = this &amp; <i>set</i><p></p>
 <dd>Same as !(x.empty), provided for its convenience  in conditional statements.<p></p>
 
 </dd>
+<dt class="d_decl">@property auto <a name="captures"></a><span class="ddoc_psymbol">captures</span>();
+</dt>
+<dd>Same as .front, provided for compatibility with original std.regex.<p></p>
+
+</dd>
 </dl>
 </dd>
 <dt class="d_decl">auto <a name="regex"></a><span class="ddoc_psymbol">regex</span>(S, S2 = string)(S <i>pattern</i>, S2 <i>flags</i> = "");
@@ -608,7 +637,7 @@ this = this &amp; <i>set</i><p></p>
 <dt class="d_decl">auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
 <br>auto <a name="match"></a><span class="ddoc_psymbol">match</span>(R, String)(R <i>input</i>, String <i>re</i>);
 </dt>
-<dd>Initiate matching of input to regex pattern re,
+<dd>Start matching <span class="d_inlinecode">input</span> to regex pattern <span class="d_inlinecode">re</span>,
     using Thompson NFA matching scheme.
     Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine state after first <a name="match"></a><span class="ddoc_psymbol">match</span>.
 <p></p>
@@ -623,7 +652,7 @@ This is the <u>recommended</u> method for matching regular expression.<p></p>
 <dt class="d_decl">auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
 <br>auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, String)(R <i>input</i>, String <i>re</i>);
 </dt>
-<dd>Initiate matching of input to regex pattern re,
+<dd>Start matching <span class="d_inlinecode">input</span> to regex pattern <span class="d_inlinecode">re</span>,
     using traditional <a href="http://google.com/search?btnI=I%27m+Feeling+Lucky&amp;ie=UTF-8&amp;oe=UTF-8&amp;q=backtracking">backtracking</a> matching scheme.
     Returns a <span class="d_inlinecode">RegexMatch</span> object holding engine
     state after first match.<p></p>
@@ -631,7 +660,7 @@ This is the <u>recommended</u> method for matching regular expression.<p></p>
 </dd>
 <dt class="d_decl">auto <a name="bmatch"></a><span class="ddoc_psymbol">bmatch</span>(R, RegEx)(R <i>input</i>, RegEx <i>re</i>);
 </dt>
-<dd>Same as above, but leveraging statically crafted machine code in <span class="d_inlinecode">StaticRegex</span>.<p></p>
+<dd>Match regular expression using statically generated <span class="d_inlinecode">StaticRegex</span>.<p></p>
 
 </dd>
 <dt class="d_decl">R <a name="replace"></a><span class="ddoc_psymbol">replace</span>(R, alias scheme = match, RegEx)(R <i>input</i>, RegEx <i>re</i>, R <i>format</i>);

@@ -64,12 +64,12 @@
   Advanced Syntax
 
   Aside from providing a well known features of regular expressions found in e.g. JavaScript,
-  FReD does support the following extensions:
+  FReD does support the following extensions.
   $(UL
-    $(LI Named groups, with Python style syntax (?P<name>re),
+    $(LI Named groups, with Python style syntax (?P&lt;name&gt;re),
         with names working like aliases in addition to direct numbers.)
     $(LI Arbitrary length and complexity lookbehind with common syntax
-        (?<=re) and (?<!re), including lookahead in lookbehind and vise-versa )
+        (?<=re) and (?<!re), including lookahead in lookbehind and vise-versa. )
     $(LI Unicode properities such as Scripts, Blocks and
         common binary properties e.g Alphabetic, White_Space, Hex_Digit etc.)
   )
@@ -79,15 +79,15 @@
   This library provides full Level 1 support* according to
     $(WEB http://unicode.org/reports/tr18/, UTS 18). Specifically:
   $(UL
-    $(LI 1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ)
-    $(LI 1.2 Unicode properties)
-    $(LI 1.3 Charactar classes with set operations)
-    $(LI 1.4 Word boundaries use full set of "word" characters)
+    $(LI 1.1 Hex notation via any of \uxxxx, \u00YYYYYY, \xZZ.)
+    $(LI 1.2 Unicode properties.)
+    $(LI 1.3 Charactar classes with set operations.)
+    $(LI 1.4 Word boundaries use full set of "word" characters.)
     $(LI 1.5 Using simple casefolding to match case
-        insensitevely across full range of codepoints)
+        insensitevely across full range of codepoints.)
     $(LI 1.6 Respecting line breaks as any of
-        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A)
-    $(LI 1.7 Operating on codepoint level)
+        \u000A | \u000B | \u000C | \u000D | \u0085 | \u2028 | \u2029 | \u000D\u000A.)
+    $(LI 1.7 Operating on codepoint level.)
   )
   *With exception being point 1.1.1, as of yet, normalization of input
     is expected to be enforced by user.
@@ -884,7 +884,7 @@ public:
     @property bool empty() const {   return ivals.empty; }
 
     ///Write out in regular expression style [\uxxxx-\uyyyy...].
-    @safe void printUnicodeSet(R)(R sink) const
+    @trusted void printUnicodeSet(R)(R sink) const
         if(isOutputRange!(R, const(char)[]))
     {
         sink("[");
@@ -2711,8 +2711,8 @@ private:
 }
 
 //
-uint lookupNamedGroup(String)(NamedGroup[] dict,String name)
-{
+@trusted uint lookupNamedGroup(String)(NamedGroup[] dict,String name)
+{//equal is @system?
     //@@@BUG@@@ kills "-inline"
 	//auto fnd = assumeSorted(map!"a.name"(dict)).lowerBound(name).length;
     uint fnd;
@@ -2785,16 +2785,16 @@ int quickTestFwd(RegEx)(uint pc, dchar front, const ref RegEx re)
     that _have_ to match given compiled regex.
     Caveats: supports only a simple subset of bytecode.
 */
-public struct SampleGenerator(Char)
+@trusted public struct SampleGenerator(Char)
 {
     import std.random;
-    const(RegEx) re;
+    const(Regex!Char) re;
     Appender!(char[]) app;
     uint limit, seed;
     Xorshift gen;
     //generator for pattern r, with soft maximum of threshold elements
     //and a given random seed
-    this(in RegEx r, uint threshold, uint randomSeed)
+    this(in Regex!Char r, uint threshold, uint randomSeed)
     {
         re = r;
         limit = threshold;
@@ -6564,13 +6564,14 @@ public:
         import fred;
         import std.range;
 
-        auto m = match("a = 42;", regex(`(?P<var>\w+)\s*=\s*(?P<value>\d+)`));
+        auto m = match("a = 42;", regex(`(?P<var>\w+)\s*=\s*(?P<value>\d+);`));
         auto c = m.captures;
         assert(c["var"] == "a");
         assert(c["value"] == "42");
-        c.popFront();
-        assert(c["var"] =="a"); //named groups are unaffected by range primitives
-        assert(c.front == "a");
+        popFrontN(c, 2);
+        //named groups are unaffected by range primitives
+        assert(c["var"] =="a"); 
+        assert(c.front == "42");
         ----
     */
     R opIndex(String)(String i) /*const*/ //@@@BUG@@@
@@ -6580,17 +6581,19 @@ public:
         return opIndex(index - f);
     }
 
-    ///Number of matches in this object
+    ///Number of matches in this object.
     @property size_t length() const { return b-f;  }
 
-    ///A hook for compatibility with std.regex
+    ///A hook for compatibility with std.regex.
     @property ref captures(){ return this; }
 }
 
 /**
     A regex engine state, as returned by $(D match) family of functions.
-    Effectively it's a forward range of Captures!R, produced by lazily searching for matches in a given input.
-    alias Engine specifies an engine type to use during matching, and is automatically deduced in a call to $(D match)/$(D bmatch).
+    Effectively it's a forward range of Captures!R, produced 
+    by lazily searching for matches in a given input.
+    alias Engine specifies an engine type to use during matching,
+    and is automatically deduced in a call to $(D match)/$(D bmatch).
 */
 @trusted public struct RegexMatch(R, alias Engine=ThompsonMatcher)
     if(isSomeString!R)
@@ -6616,7 +6619,7 @@ private:
     ~this(){}
 public:
 
-    ///Shorthands for captures.pre, captures.post, captures.hit
+    ///Shorthands for front.pre, front.post, front.hit.
     @property R pre()
     {
         return _captures.pre;
@@ -6668,7 +6671,7 @@ public:
     ///Same as !(x.empty), provided for its convenience  in conditional statements.
     T opCast(T:bool)(){ return !empty; }
 
-    //
+    /// Same as .front, provided for compatibility with original std.regex.
     @property auto captures(){ return _captures; }
 
 }

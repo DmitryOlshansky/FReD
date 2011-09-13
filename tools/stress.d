@@ -14,7 +14,7 @@ else version(thompson)
 else
 	static assert(0, "Use -version=backtracking or -version=thompson");
 
-void testRegex(Char)(in Char[] pat, RegEx r, int iterations, int length, uint seed)
+void testRegex(Char)(in Char[] pat, Regex!Char r, int iterations, int length, uint seed)
 {
     auto gen = SampleGenerator!(Char)(r, length, seed);
     foreach(s; take(gen, iterations))
