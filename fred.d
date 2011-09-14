@@ -6804,7 +6804,8 @@ public auto bmatch(R, RegEx)(R input, RegEx re)
     ---
 */
 public @trusted R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
-    if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R)))
+  if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R))
+     || is(RegEx == StaticRegex!(BasicElementOf!R)))
 {
     auto app = appender!(R)();
     auto matches = scheme(input, re);
