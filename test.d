@@ -583,13 +583,13 @@ else
             foreach(i, v; TypeTuple!(string, wstring, dstring))
             {
                 alias v String;
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r")), to!String("c"))
+                assert(fred.replace!(matchFn)(to!String("ark rapacity"), regex(to!String("r")), to!String("c"))
                        == to!String("ack rapacity"));
-                assert(fred.replace!(String, matchFn)(to!String("ark rapacity"), regex(to!String("r"), "g"), to!String("c"))
+                assert(fred.replace!(matchFn)(to!String("ark rapacity"), regex(to!String("r"), "g"), to!String("c"))
                        == to!String("ack capacity"));
-                assert(fred.replace!(String, matchFn)(to!String("noon"), regex(to!String("^n")), to!String("[$&]"))
+                assert(fred.replace!(matchFn)(to!String("noon"), regex(to!String("^n")), to!String("[$&]"))
                        == to!String("[n]oon"));
-                assert(fred.replace!(String, matchFn)(to!String("test1 test2"), regex(to!String(`\w+`),"g"), to!String("$`:$'"))
+                assert(fred.replace!(matchFn)(to!String("test1 test2"), regex(to!String(`\w+`),"g"), to!String("$`:$'"))
                        == to!String(": test2 test1 :"));
                 auto s = fred.replace!(baz!(Captures!(String,size_t)))(to!String("Strap a rocket engine on a chicken."),
                         regex(to!String("[ar]"), "g"));

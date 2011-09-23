@@ -6803,7 +6803,7 @@ public auto bmatch(R, RegEx)(R input, RegEx re)
     assert(replace("noon", regex("^n"), "[$&]") == "[n]oon");
     ---
 */
-public @trusted R replace(R, alias scheme=match, RegEx)(R input, RegEx re, R format)
+public @trusted R replace(alias scheme=match, R, RegEx)(R input, RegEx re, R format)
   if(isSomeString!R && is(RegEx == Regex!(BasicElementOf!R))
      || is(RegEx == StaticRegex!(BasicElementOf!R)))
 {

@@ -15,7 +15,7 @@ version(backtracking)
 else version(thompson)	
 	alias match matchFn;
 else version(ct_regex)
-	alias bmatch matchFn;
+	alias match matchFn;
 else	
 	static assert(0, "Use -version=backtracking or -version=thompson or -version=ct_regex");
 

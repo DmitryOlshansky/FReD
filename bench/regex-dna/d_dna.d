@@ -6,7 +6,14 @@
 import fred;
 import std.file, std.stdio, std.array, std.algorithm, std.range, std.typetuple;
 
-// version = CtRegex; // use static regexes
+version(backtracking)
+	alias bmatch matchFn;
+else version(thompson)	
+	alias match matchFn;
+else version(ct_regex)
+	alias match matchFn;
+else	
+	static assert(0, "Use -version=backtracking or -version=thompson or -version=ct_regex");
 
 alias TypeTuple!(
     "agggtaaa|tttaccct",
@@ -36,15 +43,15 @@ int main(string[] args)
 
     auto stripper = regex(`>.*?\n|\n`, "g");
     auto data = cast(string)std.file.read(args[1]);
-    auto stripped = replace(data, stripper, "");
+    auto stripped = fred.replace!matchFn(data, stripper, "");
     foreach(p; patterns)
     {
-        version (CtRegex)
+        version(ct_regex)
             alias ctRegex!(p, "ig") reg;
-        else
-            enum reg = regex(p, "ig");
+        else//auto since parsing takes miniscule amount of time
+            auto reg = regex(p, "ig");
         int count = 0;
-        foreach(m; match(stripped, reg))
+        foreach(m; matchFn(stripped, reg))
         {
             count++;
         }
@@ -56,11 +63,11 @@ int main(string[] args)
     {
         static if (!(i & 1))
         {
-            version (CtRegex)
+            version(ct_regex)
                 alias ctRegex!(p, "g") reg;
-            else
-                enum reg = regex(p, "g");
-            replaced = replace(replaced, reg, patterns2[i+1]);
+            else//auto since parsing takes miniscule amount of time
+                auto reg = regex(p, "g");
+            replaced = fred.replace!matchFn(replaced, reg, patterns2[i+1]);
         }
     }
 
