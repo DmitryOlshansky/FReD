@@ -119,8 +119,8 @@ import fred_uni;//unicode property tables
 import std.array, std.algorithm, std.range,
        std.conv, std.exception, std.traits, std.typetuple,
        std.uni, std.utf, std.format, std.typecons, std.bitmanip,
-       std.functional, std.exception, std.regionallocator;
-import core.bitop, core.stdc.string;
+       std.functional, std.exception;
+import core.bitop, core.stdc.string, core.stdc.stdlib;
 import ascii = std.ascii;
 import std.string : representation;
 
@@ -436,7 +436,8 @@ static assert(Bytecode.sizeof == 4);
 }
 
 //another pretty printer, writes out the bytecode of a regex and where the pc is
-@trusted void prettyPrint(Sink,Char=const(char))(Sink sink,const(Bytecode)[] irb, uint pc=uint.max,int indent=3,size_t index=0)
+@trusted void prettyPrint(Sink,Char=const(char))
+    (Sink sink, const(Bytecode)[] irb, uint pc=uint.max, int indent=3, size_t index=0)
     if (isOutputRange!(Sink,Char))
 {//formattedWrite is @system
     while(irb.length>0)
@@ -516,11 +517,39 @@ static assert(Bytecode.sizeof == 4);
 
 //ditto
 @trusted void replaceInPlaceAlt(T)(ref T[] arr, size_t from, size_t to, T[] items...)
+in
 {
-    //if(__ctfe)
+    assert(to >= from);
+}
+body
+{
+    if(__ctfe)
         arr = arr[0..from]~items~arr[to..$];
-    /*else //@@@BUG@@@ in replaceInPlace? symptoms being sudden ZEROs in array
-        replaceInPlace(arr, from, to, items);*/
+    else //@@@BUG@@@ in replaceInPlace? symptoms being sudden ZEROs in array
+    {
+        //replaceInPlace(arr, from, to, items);
+        size_t window = to - from, ilen = items.length;
+        if(window >= ilen)
+        {
+            size_t delta = window - ilen;
+            arr[from .. from+ilen] = items[0..$];
+            if(delta)
+            {//arrayops won't do - aliasing
+                for(size_t i = from+ilen; i < arr.length-delta; i++)
+                    arr[i] = arr[i+delta];
+                arr.length -= delta;
+            }
+        }
+        else
+        {
+            size_t delta = ilen - window, old = arr.length;
+            arr.length += delta;
+            //arrayops won't do - aliasing
+            for(size_t i = old - 1; i != to-1; i--)
+                arr[i+delta] = arr[i];
+            arr[from .. from+ilen] = items[0..$];
+        }
+    }
 }
 
 //ditto
@@ -533,8 +562,6 @@ static assert(Bytecode.sizeof == 4);
         moveAll(src, dest);
 }
 
-//default allocator to use
-alias RegionAllocator Allocator;
 
 //Regular expression engine/parser options:
 // global - search  all nonoverlapping matches in input
@@ -689,6 +716,7 @@ public:
         debug(fred_charset) writeln(ivals);
         return this;
     }
+    
     ///Exclude $(D set) from this set.
     ///Algebra: this = this - set.
     @trusted ref CodepointSet sub(in CodepointSet set)
@@ -757,6 +785,7 @@ public:
         ivals = cast(uint[])result;
         return this;
     }
+    
     ///Make this set a symmetric difference with $(D set).
     ///Algebra: this = this ~ set (i.e. (this || set) -- (this && set)).
     @trusted ref symmetricSub(in CodepointSet set)
@@ -767,6 +796,7 @@ public:
         this.sub(a);
         return this;
     }
+    
     ///Intersect this set with $(D set).
     ///Algebra: this = this & set
     @trusted ref CodepointSet intersect(in CodepointSet set)
@@ -853,13 +883,13 @@ public:
         return this;
     }
 
-    /**
+    /++
         Test if ch is present in this set, linear search done in $(BIGOH N) operations
         on number of $(U intervals) in this set.
         In practice linear search outperforms binary search until a certain threshold.
         Unless number of elements is known to be small in advance it's recommended
         to use overloaded indexing operator.
-    */
+    +/
     bool scanFor(dchar ch) const
     {
         //linear search is in fact faster (given that length is fixed under threshold)
@@ -869,10 +899,10 @@ public:
         return false;
     }
 
-    /**
+    /++
         Test if ch is present in this set, in $(BIGOH LogN) operations on number
         of $(U intervals) in this set.
-    */
+    +/
     @trusted bool opIndex(dchar ch)const
     {
         auto svals = assumeSorted!"a <= b"(ivals);
@@ -1127,6 +1157,11 @@ public:
         if(ind >= indexes.length)
             return negative;
         return cast(bool)bt(data.ptr, (indexes[ind]<<bitTestShift)+(ch&prefixMask)) ^ negative;
+        version(none)//is in fact slower (on AMD Phenom)
+        {
+            auto ptr = cast(const(ubyte)*)data.ptr;
+            return ((ptr[(cast(size_t)indexes[ind]<<prefixBits) + ((ch&prefixMask)>>3)]>>(ch&7))&1) ^ negative;
+        }
     }
 
     //invert trie (trick internal for regular expressions, has aliasing problem)
@@ -1140,20 +1175,27 @@ public:
 //heuristic value determines maximum CodepointSet length suitable for linear search
 enum maxCharsetUsed = 6;
 
+enum maxCachedTries = 8;
+
 alias CodepointTrie!8 Trie;
 
 Trie[const(CodepointSet)] trieCache;
 
 //accessor with caching
-Trie getTrie(in CodepointSet set)
-{
-    if(__ctfe)
+@trusted Trie getTrie(in CodepointSet set)
+{// @@@BUG@@@ 6357 almost all properties of AA are not @safe
+    if(__ctfe || maxCachedTries == 0)
         return Trie(set);
     else
     {
         auto p = set in trieCache;
         if(p)
             return *p;
+        if(trieCache.length == maxCachedTries)
+        {
+            trieCache.clear();
+            trieCache = null;
+        }
         return (trieCache[set] = Trie(set));
     }
 }
@@ -1321,8 +1363,12 @@ auto memoizeExpr(string expr)()
         return mixin(expr);
     alias typeof(mixin(expr)) T;
     static T slot;
-    if(slot == T.init)
+    static bool initialized;
+    if(!initialized)
+    {
         slot =  mixin(expr);
+        initialized = true;
+    }
     return slot;
 }
 
@@ -1383,7 +1429,8 @@ auto memoizeExpr(string expr)()
         else
         {
             auto range = assumeSorted!((x,y){ return ucmp(x.name, y.name) < 0; })(unicodeProperties);
-            auto eq = range.lowerBound(UnicodeProperty(cast(string)name,CodepointSet.init)).length;//TODO: hackish
+            //creating empty Codepointset is a workaround
+            auto eq = range.lowerBound(UnicodeProperty(cast(string)name,CodepointSet.init)).length;
             enforce(eq!=range.length && ucmp(name,range[eq].name)==0,"invalid property name");
             s = range[eq].set.dup;
         }
@@ -3728,6 +3775,22 @@ struct StreamTester(Char)
     @property auto loopBack(){   return BackLooper(this); }
 }
 
+//both helper below are internal, on its own is quite "explosive"
+
+//unsafe, no initialization of elements
+@system T[] mallocArray(T)(size_t len)
+{
+    return (cast(T*)malloc(len*T.sizeof))[0..len];
+}
+
+//very unsafe, no initialization
+@system T[] arrayInChunk(T)(size_t len, ref void[] chunk)
+{
+    auto ret = (cast(T*)chunk.ptr)[0..len];
+    chunk = chunk[len*T.sizeof..$];
+    return ret;
+}
+
 /+
     BacktrackingMatcher implements backtracking scheme of matching
     regular expressions.
@@ -3748,9 +3811,10 @@ template BacktrackingMatcher(bool CTregex)
         enum initialStack = 1<<16;
         alias const(Char)[] String;
         static if(CTregex)
-            StaticRegex!Char re;
+            alias StaticRegex!Char RegEx;
         else
-            Regex!Char re;           //regex program
+            alias Regex!Char RegEx;
+        RegEx re;      //regex program
         //Stream state
         Stream s;
         DataIndex index;
@@ -3758,18 +3822,30 @@ template BacktrackingMatcher(bool CTregex)
         bool exhausted;
         //backtracking machine state
         uint pc, counter;
-        DataIndex lastState = 0;       //top of state stack
+        DataIndex lastState = 0;    //top of state stack
         DataIndex[] trackers;
         uint infiniteNesting;
         size_t[] memory;
-        Group!DataIndex[] matches, backrefed; //local slice of matches, global for backref
-        Allocator* alloc;
+        //local slice of matches, global for backref
+        Group!DataIndex[] matches, backrefed; 
+        
         static if(__traits(hasMember,Stream, "search"))
         {
             enum kicked = true;
         }
         else
             enum kicked = false;
+        
+        static size_t initialMemory(const ref RegEx re)
+        {  
+            return (re.ngroup+1)*DataIndex.sizeof //trackers
+                + stackSize(re)*size_t.sizeof;
+        }
+            
+        static size_t stackSize(const ref RegEx re)   
+        {
+            return initialStack*(stateSize + re.ngroup*(Group!DataIndex).sizeof/size_t.sizeof)+1;
+        }
 
         @property bool atStart(){ return index == 0; }
 
@@ -3797,22 +3873,36 @@ template BacktrackingMatcher(bool CTregex)
         //
         void newStack()
         {
-            auto chunk = alloc.newArray!(size_t[])(initialStack*(stateSize + re.ngroup*(Group!DataIndex).sizeof/size_t.sizeof)+1);
+            auto chunk = mallocArray!(size_t)(stackSize(re));
             chunk[0] = cast(size_t)(memory.ptr);
             memory = chunk[1..$];
         }
-
-        //
-        this(Regex!Char program, Stream stream, Allocator* allocator)
+        
+        void initialize(ref RegEx program, Stream stream, void[] memBlock)
         {
             re = program;
             s = stream;
-            alloc = allocator;
-            next();
             exhausted = false;
-            trackers = alloc.newArray!(DataIndex[])(re.ngroup+1);
-            newStack();
+            trackers = arrayInChunk!(DataIndex)(re.ngroup+1, memBlock);
+            memory = cast(size_t[])memBlock;
+            memory[0] = 0; //hidden pointer
+            memory = memory[1..$];
             backrefed = null;
+        }
+
+        //
+        this(ref RegEx program, Stream stream, void[] memBlock)
+        {
+            initialize(program, stream, memBlock);
+            next();
+        }
+        
+        //
+        this(ref RegEx program, Stream stream, void[] memBlock, dchar ch, DataIndex idx)
+        {
+            initialize(program, stream, memBlock);
+            front = ch;
+            index = idx;
         }
 
         //
@@ -4150,12 +4240,9 @@ template BacktrackingMatcher(bool CTregex)
                     uint len = re.ir[pc].data;
                     auto save = index;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    auto matcher = this;
-                    auto a = newRegionAllocator();
-                    matcher.alloc = &a;
-                    matcher.re.ngroup =  me - ms;
-                    matcher.memory = null;
-                    matcher.newStack();
+                    auto mem = malloc(initialMemory(re))[0..initialMemory(re)];
+                    scope(exit) free(mem.ptr);
+                    auto matcher = BacktrackingMatcher(re, s, mem, front, index);
                     matcher.matches = matches[ms .. me];
                     matcher.backrefed = backrefed.empty ? matches : backrefed;
                     matcher.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
@@ -4172,13 +4259,12 @@ template BacktrackingMatcher(bool CTregex)
                 case IR.LookbehindStart:
                 case IR.NeglookbehindStart:
                     uint len = re.ir[pc].data;
-                    auto prog = re;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    prog.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
-                    prog.ngroup = me - ms;
-                    auto a = newRegionAllocator();
-                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
+                    auto mem = malloc(initialMemory(re))[0..initialMemory(re)];
+                    scope(exit) free(mem.ptr);
+                    auto backMatcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(re, s.loopBack, mem);
                     backMatcher.matches = matches[ms .. me];
+                    backMatcher.re.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
                     backMatcher.backrefed  = backrefed.empty ? matches : backrefed;
                     bool match = backMatcher.matchBackImpl() ^ (re.ir[pc].code == IR.NeglookbehindStart);
                     if(!match)
@@ -4248,6 +4334,7 @@ template BacktrackingMatcher(bool CTregex)
                 prev = cast(size_t*)*prev;//take out hidden pointer
                 if(!prev)
                     return false;
+                free(memory.ptr);//last segment is freed in RegexMatch
                 immutable size = initialStack*(stateSize + 2*re.ngroup);
                 memory = prev[0..size];
                 lastState = size;
@@ -4546,14 +4633,13 @@ template BacktrackingMatcher(bool CTregex)
                 case IR.NeglookaheadEnd:
                     uint len = re.ir[pc].data;
                     pc -= len + IRL!(IR.LookaheadStart);
-                    auto prog = re;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    prog.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
-                    prog.ngroup = me - ms;
-                    auto a = newRegionAllocator();
-                    auto matcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(prog, s.loopBack, &a);
+                    auto mem = malloc(initialMemory(re))[0..initialMemory(re)];
+                    scope(exit) free(mem.ptr);
+                    auto matcher = BacktrackingMatcher!(Char, typeof(s.loopBack))(re, s.loopBack, mem);
                     matcher.matches = matches[ms .. me];
                     matcher.backrefed  = backrefed.empty ? matches : backrefed;
+                    matcher.re.ir = re.ir[pc+IRL!(IR.LookaheadStart) .. pc+IRL!(IR.LookaheadStart)+len+IRL!(IR.LookaheadEnd)];
                     bool match = matcher.matchImpl() ^ (re.ir[pc].code == IR.NeglookaheadStart);
                     if(!match)
                         goto L_backtrack;
@@ -4568,12 +4654,10 @@ template BacktrackingMatcher(bool CTregex)
                     pc -= len + IRL!(IR.LookbehindStart);
                     auto save = index;
                     uint ms = re.ir[pc+1].raw, me = re.ir[pc+2].raw;
-                    auto matcher = this;
-                    auto a = newRegionAllocator();
-                    matcher.alloc = &a;
+                    auto mem = malloc(initialMemory(re))[0..initialMemory(re)];
+                    scope(exit) free(mem.ptr);
+                    auto matcher = BacktrackingMatcher(re, s, mem, front, index);
                     matcher.re.ngroup =  me - ms;
-                    matcher.memory = null;
-                    matcher.newStack();
                     matcher.matches = matches[ms .. me];
                     matcher.backrefed = backrefed.empty ? matches : backrefed;
                     matcher.re.ir = re.ir[pc .. pc+IRL!(IR.LookbehindStart)+len];
@@ -5214,7 +5298,6 @@ enum OneShot { Fwd, Bwd };
     size_t threadSize;
     bool matched;
     bool exhausted;
-    Allocator* alloc;
     static if(__traits(hasMember,Stream, "search"))
     {
         enum kicked = true;
@@ -5222,6 +5305,18 @@ enum OneShot { Fwd, Bwd };
     else
         enum kicked = false;
 
+    static size_t getThreadSize(const ref Regex!Char re)
+    {
+        return re.ngroup 
+            ? (Thread!DataIndex).sizeof+(re.ngroup-1)*(Group!DataIndex).sizeof 
+            : (Thread!DataIndex).sizeof - (Group!DataIndex).sizeof;
+    }
+    
+    static size_t initialMemory(const ref Regex!Char re)
+    {  
+        return getThreadSize(re)*re.threadCount + re.hotspotTableSize*size_t.sizeof;
+    }
+    
     //true if it's start of input
     @property bool atStart(){   return index == 0; }
 
@@ -5238,10 +5333,11 @@ enum OneShot { Fwd, Bwd };
         return true;
     }
 
-    bool search()
+    static if(kicked)
     {
-        static if(kicked)
+        bool search()
         {
+        
             if(!s.search(re.kickstart, front, index))
             {
                 index = s.lastIndex;
@@ -5249,18 +5345,20 @@ enum OneShot { Fwd, Bwd };
             }
             return true;
         }
-        assert(0);
     }
 
-    this()(Regex!Char program, Stream stream, Allocator* allocator)
+    this()(Regex!Char program, Stream stream, void[] memory)
     {
         re = program;
         s = stream;
-        alloc = allocator;
-        threadSize = re.ngroup ? (Thread!DataIndex).sizeof+(re.ngroup-1)*(Group!DataIndex).sizeof : (Thread!DataIndex).sizeof - (Group!DataIndex).sizeof;
-        reserve(re.threadCount);
+        threadSize = getThreadSize(re);
+        prepareFreeList(re.threadCount, memory);
         if(re.hotspotTableSize)
-            merge = alloc.newArray!(DataIndex[])(re.hotspotTableSize);
+        {
+            //merge = new DataIndex[re.hotspotTableSize];
+            merge = arrayInChunk!(DataIndex)(re.hotspotTableSize, memory);
+            merge[] = 0;
+        }
         genCounter = 0;
     }
 
@@ -5269,7 +5367,6 @@ enum OneShot { Fwd, Bwd };
         s = stream;
         re = matcher.re;
         re.ir = piece;
-        alloc = matcher.alloc;
         threadSize = matcher.threadSize;
         merge = matcher.merge;
         genCounter = matcher.genCounter;
@@ -5278,7 +5375,7 @@ enum OneShot { Fwd, Bwd };
 
     this(this)
     {
-        merge = merge.dup;
+        merge[] = 0;
         debug(fred_allocation) writeln("ThompsonVM postblit!");
         //free list is  efectively shared ATM
     }
@@ -6379,10 +6476,11 @@ enum OneShot { Fwd, Bwd };
         return t;
     }
 
-    //reserve memory for Threads
-    void reserve(size_t size)
+    //link memory into a free list of Threads
+    void prepareFreeList(size_t size, ref void[] memory)
     {
-        void[] mem = alloc.allocate(threadSize*size)[0 .. threadSize*size];
+        void[] mem = memory[0 .. threadSize*size];
+        memory = memory[threadSize*size..$];
         freelist = cast(Thread!DataIndex*)&mem[0];
         size_t i;
         for(i=threadSize; i<threadSize*size; i+=threadSize)
@@ -6578,7 +6676,7 @@ public:
         if(isSomeString!String)
     {
         size_t index = lookupNamedGroup(names, i);
-        return opIndex(index - f);
+        return _input[matches[index].begin..matches[index].end];
     }
 
     ///Number of matches in this object.
@@ -6602,22 +6700,41 @@ private:
     alias BasicElementOf!R Char;
     alias Engine!Char EngineType;
     EngineType _engine;
-    Allocator _alloc;
     R _input;
     Captures!(R,EngineType.DataIndex) _captures;
-
+    void[] _memory;
+    
     this(Regex!Char prog, R input)
     {
         _input = input;
-        auto stack = RegionAllocatorStack(1<<20, GCScan.no);
-        _alloc = stack.newRegionAllocator();
-        _engine = EngineType(prog, Input!Char(input), &_alloc);
+        immutable size = EngineType.initialMemory(prog)+size_t.sizeof;
+        _memory = (malloc(size)[0..size]);
+        scope(failure) free(_memory.ptr);
+        *cast(size_t*)_memory.ptr = 1;
+        _engine = EngineType(prog, Input!Char(input), _memory[size_t.sizeof..$]);
         _captures = Captures!(R,EngineType.DataIndex)(this);
         _captures._empty = !_engine.match(_captures.matches);
+        debug(fred_counter) writefln("RefCount (ctor): %d", *cast(size_t*)_memory.ptr);
+    }
+    
+public:
+    this(this)
+    {
+        if(_memory.ptr)
+        {
+            ++*cast(size_t*)_memory.ptr;
+            debug(fred_counter) writefln("RefCount (postblit): %d", *cast(size_t*)_memory.ptr);
+        }
     }
 
-    ~this(){}
-public:
+    ~this()
+    {
+        if(_memory.ptr && --*cast(size_t*)_memory.ptr == 0)
+        {
+            free(cast(void*)_memory.ptr);
+            debug(fred_counter) writefln("RefCount (dtor): %d", *cast(size_t*)_memory.ptr);
+        }
+    }
 
     ///Shorthands for front.pre, front.post, front.hit.
     @property R pre()
@@ -6657,7 +6774,6 @@ public:
     ///ditto
     void popFront()
     { //previous one can have escaped references from Capture object
-        _engine.alloc = &_alloc;
         _captures.newMatches();
         _captures._empty = !_engine.match(_captures.matches);
     }
