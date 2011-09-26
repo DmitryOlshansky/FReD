@@ -6704,7 +6704,7 @@ private:
     Captures!(R,EngineType.DataIndex) _captures;
     void[] _memory;
     
-    this(Regex!Char prog, R input)
+    this(RegEx)(RegEx prog, R input)
     {
         _input = input;
         immutable size = EngineType.initialMemory(prog)+size_t.sizeof;
