@@ -449,8 +449,22 @@ unittest
         auto greed =  ctRegex!("<packet.*?/packet>");
         assert(bmatch("<packet>text</packet><packet>text</packet>", greed).hit
                 == "<packet>text</packet>");
+        auto cr8 = ctRegex!("^(a)(b)?(c*)");
+        auto m8 = bmatch("abcc",cr8);
+        assert(m8); 
+        assert(m8.captures[1] == "a"); 
+        assert(m8.captures[2] == "b");
+        assert(m8.captures[3] == "cc");
+        auto cr9 = ctRegex!("q(a|b)*q");
+        auto m9 = match("xxqababqyy",cr9);
+        assert(m9);
+        assert(equal(bmatch("xxqababqyy",cr9).captures, ["qababq", "b"]));
+        
+        auto rtr = regex("a|b|c");
+        enum ctr = regex("a|b|c");
+        assert(equal(rtr.ir,ctr.ir)); 
         //CTFE parser BUG is triggered by group 
-        //in the middle or alterantion (at least not first and not last)
+        //in the middle of alternation (at least not first and not last)
         version(fred_bug)
         {
         enum testCT = regex(`abc|(edf)|xyz`);
@@ -461,10 +475,35 @@ unittest
             testCT.print();
             writeln("R-T version :");
             testRT.print();
+            
         }
        
         }
         
+    }
+    
+    unittest 
+    {
+        enum cx = ctRegex!"(A|B|C)";
+        auto mx = match("B",cx);
+        assert(mx);
+        assert(equal(mx.captures, [ "B", "B"]));
+        enum cx2 = ctRegex!"(A|B)*";
+        assert(match("BAAA",cx2));
+        enum cx3 = ctRegex!("a{3,4}","i");
+        auto mx3 = match("AaA",cx3);
+        assert(mx3);
+        assert(mx3.captures[0] == "AaA");
+        enum cx4 = ctRegex!(`^a{3,4}?[a-zA-Z0-9~]{1,2}`,"i");
+        auto mx4 = match("aaaabc", cx4);
+        assert(mx4);
+        assert(mx4.captures[0] == "aaaab");
+        auto cr8 = ctRegex!("(a)(b)?(c*)");
+        auto m8 = bmatch("abcc",cr8);
+        assert(m8); 
+        assert(m8.captures[1] == "a"); 
+        assert(m8.captures[2] == "b");
+        assert(m8.captures[3] == "cc");
     }
 }
 else
