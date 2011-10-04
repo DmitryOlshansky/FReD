@@ -4316,52 +4316,63 @@ template BacktrackingMatcher(bool CTregex)
 			}
             assert(0);
         }
-        
-        static if(CTregex)
-        {
-			void stackPush(T)(T val)
-				if(!isDynamicArray!T)
-			{
-				
-				*cast(T*)&memory[lastState] = val;
-				enum delta = (T.sizeof+size_t.sizeof/2)/size_t.sizeof;
-				lastState += delta;
-				debug(fred_matching) writeln("push element SP= ", lastState);
-			}
-			
-			void stackPush(T)(T[] val)
-			{
-				
-				static assert(T.sizeof % size_t.sizeof == 0);
-				(cast(T*)&memory[lastState])[0..val.length] 
-					= val[0..$];
-				lastState += val.length*(T.sizeof/size_t.sizeof);
-				debug(fred_matching) writeln("push array SP= ", lastState);
-			}
-			
-			void stackPop(T)(ref T val)
-				if(!isDynamicArray!T)
-			{
-				
-				enum delta = (T.sizeof+size_t.sizeof/2)/size_t.sizeof;
-				lastState -= delta;
-				val = *cast(T*)&memory[lastState];
-				debug(fred_matching) writeln("pop element SP= ", lastState);
-			}
-			
-			void stackPop(T)(ref T[] val)
-			{
-				
-				lastState -= val.length*(T.sizeof/size_t.sizeof);
-				val[0..$] = (cast(T*)&memory[lastState])[0..val.length];
-				debug(fred_matching) writeln("pop array SP= ", lastState);
-			}
+                
+		@property size_t stackAvail()
+		{
+			return memory.length - lastState;
+		}
+		
+		bool prevStack()
+		{
+			size_t* prev = memory.ptr-1;
+			prev = cast(size_t*)*prev;//take out hidden pointer
+			if(!prev)
+				return false;
+			free(memory.ptr);//last segment is freed in RegexMatch
+			immutable size = initialStack*(stateSize + 2*re.ngroup);
+			memory = prev[0..size];
+			lastState = size;
+			return true;
+		}
+		
+		void stackPush(T)(T val)
+			if(!isDynamicArray!T)
+		{
+			*cast(T*)&memory[lastState] = val;
+			enum delta = (T.sizeof+size_t.sizeof/2)/size_t.sizeof;
+			lastState += delta;
+			debug(fred_matching) writeln("push element SP= ", lastState);
+		}
+		
+		void stackPush(T)(T[] val)
+		{
+			static assert(T.sizeof % size_t.sizeof == 0);
+			(cast(T*)&memory[lastState])[0..val.length] 
+				= val[0..$];
+			lastState += val.length*(T.sizeof/size_t.sizeof);
+			debug(fred_matching) writeln("push array SP= ", lastState);
+		}
+		
+		void stackPop(T)(ref T val)
+			if(!isDynamicArray!T)
+		{
+			enum delta = (T.sizeof+size_t.sizeof/2)/size_t.sizeof;
+			lastState -= delta;
+			val = *cast(T*)&memory[lastState];
+			debug(fred_matching) writeln("pop element SP= ", lastState);
+		}
+		
+		void stackPop(T)(ref T[] val)
+		{
+			lastState -= val.length*(T.sizeof/size_t.sizeof);
+			val[0..$] = (cast(T*)&memory[lastState])[0..val.length];
+			debug(fred_matching) writeln("pop array SP= ", lastState);
 		}
 		
         //helper function, saves engine state
         void pushState(uint pc, uint counter)
         {
-            if(lastState + stateSize + matches.length >= memory.length)
+            if(stateSize + matches.length > stackAvail)
             {
                 newStack();
                 lastState = 0;
@@ -4378,16 +4389,7 @@ template BacktrackingMatcher(bool CTregex)
         bool popState()
         {
             if(!lastState)
-            {
-                size_t* prev = memory.ptr-1;
-                prev = cast(size_t*)*prev;//take out hidden pointer
-                if(!prev)
-                    return false;
-                free(memory.ptr);//last segment is freed in RegexMatch
-                immutable size = initialStack*(stateSize + 2*re.ngroup);
-                memory = prev[0..size];
-                lastState = size;
-            }
+                return prevStack();
             lastState -= 2*matches.length;
             auto pm = cast(size_t[])matches;
             pm[] = memory[lastState .. lastState+2*matches.length];
@@ -4406,7 +4408,8 @@ template BacktrackingMatcher(bool CTregex)
             s.reset(index);
             next();
             debug(fred_matching)
-                writefln("Backtracked (pc=%s) front: %s src: %s", pc, front, s[index..s.lastIndex]);
+                writefln("Backtracked (pc=%s) front: %s src: %s"
+                , pc, front, s[index..s.lastIndex]);
             return true;
         }
 
@@ -4421,10 +4424,14 @@ template BacktrackingMatcher(bool CTregex)
             lastState = 0;
             infiniteNesting = -1;//intentional
             auto start = index;
-            debug(fred_matching) writeln("Try matchBack at ",retro(s[index..s.lastIndex]));
+            debug(fred_matching) 
+				writeln("Try matchBack at ",retro(s[index..s.lastIndex]));
             for(;;)
             {
-                debug(fred_matching) writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s", pc, counter, disassemble(re.ir, pc, re.dict), front, retro(s[index..s.lastIndex]));
+                debug(fred_matching) 
+					writefln("PC: %s\tCNT: %s\t%s \tfront: %s src: %s"
+					, pc, counter, disassemble(re.ir, pc, re.dict)
+					, front, retro(s[index..s.lastIndex]));
                 switch(re.ir[pc].code)
                 {
                 case IR.OrChar://assumes IRL!(OrChar) == 1
@@ -4529,7 +4536,8 @@ template BacktrackingMatcher(bool CTregex)
                 case IR.Eol:
                     dchar back;
                     DataIndex bi;
-                    debug(fred_matching) writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
+                    debug(fred_matching) 
+						writefln("EOL (front 0x%x) %s", front, s[index..s.lastIndex]);
                     //no matching inside \r\n
                     if((re.flags & RegexOption.multiline)
                             && s.loopBack.nextChar(back,bi)
@@ -4570,8 +4578,10 @@ template BacktrackingMatcher(bool CTregex)
                     uint len = re.ir[pc].data;
                     trackers[infiniteNesting+1] = index;
                     pc -= len+IRL!(IR.InfiniteStart);
-                    assert(re.ir[pc].code == IR.InfiniteStart || re.ir[pc].code == IR.InfiniteQStart);
-                    debug(fred_matching) writeln("(backmatch) Infinite nesting:", infiniteNesting);
+                    assert(re.ir[pc].code == IR.InfiniteStart 
+						|| re.ir[pc].code == IR.InfiniteQStart);
+                    debug(fred_matching) 
+						writeln("(backmatch) Infinite nesting:", infiniteNesting);
                     if(re.ir[pc].code == IR.InfiniteStart)//greedy
                     {
                         pushState(pc-1, counter);
@@ -4770,7 +4780,8 @@ template BacktrackingMatcher(bool CTregex)
             {
                 static if(args.length > 0)
                 {
-                    return  format[0..i-1] ~ to!string(args[0]) ~ ctSub(format[i+1..$], args[1..$]);
+                    return  format[0..i-1] ~ to!string(args[0]) 
+						~ ctSub(format[i+1..$], args[1..$]);
                 }
                 else
                     assert(0);
@@ -4785,11 +4796,31 @@ template BacktrackingMatcher(bool CTregex)
     return format;
 }
 
+//generate code for TypeTuple(S, S+1, S+2, ... E)
+@system string ctGenSeq(int S, int E)
+{
+	string s = "alias TypeTuple!(";
+	if(S < E)
+		s ~= to!string(S);
+	for(int i=S+1; i<E;i++)
+	{
+		s ~= ", ";
+		s ~= to!string(i);
+	}
+	return s ~") Sequence;";
+}
+
+//alias to TypeTuple(S, S+1, S+2, ... E)
+template Sequence(int S, int E)
+{
+	mixin(ctGenSeq(S,E));
+}
+
 struct CtContext
 {
 	//dirty flags
     bool counter, infNesting;
-    int n_inf_loops; // to make a unique advancement counter per loop
+    int nInfLoops; // to make a unique advancement counter per loop
     int match, total_matches;
 
 
@@ -4809,13 +4840,13 @@ struct CtContext
 	//restore state having current context
 	string restoreCode()
 	{
-		string text;
-		//TODO: check next slice of stack
+		string text; 
+		//stack is checked in L_backtrack
 		text ~= counter 
 			? "
-				stackPop(counter);" 
+					stackPop(counter);" 
 			: "
-				counter = 0;";
+					counter = 0;";
 		if(match < total_matches)
 		{
 			text ~= ctSub("
@@ -4832,14 +4863,18 @@ struct CtContext
 	//save state having current context
 	string saveCode(uint pc, string count_expr="counter")
 	{
-		string text;
-		//TODO: check available space
+		string text = ctSub("
+					if(stackAvail < $$*(Group!(DataIndex)).sizeof/size_t.sizeof + $$)
+					{
+						newStack();
+						lastState = 0;
+					}", match-1, cast(int)counter + 2);
 		if(match < total_matches)
 			text ~= ctSub("
-					stackPush(matches[1..$$]);", match); 
+				stackPush(matches[1..$$]);", match);
 		else
 			text ~= "
-					stackPush(matches[1..$]);"; 			
+				stackPush(matches[1..$]);"; 
 		text ~= counter ? ctSub("
 					stackPush($$);", count_expr) : "";		
 		text ~= ctSub("
@@ -4873,7 +4908,7 @@ struct CtContext
 				ir[0].code == IR.InfiniteStart || ir[0].code == IR.InfiniteQStart;
 			infNesting = infNesting || infLoop;
 			if(infLoop)
-				n_inf_loops++;
+				nInfLoops++;
 			counter = counter ||
 				ir[0].code == IR.RepeatStart || ir[0].code == IR.RepeatQStart;
 			uint len = ir[0].data;
@@ -4956,7 +4991,7 @@ struct CtContext
 		case IR.InfiniteStart, IR.InfiniteQStart:
 			r ~= ctSub( `
 					tracker_$$ = DataIndex.max;
-					goto case $$;`, n_inf_loops-1, fixup);
+					goto case $$;`, nInfLoops-1, fixup);
 			ir = ir[ir[0].length..$];
 			break;
 		case IR.InfiniteEnd:
@@ -4975,8 +5010,8 @@ struct CtContext
 					goto case $$;
 				case $$: //restore state and go out of loop
 					$$
-					goto case;`, n_inf_loops-1, addr+2,
-					n_inf_loops-1, testCode, saveCode(addr+1), 
+					goto case;`, nInfLoops-1, addr+2,
+					nInfLoops-1, testCode, saveCode(addr+1), 
 					fixup, addr+1, restoreCode());
 			ir = ir[ir[0].length..$];
 			break;
@@ -4999,7 +5034,7 @@ struct CtContext
 				case $$://restore state and go inside loop
 					$$
 					goto case $$;`, 
-						n_inf_loops-1, addr+2, n_inf_loops-1,  
+						nInfLoops-1, addr+2, nInfLoops-1,  
 						testCode, saveCode(addr+1), 
 						addr+2, fixup, addr+1, restoreCode(), fixup);
 			ir = ir[ir[0].length..$];
@@ -5299,24 +5334,24 @@ struct CtContext
 			lastState = 0;
 			infiniteNesting = -1;//intentional
 			auto start = s._index;`;
-		for(int i=0; i<n_inf_loops; i++)
+		for(int i=0; i<nInfLoops; i++)
 			r ~= ctSub(`
 			size_t tracker_$$;`, i);
 		r ~= `
 			goto StartLoop;
 			debug(fred_matching) writeln("Try CT matching  starting at ",s[index..s.lastIndex]);
 		L_backtrack:
-			if(!lastState)
-			{
-				s.reset(start);
-				return false;
-			}
-			else
+			if(lastState || prevStack())
 			{
 				stackPop(pc);
 				stackPop(index);
 				s.reset(index);
 				next();
+			}
+			else
+			{
+				s.reset(start);
+				return false;
 			}
 		StartLoop:
 			switch(pc)
@@ -5540,7 +5575,7 @@ enum OneShot { Fwd, Bwd };
            return false;
         if(re.flags & RegexInfo.oneShot)
         {
-            next(); // why this is not
+            next(); 
             exhausted = true;
             return matchOneShot!(OneShot.Fwd)(matches)==MatchResult.Match;
         }
