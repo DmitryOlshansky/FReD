@@ -3,7 +3,7 @@
 // http://shootout.alioth.debian.org/
 
 
-import fred;
+import std.regex;
 import std.file, std.stdio, std.array, std.algorithm, std.range, std.typetuple;
 
 version(backtracking)

@@ -8,7 +8,7 @@ import std.datetime;
 import std.conv;
 import std.string;
 
-import fred;
+import std.regex;
 
 version(backtracking)
 	alias bmatch matchFn;

@@ -7,7 +7,7 @@ import std.stdio;
 import std.datetime;
 import std.conv;
 
-import fred;
+import std.regex;
 version(backtracking)
 	alias bmatch matchFn;
 else version(thompson)	

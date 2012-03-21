@@ -1,30 +1,17 @@
 Fast Regular Expressions for D (FReD)
 a project proposed as source level compatible replacement for std.regex
-
+After being accepted into Phobos FReD repository is used for various tools & benchmarks of std.regex,
+that can't go into D core repo for obvious reasons.
+This page is placeholder untill I clean up the consequences ;)
 
 Package contents
 --------------------------
 bench\*          - sample programs for benchmarking (D vs C++ libraries)
-streamDecode.d   - upcoming stream regex support
-fred.d           - core library
-fred_uni.d       - unicode tables for properties
-test.d           - test suite
 tools\*          - various helper tools for code generation and self testing
 
 Building
 --------------------------
-Building existing projects should be as simple as:
-    - replace all std.regex with fred
-    - recompile adding fred.d and fred_uni.d and std\regionallocator
-      to the list of compiled files
 
-E.g. to compile testsuite (no static regex):
-dmd -unittest fred.d fred_uni.d test.d std\regionallocator.d
-
-same for static regex only:
-dmd -version=fred_ct -unittest fred.d fred_uni.d test.d std\regionallocator.d
-
-(the reason for separation is the compilation speed of the latter)
 If you just need a test tool to give you a head start, you can compile fred_r.d from bench, usage is:
 fred_r pattern file [print]
 Use the "" around pattern to keep away your shell interpreter that is always hungry for special characters.
