@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <windows.h>
 #include <regex>
+
 using namespace std;
+
 int main(int argc,char* argv[]){
 	if(argc < 3){
 		printf("Usage: test_pcre <re> <file> [print]>\n");

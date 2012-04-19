@@ -39,7 +39,7 @@ unittest
 
 Syntax
 --------------------------
-I'd really hate to reiterate all the trivia here. But sure, it will be a nice and big table in DDoc later on.
+I'd really hate to reiterate all the trivia here. It's all up there in 
 To get an idea of syntax seek column ECMScript here http://www.regular-expressions.info/refflavors.html
 (but in its behavior it's very similar to .Net)
 and add this one to the mix  http://www.regular-expressions.info/refunicode.html
@@ -77,10 +77,11 @@ Things to keep an eye for:
     - there are 3 different regex engines (counting C-T for static regexes) 
       to invoke traditional backtracking engine use bmatch instead of match
 
-Report any bugs at github : https://github.com/blackwhale/FReD/issues/
-or send email to dmitry.olsh(at)gmail.com tag the topic with [GSOC] or [FReD]
+Now that it's in the Phobos proper, all bugs should be reported to http://d.puremagic.com/issues
+
 Please don't hesitate to include bogus pattern, test _input_, OS and compiler version
 Any additional tests on e.g. conformance are also welcome.
+
 Know some really good regex library Brand X (for c/c++ preferably)? Please do tell.
 If your favorite regex pattern runs orders of magnitude slower on FReD then on this Brand X library then ....
-well, I can't guarantee anything but will sure take a look (please make sure Brand X _does_ use UTF-8/16/32).
+I can't guarantee anything but will take a look (please make sure Brand X _does_ use UTF-8/16/32).

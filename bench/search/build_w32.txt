@@ -1,1 +1,0 @@
-dmd -J. -inline -release -O -version=thompson fred_r.d ..\..\fred.d ..\..\fred_uni.d ..\..\std\regionallocator.d
