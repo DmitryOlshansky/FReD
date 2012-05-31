@@ -4,7 +4,7 @@
 */
 module stress;
 
-import fred;
+import std.regex;
 import std.stdio, std.range, std.string, std.array, std.exception, std.conv, std.random;
 
 version(backtracking)

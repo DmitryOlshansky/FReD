@@ -2,7 +2,7 @@
 /**
     Small tool for analyzing tries with w.r.t. memory footprint for Unicode propertes
 */
-import fred, fred_uni;
+import std.internal.uni_tab, std.internal.uni;
 import std.stdio, std.algorithm, std.typetuple;
 
 void main()
@@ -10,19 +10,17 @@ void main()
     void test_nbits(uint bits)(File f)
     {
         uint max_char, max_data;
-        Trie!bits t;
+        CodepointTrie!bits t;
         foreach(up; unicodeProperties)
         {
-            t = Trie!bits(up.set);
+            t = CodepointTrie!bits(up.set);
             uint num = 0;
-            foreach(ival; up.set.intervals)
+            foreach(ival; up.set.byInterval)
             {
                 num += ival.end - ival.begin + 1;
                 for(uint ch=ival.begin;ch<=ival.end;ch++)
                     assert(cast(dchar)t[ch]);
             }
-            //t.desc();
-            //writefln("That was %s set with %s codepoints encoded as %d bit-tables", up.name, num, t.data.length);
             f.writefln("\"%s\";%s;%s;%s;", up.name, num, t.data.length*4, t.indexes.length*2);
         }
     }
