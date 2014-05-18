@@ -43,7 +43,7 @@ int main(string[] args)
 
     auto stripper = regex(`>.*?\n|\n`, "g");
     auto data = cast(string)std.file.read(args[1]);
-    auto stripped = fred.replace!matchFn(data, stripper, "");
+    auto stripped = replace!matchFn(data, stripper, "");
     foreach(p; patterns)
     {
         version(ct_regex)
@@ -67,7 +67,7 @@ int main(string[] args)
                 alias ctRegex!(p, "g") reg;
             else//auto since parsing takes miniscule amount of time
                 auto reg = regex(p, "g");
-            replaced = fred.replace!matchFn(replaced, reg, patterns2[i+1]);
+            replaced = replace!matchFn(replaced, reg, patterns2[i+1]);
         }
     }
 
