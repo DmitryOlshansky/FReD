@@ -5,7 +5,7 @@
 #else
 	#include <sys/time.h>
 #endif
-#include <boost/regex/regex.hpp>
+#include <boost/regex.hpp>
 
 using namespace boost;
 
@@ -14,7 +14,7 @@ int main(int argc,char* argv[]){
 		printf("Usage: test_pcre <re> <file> [print]>\n");
 		return 1;
 	}
-	regex engine = boost::make_regex(argv[1]);
+	regex engine = boost::regex(argv[1]);
 	cmatch match;
 	FILE* f = fopen(argv[2],"rb");
 	if(!f){
@@ -37,7 +37,7 @@ int main(int argc,char* argv[]){
 		gettimeofday(&start,NULL);
 	#endif
 	const char* ptr = data;
-	regex_iterator m1(ptr,ptr+size,engine), m2;
+	cregex_iterator m1(ptr,ptr+size,engine), m2;
 	if(argc == 4 && strcmp(argv[3],"print") == 0)
 		for(;m1!=m2;++m1){
 			printf("%s\n",m1->str().c_str());
