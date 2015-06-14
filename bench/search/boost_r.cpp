@@ -11,7 +11,7 @@ using namespace boost;
 
 int main(int argc,char* argv[]){
 	if(argc < 3){
-		printf("Usage: test_pcre <re> <file> [print]>\n");
+		printf("Usage: test_boost <re> <file> [print]>\n");
 		return 1;
 	}
 	regex engine = boost::regex(argv[1]);

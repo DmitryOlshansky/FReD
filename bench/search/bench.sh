@@ -27,12 +27,10 @@ list_exec(){
     done 
 }
 
-list_exec 1>&2
-
 BINARIES=$(list_exec)
 RUNS=3
 IDX=0
-echo -n "n, pattern,\"CT-regex\"," 
+echo -n "n,pattern,\"CT-regex\"," 
 for b in $BINARIES; do
     echo -n "$b," | sed "s|./||"
 done
