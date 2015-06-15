@@ -1,65 +1,20 @@
 Fast Regular Expressions for D (FReD)
-a project proposed as source level compatible replacement for std.regex
-After being accepted into Phobos FReD repository is used for various tools & benchmarks of std.regex,
-that can't go into D core repo for obvious reasons.
-This page is placeholder untill I clean up the consequences ;)
+a project proposed as source level compatible replacement for std.regex 
+After being accepted into Phobos FReD repository is used for various tools & benchmarks of std.regex, that can't go into D core repo for obvious reasons. 
 
 Package contents
 --------------------------
-bench\*          - sample programs for benchmarking (D vs C++ libraries)
+bench\*          - sample programs for benchmarking (D vs other languages/libraries)
 tools\*          - various helper tools for code generation and self testing
 
 Building
 --------------------------
 
-If you just need a test tool to give you a head start, you can compile fred_r.d from bench, usage is:
+If you just need a test tool to give you a head start, you can compile d_r.d from bench, usage is:
 fred_r pattern file [print]
 Use the "" around pattern to keep away your shell interpreter that is always hungry for special characters.
 
-Synopsis
---------------------------
-In case you have no experience with std.regex, the basic usage is:
-
-unittest
-{
-    import std.stdio, fred;
-    //match every character
-    auto r = regex(`\w`, "g"); //g - global
-    auto m = match("abc", r);
-    foreach(cur; m)//iterate over all matches
-        writeln(cur.hit);
-
-    enum ctr = ctRegex!(`^.*/(.+)/?$`); //static regex, precompiled
-    auto m2 = match("foo/bar", ctr);   //first match found here if any
-    assert(!m2.empty);   //so be sure to check it before examining contents!
-    assert(m2.captures[1] == "bar");//captures - a range of submatches, 0 - full match
-}
-
-(you can also find other usage patterns in fred_r.d, test.d or in Phobos documentation on std.regex)
-
-Syntax
---------------------------
-I'd really hate to reiterate all the trivia here. It's all up there in 
-To get an idea of syntax seek column ECMScript here http://www.regular-expressions.info/refflavors.html
-(but in its behavior it's very similar to .Net)
-and add this one to the mix  http://www.regular-expressions.info/refunicode.html
-
-Notable extras:
-    - lookbehind with full regex syntax (except another lookaround)
-    - \p{xxx} and \P{xxx} unicode properties (Perl style)
-    - named groups (?P<mygroup>abc) (Python styled)
-    - full set operations inside character classes, e.g. [\p{Letter}&&[\x00-\x7f]]
-      operators are -- subtraction, && intersection, ~~ symmetric difference, || union
-   
-Subtle moments & limitations:
-    - Unicode blocks use InBlock syntax
-    - single codepoints use \u and \U syntax (\x for 2 digit acsii),
-    - \b, \B, \d, \w, etc are Unicode aware and use full sets of characters
-    - backreferences must be locally unique e.g. (\w+)\1 is not localy unique, while \b(\w+)\b\1 is (note the anchor on both sides!)
-    - n and m inside of {n,m} repetitions are implicitly limited by memory usage constraint to around 2^20 
-      or less in case of nested repetitions
-
-I'm not opposed to getting multiple syntax profiles (a-la Boost), but for the moment it's out the scope of project.
+Build scripts and benchmark harness are work in progress at the moment.
 
 Notes for testers
 --------------------------
@@ -82,6 +37,4 @@ Now that it's in the Phobos proper, all bugs should be reported to http://d.pure
 Please don't hesitate to include bogus pattern, test _input_, OS and compiler version
 Any additional tests on e.g. conformance are also welcome.
 
-Know some really good regex library Brand X (for c/c++ preferably)? Please do tell.
-If your favorite regex pattern runs orders of magnitude slower on FReD then on this Brand X library then ....
-I can't guarantee anything but will take a look (please make sure Brand X _does_ use UTF-8/16/32).
+Know some really good regex library Brand X (for c/c++ preferably?) Please do tell.
