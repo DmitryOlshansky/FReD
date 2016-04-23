@@ -3,7 +3,8 @@
 if [ $# -ne 0 ] ; then
     ARG=$1
 else
-    ARG=howto
+    echo "Usage ./bench.sh <file>"
+    exit 1
 fi
 echo "Running tests for $ARG" 1>&2
 

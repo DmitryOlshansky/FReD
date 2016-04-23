@@ -28,8 +28,8 @@ else
 
 int main(string[] argv)
 {
-    if(argv.length < 4){
-        writefln("Usage %s <re> file <iterations>",argv[0]);
+    if(argv.length != 3){
+        writefln("Usage %s <re> <file>",argv[0]);
         return 1;
     }
     version(ct_regex)
@@ -40,7 +40,7 @@ int main(string[] argv)
     auto data = to!String(raw);
     auto lines = std.string.split(data, "\n");
     size_t count=0;
-    size_t iterations = to!size_t(argv[3]);
+    size_t iterations = 100;
     StopWatch sw;
     sw.start();
     for(size_t i=0; i<iterations; i++)
