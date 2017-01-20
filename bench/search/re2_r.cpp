@@ -60,6 +60,6 @@ int main(int argc,char* argv[]){
 		double time = (end.tv_sec - start.tv_sec) + (1e-6*end.tv_usec - 1e-6*start.tv_usec);
 	#endif
 	delete[] data;
-	printf("\n\nTotal matches %d\nTime elapsed %.2lf sec\n",count,time);
+	printf("\n\nTotal matches %d\nTime elapsed %.2lf sec\n", (int)count, time);
 	return 0;
 }

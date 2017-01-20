@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
+#ifdef WIN32
+  #include <windows.h>
+#else
+  #include <sys/time.h>
+#endif
 #include <regex>
 
 using namespace std;
@@ -27,8 +31,13 @@ int main(int argc,char* argv[]){
 	
 	
 	size_t count=0;
-	LARGE_INTEGER start, end, resolution;
-	QueryPerformanceCounter(&start);
+#ifdef WIN32
+    LARGE_INTEGER start, end, resolution;
+    QueryPerformanceCounter(&start);
+#else
+    timeval start, end;
+    gettimeofday(&start,NULL);
+#endif
 	const char* ptr = data;
 	cregex_iterator m1(ptr,ptr+size,engine), m2;
 	if(argc == 4 && strcmp(argv[3],"print") == 0)
@@ -40,10 +49,15 @@ int main(int argc,char* argv[]){
 		for(;m1!=m2;++m1){
 			count++;
 		}	
-	QueryPerformanceCounter(&end);
-	QueryPerformanceFrequency(&resolution);
-	double time = ((end.QuadPart - start.QuadPart)/(double)resolution.QuadPart);
-	delete[] data;
-	printf("\n\nTotal matches %d\nTime elapsed %.2lf sec\n",count,time);
+	#ifdef WIN32
+      QueryPerformanceCounter(&end);
+      QueryPerformanceFrequency(&resolution);
+      double time = ((end.QuadPart - start.QuadPart)/(double)resolution.QuadPart);
+    #else
+      gettimeofday(&end, NULL);
+      double time = (end.tv_sec - start.tv_sec) + (1e-6*end.tv_usec - 1e-6*start.tv_usec);
+    #endif
+    delete[] data;
+	printf("\n\nTotal matches %d\nTime elapsed %.2lf sec\n",(int)count,time);
 	return 0;
 }
