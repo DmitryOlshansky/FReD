@@ -1,0 +1,7 @@
+[package]
+name = "rust_r"
+version = "0.1.0"
+authors = ["Dmitry Olshansky <d.olshanskiy@tinkoff.ru>"]
+
+[dependencies]
+regex = "0.2"

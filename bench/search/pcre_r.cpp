@@ -8,6 +8,8 @@
   #include <sys/time.h>
 #endif
 
+#define JIT
+
 #ifdef JIT
   #define USE_JIT PCRE_STUDY_JIT_COMPILE
 #else

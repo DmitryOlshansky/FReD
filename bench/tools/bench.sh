@@ -21,7 +21,7 @@ bench(){
 }
 
 list_exec(){
-    find -type f | while read f; do
+    find -type f  | while read f; do
         if [ -x $f ] && !(echo -n "$f" | grep -q -E '.*\.sh|ct_r.*' ); then
             echo "$f"
         fi

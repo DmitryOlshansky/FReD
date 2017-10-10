@@ -11,7 +11,7 @@
 
 int main(int argc,char* argv[]){
 	if(argc < 3){
-		printf("Usage: test_pcre <re> <file> [print]>\n");
+		printf("Usage: test_re2 <re> <file> [print]>\n");
 		return 1;
 	}
 	RE2 engine(argv[1]);
